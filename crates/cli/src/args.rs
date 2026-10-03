@@ -16,7 +16,13 @@ pub struct CliArgs {
     /// 只列出内置工具后退出。
     pub list_tools: bool,
     /// 使用离线 faux provider（默认也是它，显式写出便于脚本自解释）。
+    /// 与 `--provider` 同时给出时以 `--provider` 为准。
     pub faux: bool,
+    /// provider 选择（`--provider`）：`faux` / `anthropic` / `openai` /
+    /// `openai-responses` / `google`。
+    pub provider: Option<String>,
+    /// 模型 id（`--model`）；缺省时用该 provider 的默认模型。
+    pub model: Option<String>,
     /// 打印帮助。
     pub help: bool,
     /// 打印版本。
@@ -63,12 +69,16 @@ tower-pi-agent（cli）
   -C, --cwd <目录>    工具的工作目录（默认：当前目录）
       --list-tools    列出内置工具后退出
       --print         用纯文本输出事件，不启动 TUI
-      --faux          使用离线 faux provider（当前唯一可用的 provider）
+      --provider <p>  选择 provider：faux / anthropic / openai / openai-responses / google
+                      （默认 faux）
+      --model <id>    模型 id（默认取 provider 的默认模型）
+      --faux          等价于 --provider faux
 
 说明:
   没有给出提示词时，会从 stdin 读取全部内容作为提示词。
-  真实 provider（anthropic/openai/…）属于 `ai` crate 的 provider 层，尚未移植；
-  `--faux` 是确定性的离线 provider，用于在没有模型的情况下跑通完整会话。";
+  真实 provider 从环境变量读取凭据：anthropic=ANTHROPIC_API_KEY、
+  openai=OPENAI_API_KEY、google=GEMINI_API_KEY；缺少凭据时会报错退出。
+  `faux` 是确定性的离线 provider，用于在没有模型的情况下跑通完整会话。";
 
 /// 解析参数。
 pub fn parse<I, S>(args: I) -> Result<CliArgs, ArgError>
@@ -93,6 +103,32 @@ where
             "--list-tools" => parsed.list_tools = true,
             "--print" => parsed.print = true,
             "--faux" => parsed.faux = true,
+            "--provider" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| ArgError::new("--provider 需要一个取值"))?;
+                parsed.provider = Some(value);
+            }
+            other if other.starts_with("--provider=") => {
+                let value = other.trim_start_matches("--provider=");
+                if value.is_empty() {
+                    return Err(ArgError::new("--provider 需要一个取值"));
+                }
+                parsed.provider = Some(value.to_string());
+            }
+            "--model" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| ArgError::new("--model 需要一个模型 id"))?;
+                parsed.model = Some(value);
+            }
+            other if other.starts_with("--model=") => {
+                let value = other.trim_start_matches("--model=");
+                if value.is_empty() {
+                    return Err(ArgError::new("--model 需要一个模型 id"));
+                }
+                parsed.model = Some(value.to_string());
+            }
             "-C" | "--cwd" => {
                 let value = iter
                     .next()
@@ -134,6 +170,8 @@ mod tests {
         assert_eq!(args.cwd, None);
         assert!(!args.print);
         assert!(!args.list_tools);
+        assert_eq!(args.provider, None);
+        assert_eq!(args.model, None);
     }
 
     #[test]
@@ -152,6 +190,34 @@ mod tests {
 
         let args = parse_ok(&["--cwd=/tmp/other"]);
         assert_eq!(args.cwd, Some(PathBuf::from("/tmp/other")));
+    }
+
+    #[test]
+    fn provider_and_model_are_parsed() {
+        let args = parse_ok(&["--provider", "anthropic", "--model", "claude-test", "hi"]);
+        assert_eq!(args.provider.as_deref(), Some("anthropic"));
+        assert_eq!(args.model.as_deref(), Some("claude-test"));
+        assert_eq!(args.prompt.as_deref(), Some("hi"));
+
+        let args = parse_ok(&["--provider=google", "--model=gemini-test"]);
+        assert_eq!(args.provider.as_deref(), Some("google"));
+        assert_eq!(args.model.as_deref(), Some("gemini-test"));
+    }
+
+    #[test]
+    fn provider_and_model_require_values() {
+        assert_eq!(
+            parse(["--provider"]).expect_err("missing value").message(),
+            "--provider 需要一个取值"
+        );
+        assert_eq!(
+            parse(["--model"]).expect_err("missing value").message(),
+            "--model 需要一个模型 id"
+        );
+        assert_eq!(
+            parse(["--provider="]).expect_err("empty value").message(),
+            "--provider 需要一个取值"
+        );
     }
 
     #[test]

@@ -36,7 +36,10 @@ pub use provider::{
     BoxProviderService, ProviderService, ProviderServiceExt,
     anthropic::{API as ANTHROPIC_MESSAGES_API, AnthropicConfig, AnthropicProvider},
     google::{API as GOOGLE_GENERATIVE_AI_API, GoogleConfig, GoogleProvider},
-    layers::{HeaderTransport, ObserveTransport, PayloadHook, ResponseHook, RetryTransport},
+    layers::{
+        HeaderTransport, ObserveTransport, PayloadHook, ResponseHook, RetryTransport,
+        TimeoutService,
+    },
     openai::{API as OPENAI_COMPLETIONS_API, OpenAiConfig, OpenAiProvider},
     openai_responses::{
         API as OPENAI_RESPONSES_API, OpenAiResponsesConfig, OpenAiResponsesProvider,

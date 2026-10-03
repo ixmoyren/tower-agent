@@ -203,10 +203,10 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `provider::openai`：OpenAI Chat Completions provider —— 一条实现覆盖大量兼容端点（OpenAI / Azure OpenAI / OpenRouter / Cerebras / Groq / DeepSeek …）。请求构造（system / tools / temperature / `stream_options.include_usage` / `user`）、`content` / `reasoning_content` / `tool_calls` 的流式映射（含分片 partial JSON）、`finish_reason` 映射、`data: [DONE]` 收尾；错误归属与 Anthropic 一致。
 - `provider::google`：Google Generative AI provider —— 用来验证抽象能容纳**形状完全不同**的 API：URL 把模型放进路径（`:streamGenerateContent?alt=sse`）、认证用 `x-goog-api-key`、请求体是 `contents`+`parts` 而不是 `messages`（system 走 `systemInstruction`、工具走 `tools[].functionDeclarations`）、`functionCall` 是整块对象（因此一次发 start/delta/end）、思考用 `thought: true` 的 part、用量在 `usageMetadata`（input 扣掉 cached、output 加上 thoughts）。另外按 pi 的行为在有工具调用时把 `STOP` 纠正成 `toolUse`。
 - `provider::openai_responses`：OpenAI Responses provider —— 与 chat completions 又是另一套协议：请求体是类型化 `input` item 列表（`function_call` / `function_call_output` 与消息平级、`store: false`、`max_output_tokens` 下限 16），流是**事件类型化**的 SSE（`response.output_text.delta`、`response.reasoning_summary_text.delta`、`response.function_call_arguments.delta|done`、`response.output_item.done`、`response.completed|incomplete|failed`），需要按 `output_index` 把 deltas 归并到对应输出项，并用终态 item 修正文本/参数。
-- `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）、`RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条），以及 `ObserveTransport`（`onPayload` 可观测/替换载荷，`onResponse` 观测状态码与响应头；[`CallContext`] 携带 provider/api/model 但不上线）。
+- `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）、`RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条）、`ObserveTransport`（`onPayload` 可观测/替换载荷，`onResponse` 观测状态码与响应头；[`CallContext`] 携带 provider/api/model 但不上线），以及 `TimeoutService`（`timeoutMs`：只约束 `call` 返回的「建立请求」future，超时映射成 `PiError::Timeout`）。
 - `models::Models`：三块内容 —— `(provider, api) → provider Service` 的路由 Service、`(provider, model id) → Model` 的模型目录，以及 `refresh`：逐个 provider 调用注册的目录来源，成功替换该 provider 的目录并统计 added/updated/removed，失败保留旧条目并把错误记进报告（对应 pi `Models.refresh()` 返回 `{ aborted, errors }` 的语义）。选项支持 `allow_network` / `providers`（限定范围）/ `signal`（取消）。未注册路由返回 `PiError::Unsupported`。
 
-尚未移植的 provider 相关部分：bedrock-converse / vertex / mistral-conversations / pi-messages / cloudflare 等（其中 bedrock 还需要 SigV4 与事件流签名）。CLI 也还没有接上真实 provider（仍用离线 faux）。
+尚未移植的 provider 相关部分：bedrock-converse / vertex / mistral-conversations / pi-messages / cloudflare 等（其中 bedrock 还需要 SigV4 与事件流签名）。CLI 已接上真实 provider：`--provider`（`faux` / `anthropic` / `openai` / `openai-responses` / `google`）+ `--model` 组装 `timeout → retry → provider` 的栈，凭据来自各家的环境变量（`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`），缺凭据时明确报错。
 
 `protocol` 已落地的内容（`crates/protocol`）：
 
@@ -241,12 +241,13 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 
 `cli` 已落地的会话入口（`crates/cli`）：
 
-- `args`：命令行解析（提示词、`-C/--cwd`、`--print`、`--list-tools`、`--faux`、`--help`、`--version`、`--` 终止选项解析）；手写解析便于单测覆盖。
+- `args`：命令行解析（提示词、`-C/--cwd`、`--print`、`--list-tools`、`--provider`、`--model`、`--faux`、`--help`、`--version`、`--` 终止选项解析）；手写解析便于单测覆盖。
+- `provider`：把 `--provider` / `--model` 映射到 `ai` 的真实 provider 栈——`ProviderKind`（`faux` / `anthropic` / `openai` / `openai-responses` / `google`）给出 `(provider, api)`、凭据环境变量与默认模型 id；`build` 读环境变量并用 `Models` 注册路由 + 模型目录，真实 provider 用 `RetryTransport → ReqwestTransport` 加 `TimeoutService`（建立请求超时）。缺凭据返回 `MissingApiKey`，未知 provider 返回 `Unknown`（都带可读文案）。
 - `session::Session`：持有 `agent::Agent` + 八个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`。
 - `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、**流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。
-- `faux`：**确定性的离线 provider**。真实 provider（anthropic/openai/…）属于 `ai` crate 的 provider 层，尚未移植；为了让会话入口今天就能运行与被测试，faux 按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
-- 二进制 `cli`：`--list-tools` 打印八个工具，`--print` 跑一轮并打纯文本事件，默认用 TUI 渲染；没有位置参数时从 stdin 读提示词。
-- 尚未移植：真实 provider、交互式输入编辑器（TUI 目前是只读视图）、扩展/MCP/compaction。
+- `faux`：**确定性的离线 provider**（默认 provider），不联网也能端到端跑通会话；按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
+- 二进制 `cli`：`--list-tools` 打印八个工具，`--print` 跑一轮并打纯文本事件，默认用 TUI 渲染；`--provider` / `--model` 选择真实 provider；没有位置参数时从 stdin 读提示词。
+- 尚未移植：扩展（extensions/MCP/compaction）。TUI 模式下输入区即 vim 编辑器，提交的文本经 `Session::submit` 进入 agent。
 - 不使用 tower：TUI 订阅事件流，不是"请求 → 响应"边界（第 4.1 节）。
 
 ---
@@ -312,6 +313,7 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/cli/src/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `bash` / `read` / `write` / `edit` / `ls` / `find` / `grep`，`powershell` 复用 shell 执行逻辑），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
    3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `editor` / `backend` + `main.rs` 二进制）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件，**`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。测试：25 个 lib 单元（含 12 个编辑器用例）+ 2 个二进制单元 + 7 个 `TestBackend` 端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
    4. `cli`：`cli` crate 的会话入口与扩展。
-      - 会话入口已完成：~~`args` / `session` / `faux` / 二进制入口~~ 落在 `crates/cli`（`args` / `session` / `faux` + `main.rs`）。会话把 agent、八个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（只读视图），无位置参数时从 stdin 读提示词。真实 provider 属于 `ai` crate 的 provider 层（尚未移植），当前用 `--faux` 的确定性离线 provider 端到端跑通会话。
-      - 测试：7 个 `args` 单元测试、3 个 `faux` 单元测试、3 个二进制单元测试、5 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路与纯文本渲染断言）、6 个**真正运行 `cli` 二进制**的端到端测试（`--help` / `--version` / `--list-tools` / `--print` / stdin 提示词 / 错误参数）。
-      - 待办：扩展（extensions/MCP/compaction）与真实 provider。
+      - 会话入口已完成：~~`args` / `session` / `provider` / `faux` / 二进制入口~~ 落在 `crates/cli`（`args` / `session` / `provider` / `faux` + `main.rs`）。会话把 agent、八个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（只读视图），无位置参数时从 stdin 读提示词。
+      - 真实 provider 已接上：~~`provider` 模块~~ 用 `--provider`（`faux` / `anthropic` / `openai` / `openai-responses` / `google`）+ `--model` 组装 `timeout → retry → provider` 栈，凭据来自 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`，并注册进 `Models` 路由与模型目录；缺凭据或未知 provider 都给出可读错误。默认仍是离线 `faux`。
+      - 测试：9 个 `args` 单元测试、3 个 `faux` 单元测试、5 个 `provider` 单元测试、3 个二进制单元测试、5 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路与纯文本渲染断言）、6 个 `provider` 集成测试、9 个**真正运行 `cli` 二进制**的端到端测试（`--help` / `--version` / `--list-tools` / `--print` / stdin 提示词 / 错误参数 / `--provider` 选择 / 缺凭据 / 未知 provider）。
+      - 待办：扩展（extensions/MCP/compaction）与更多 provider（bedrock / vertex / mistral / cloudflare / pi-messages）。

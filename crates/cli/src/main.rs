@@ -1,13 +1,14 @@
 //! `cli` — tower-pi-agent 的命令行入口（对应 pi `packages/coding-agent`）。
 //!
 //! 组装一次会话：内置工具 + agent 编排循环 + （TUI 或纯文本）事件渲染。
-//! provider 目前只有离线 faux 实现（真实 provider 属于 `ai` crate，尚未移植）。
+//! provider 由 `--provider` / `--model` 选择：默认离线 `faux`，也可以接真实的
+//! anthropic / openai / google provider（凭据来自环境变量）。
 
 use std::{io::Read as _, path::PathBuf, process::ExitCode};
 
 use cli::{
     args::{USAGE, parse},
-    faux::{FauxProvider, model},
+    provider::{self, ProviderKind, ProviderStackOptions},
     session::{Session, run_print, run_tui},
     tools,
 };
@@ -46,9 +47,32 @@ fn main() -> ExitCode {
         }
     };
 
-    // 目前只有 faux provider；`--faux` 是显式写法，便于脚本自解释。
-    let provider = FauxProvider::new().boxed();
-    let session = std::sync::Arc::new(Session::with_model(cwd, provider, model()));
+    // `--provider` 优先；`--faux` 是没有显式 provider 时的离线简写（默认也是 faux）。
+    let kind = match args.provider.as_deref() {
+        Some(value) => match ProviderKind::parse(value) {
+            Some(kind) => kind,
+            None => {
+                eprintln!("{}", provider::ProviderError::Unknown(value.to_string()));
+                return ExitCode::FAILURE;
+            }
+        },
+        None => ProviderKind::Faux,
+    };
+
+    let setup = match provider::build(kind, args.model.as_deref(), ProviderStackOptions::default())
+    {
+        Ok(setup) => setup,
+        Err(error) => {
+            eprintln!("provider 配置失败：{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let session = std::sync::Arc::new(Session::with_model(
+        cwd,
+        setup.stream_fn(),
+        setup.model.clone(),
+    ));
 
     let outcome = if args.print {
         run_print_blocking(&session, prompt)

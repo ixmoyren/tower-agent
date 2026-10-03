@@ -110,6 +110,40 @@ fn unknown_option_fails_with_usage() {
 }
 
 #[test]
+fn unknown_provider_fails_with_the_available_list() {
+    let output = cli()
+        .args(["--print", "--provider", "mistral", "hi"])
+        .output()
+        .expect("run cli");
+    assert!(!output.status.success());
+    let text = stderr(&output);
+    assert!(text.contains("未知 provider：mistral"), "got:\n{text}");
+    assert!(text.contains("anthropic"), "got:\n{text}");
+}
+
+#[test]
+fn real_provider_without_api_key_fails_clearly() {
+    let output = cli()
+        .env_remove("ANTHROPIC_API_KEY")
+        .args(["--print", "--provider", "anthropic", "hi"])
+        .output()
+        .expect("run cli");
+    assert!(!output.status.success());
+    let text = stderr(&output);
+    assert!(text.contains("ANTHROPIC_API_KEY"), "got:\n{text}");
+}
+
+#[test]
+fn explicit_provider_faux_runs_a_full_turn() {
+    let output = cli()
+        .args(["--print", "--provider", "faux", "你好"])
+        .output()
+        .expect("run cli");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    assert!(stdout(&output).contains("[faux] 收到：你好"));
+}
+
+#[test]
 fn missing_prompt_fails_with_usage() {
     // stdin 是空管道时没有提示词可用。
     use std::process::Stdio;

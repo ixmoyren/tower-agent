@@ -181,8 +181,7 @@ pub fn write_event<W: Write>(out: &mut W, event: &AgentEvent) -> std::io::Result
 
 /// 用 TUI 渲染这条会话：先订阅，再跑一轮，最后交给 [`tui::run_agent_tui`]。
 ///
-/// TUI 目前是只读视图（编辑器在后续步骤落地），按 `q`/`Esc`/`Ctrl+C` 退出。
-/// 用 TUI 渲染这条会话：订阅事件、把输入区提交的文本交给 agent，直到用户退出。
+/// 订阅事件、把输入区提交的文本交给 agent，直到用户退出；`q`/`Esc`/`Ctrl+C` 退出。
 ///
 /// 编辑器默认 vim 普通模式（`i` 插入 / `Esc` 普通 / `Enter` 提交 / `q` 退出）。
 /// 用户退出时会取消还在进行的一轮，等驱动任务收尾后返回。

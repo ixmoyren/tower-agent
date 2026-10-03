@@ -211,3 +211,66 @@ impl<T: HttpTransport> HttpTransport for ObserveTransport<T> {
         })
     }
 }
+
+/// 超时层（design.md 4.3 的 `timeoutMs`）。
+///
+/// **只覆盖 `call` 返回的 future**，也就是"建立请求"阶段；响应流被消费的过程不受约束
+/// （tower 中间件在本仓库的定位，见 design D1/D2）。超时映射成 [`PiError::Timeout`]，
+/// 由 retry 层（如果在更内侧）先决定是否重试。
+#[derive(Clone)]
+pub struct TimeoutService<S> {
+    inner: S,
+    duration: Duration,
+}
+
+impl<S> TimeoutService<S> {
+    /// 用超时时长包裹一个 provider 服务。
+    pub fn new(inner: S, duration: Duration) -> Self {
+        Self { inner, duration }
+    }
+
+    /// 超时时长。
+    pub fn duration(&self) -> Duration {
+        self.duration
+    }
+}
+
+impl<S> tower::Service<crate::StreamRequest> for TimeoutService<S>
+where
+    S: tower::Service<
+            crate::StreamRequest,
+            Response = crate::AssistantEventStream,
+            Error = crate::PiError,
+        > + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = crate::AssistantEventStream;
+    type Error = crate::PiError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: crate::StreamRequest) -> Self::Future {
+        let mut inner = self.inner.clone();
+        let duration = self.duration;
+        Box::pin(async move {
+            use tower::ServiceExt as _;
+            let ready =
+                tokio::time::timeout(
+                    duration,
+                    async move { inner.ready().await?.call(request).await },
+                );
+            match ready.await {
+                Ok(result) => result,
+                Err(_) => Err(crate::PiError::Timeout),
+            }
+        })
+    }
+}
