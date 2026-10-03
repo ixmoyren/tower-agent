@@ -11,11 +11,14 @@
 
 mod error;
 mod event;
+pub mod http;
 mod json;
 mod message;
 mod model;
+pub mod provider;
 mod request;
 mod service;
+pub mod sse;
 mod stream;
 
 pub use error::{BoxError, PiError};
@@ -27,6 +30,11 @@ pub use message::{
     UserContent, UserMessage,
 };
 pub use model::{InputModality, Model, ModelCost, ModelCostRates, ModelCostTier};
+pub use provider::{
+    BoxProviderService, ProviderService, ProviderServiceExt,
+    anthropic::{API as ANTHROPIC_MESSAGES_API, AnthropicConfig, AnthropicProvider},
+    layers::{HeaderTransport, RetryTransport},
+};
 pub use request::{
     DeferredHandle, DeferredRequest, DeferredWindow, ModelThinkingLevel, ProviderHeaders,
     SimpleStreamOptions, StreamOptions, StreamRequest, ThinkingBudgets, ThinkingLevel, ToolChoice,

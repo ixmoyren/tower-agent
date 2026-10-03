@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v1.1（开放问题已确认；第 9 节第 2、3 步与第 4 步的 `agent`、`tools`、`tui`、`cli` 四个阶段，以及 `protocol` crate 已落地） |
+| 状态     | 草案 v1.2（开放问题已确认；第 9 节第 2、3 步与第 4 步的四个阶段、`protocol` crate、以及真实 provider（Anthropic）已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -193,7 +193,16 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 
 阶段 1 落成 `protocol` / `ai` / `agent` / `tui` / `cli` 五个 crate，拆分依据是上面的模块边界而不是文件数量；公共 `PiError` / `BoxError` / Request/Response 类型放在 `ai`，避免额外引入第 6 个 crate。后续如需可再细分，但不改变该依赖提取策略。
 
-当前进度：workspace 骨架已建立，`ai`（第一个移植单元）、`agent`（第 4.i 步）、`cli`（第 4.ii 步内置工具 + 第 4.iv 步会话入口）、`tui`（第 4.iii 步终端 UI）与 `protocol`（帧 / CBOR / RPC 信封）五个 crate 全部落地。
+当前进度：workspace 骨架已建立，`ai`（第一个移植单元 + 真实 provider）、`agent`（第 4.i 步）、`cli`（第 4.ii 步内置工具 + 第 4.iv 步会话入口）、`tui`（第 4.iii 步终端 UI）与 `protocol`（帧 / CBOR / RPC 信封）五个 crate 全部落地。
+
+`ai` 已落地的 provider 层：
+
+- `http`：`HttpTransport` 接缝（真实实现是 `ReqwestTransport`，Q5 选型 reqwest + rustls）+ 请求/响应类型（响应体是分块字节流）。provider 只依赖这个 trait，因此测试可以用脚本化传输层覆盖，无网络。
+- `sse`：增量 SSE 解析（`event:` / 多行 `data:` / 注释 / CRLF，任意切分）。
+- `provider::anthropic`：Anthropic Messages provider —— 请求构造（system / messages / tools / thinking / temperature / metadata）、`text` / `thinking` / `redacted_thinking` / `tool_use` 四种内容块的流式映射、usage 与成本（含计价档位）、`stop_reason` 映射（`end_turn`→stop、`max_tokens`→length、`tool_use`→toolUse、`refusal`/未知→error），错误按契约区分：非重试的 4xx 与流内 `error` 编码进流，429/5xx/传输错误走 `Service::Error` 交给 retry 层。
+- `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）与 `RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条）。
+
+尚未移植的 provider 相关部分：其它 provider（openai-completions / google / bedrock / …）、`Models` 注册表路由、`onPayload` / `onResponse` 观测 Layer。
 
 `protocol` 已落地的内容（`crates/protocol`）：
 
