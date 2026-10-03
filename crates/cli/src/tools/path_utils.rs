@@ -22,12 +22,6 @@ fn normalize_unicode_spaces(value: &str) -> String {
         .collect()
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
-}
-
 /// 词法规范化：折叠 `.` 与 `..`，不触碰文件系统（对应 Node `path.resolve` 的规范化部分）。
 fn normalize_lexically(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
@@ -54,7 +48,8 @@ pub fn expand_path(input: &str) -> String {
     if let Some(stripped) = normalized.strip_prefix('@') {
         normalized = stripped.to_string();
     }
-    if let Some(home) = home_dir() {
+    // `dirs` 处理了各平台的主目录解析（macOS/Windows 不只看 `$HOME`）。
+    if let Some(home) = dirs::home_dir() {
         if normalized == "~" {
             return home.to_string_lossy().into_owned();
         }
@@ -151,11 +146,9 @@ mod tests {
 
     #[test]
     fn resolve_to_cwd_expands_tilde() {
-        // HOME is always set in the test environment; compare against the same source.
-        let home = std::env::var("HOME").expect("HOME is set");
-        assert_eq!(
-            resolve_to_cwd("~/x", Path::new("/")),
-            PathBuf::from(format!("{home}/x"))
-        );
+        // 用与实现相同的主目录来源，避免测试和实现走不同的平台逻辑。
+        let home = dirs::home_dir().expect("home directory is resolvable");
+        assert_eq!(resolve_to_cwd("~/x", Path::new("/")), home.join("x"));
+        assert_eq!(resolve_to_cwd("~", Path::new("/")), home);
     }
 }
