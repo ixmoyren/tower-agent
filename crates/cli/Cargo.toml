@@ -26,6 +26,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tower = { workspace = true }
+tui = { path = "../tui" }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
