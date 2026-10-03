@@ -14,6 +14,7 @@ pub(crate) mod common;
 pub mod google;
 pub mod layers;
 pub mod openai;
+pub mod openai_responses;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

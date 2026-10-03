@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v1.4（开放问题已确认；第 9 节第 2、3 步与第 4 步的四个阶段、`protocol` crate、以及 provider 层（Anthropic + OpenAI 兼容 + Google + Models 路由 + 观测层）已落地） |
+| 状态     | 草案 v1.5（开放问题已确认；第 9 节第 2、3 步与第 4 步的四个阶段、`protocol` crate、以及 provider 层（Anthropic / OpenAI 兼容 / OpenAI Responses / Google + Models 路由与目录刷新 + 观测层）已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -202,10 +202,11 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `provider::anthropic`：Anthropic Messages provider —— 请求构造（system / messages / tools / thinking / temperature / metadata）、`text` / `thinking` / `redacted_thinking` / `tool_use` 四种内容块的流式映射、usage 与成本（含计价档位）、`stop_reason` 映射（`end_turn`→stop、`max_tokens`→length、`tool_use`→toolUse、`refusal`/未知→error），错误按契约区分：非重试的 4xx 与流内 `error` 编码进流，429/5xx/传输错误走 `Service::Error` 交给 retry 层。
 - `provider::openai`：OpenAI Chat Completions provider —— 一条实现覆盖大量兼容端点（OpenAI / Azure OpenAI / OpenRouter / Cerebras / Groq / DeepSeek …）。请求构造（system / tools / temperature / `stream_options.include_usage` / `user`）、`content` / `reasoning_content` / `tool_calls` 的流式映射（含分片 partial JSON）、`finish_reason` 映射、`data: [DONE]` 收尾；错误归属与 Anthropic 一致。
 - `provider::google`：Google Generative AI provider —— 用来验证抽象能容纳**形状完全不同**的 API：URL 把模型放进路径（`:streamGenerateContent?alt=sse`）、认证用 `x-goog-api-key`、请求体是 `contents`+`parts` 而不是 `messages`（system 走 `systemInstruction`、工具走 `tools[].functionDeclarations`）、`functionCall` 是整块对象（因此一次发 start/delta/end）、思考用 `thought: true` 的 part、用量在 `usageMetadata`（input 扣掉 cached、output 加上 thoughts）。另外按 pi 的行为在有工具调用时把 `STOP` 纠正成 `toolUse`。
+- `provider::openai_responses`：OpenAI Responses provider —— 与 chat completions 又是另一套协议：请求体是类型化 `input` item 列表（`function_call` / `function_call_output` 与消息平级、`store: false`、`max_output_tokens` 下限 16），流是**事件类型化**的 SSE（`response.output_text.delta`、`response.reasoning_summary_text.delta`、`response.function_call_arguments.delta|done`、`response.output_item.done`、`response.completed|incomplete|failed`），需要按 `output_index` 把 deltas 归并到对应输出项，并用终态 item 修正文本/参数。
 - `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）、`RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条），以及 `ObserveTransport`（`onPayload` 可观测/替换载荷，`onResponse` 观测状态码与响应头；[`CallContext`] 携带 provider/api/model 但不上线）。
-- `models::Models`：`(provider, api) → provider Service` 的注册表与路由 Service，按 `StreamRequest.model` 转发；未注册路由返回 `PiError::Unsupported`。
+- `models::Models`：三块内容 —— `(provider, api) → provider Service` 的路由 Service、`(provider, model id) → Model` 的模型目录，以及 `refresh`：逐个 provider 调用注册的目录来源，成功替换该 provider 的目录并统计 added/updated/removed，失败保留旧条目并把错误记进报告（对应 pi `Models.refresh()` 返回 `{ aborted, errors }` 的语义）。选项支持 `allow_network` / `providers`（限定范围）/ `signal`（取消）。未注册路由返回 `PiError::Unsupported`。
 
-尚未移植的 provider 相关部分：其它 provider（bedrock-converse / vertex / mistral-conversations / openai-responses / pi-messages / cloudflare …）与模型目录刷新（`Models::refresh`）。CLI 也还没有接上真实 provider（仍用离线 faux）。
+尚未移植的 provider 相关部分：bedrock-converse / vertex / mistral-conversations / pi-messages / cloudflare 等（其中 bedrock 还需要 SigV4 与事件流签名）。CLI 也还没有接上真实 provider（仍用离线 faux）。
 
 `protocol` 已落地的内容（`crates/protocol`）：
 

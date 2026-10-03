@@ -31,13 +31,16 @@ pub use message::{
     UserContent, UserMessage,
 };
 pub use model::{InputModality, Model, ModelCost, ModelCostRates, ModelCostTier};
-pub use models::Models;
+pub use models::{ModelSource, Models, ProviderRefresh, RefreshOptions, RefreshReport};
 pub use provider::{
     BoxProviderService, ProviderService, ProviderServiceExt,
     anthropic::{API as ANTHROPIC_MESSAGES_API, AnthropicConfig, AnthropicProvider},
     google::{API as GOOGLE_GENERATIVE_AI_API, GoogleConfig, GoogleProvider},
     layers::{HeaderTransport, ObserveTransport, PayloadHook, ResponseHook, RetryTransport},
     openai::{API as OPENAI_COMPLETIONS_API, OpenAiConfig, OpenAiProvider},
+    openai_responses::{
+        API as OPENAI_RESPONSES_API, OpenAiResponsesConfig, OpenAiResponsesProvider,
+    },
 };
 pub use request::{
     DeferredHandle, DeferredRequest, DeferredWindow, ModelThinkingLevel, ProviderHeaders,
