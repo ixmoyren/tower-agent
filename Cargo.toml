@@ -16,12 +16,14 @@ futures-util = "0.3"
 globset = "0.4"
 ignore = "0.4"
 nix = { version = "0.31", default-features = false, features = ["signal"] }
+ratatui = "0.30"
 regex = "1"
 similar = "3"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "sync", "macros", "time", "process", "io-util", "fs"] }
 tokio-util = { version = "0.7", default-features = false }
 unicode-normalization = "0.1"
+unicode-width = "0.2"
 serde_json = "1"
 thiserror = "2"
 

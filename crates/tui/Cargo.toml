@@ -1,0 +1,19 @@
+[package]
+name = "tui"
+description = "Rust port of pi's `tui` package: differential terminal rendering driven by the agent event stream."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+agent = { path = "../agent" }
+ai = { path = "../ai" }
+ratatui = { workspace = true }
+tokio = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
