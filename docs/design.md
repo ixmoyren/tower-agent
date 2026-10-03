@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v1.0（开放问题已确认；第 9 节第 2、3 步与第 4 步的 `agent`、`tools`、`tui`、`cli` 四个阶段已落地） |
+| 状态     | 草案 v1.1（开放问题已确认；第 9 节第 2、3 步与第 4 步的 `agent`、`tools`、`tui`、`cli` 四个阶段，以及 `protocol` crate 已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -193,7 +193,13 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 
 阶段 1 落成 `protocol` / `ai` / `agent` / `tui` / `cli` 五个 crate，拆分依据是上面的模块边界而不是文件数量；公共 `PiError` / `BoxError` / Request/Response 类型放在 `ai`，避免额外引入第 6 个 crate。后续如需可再细分，但不改变该依赖提取策略。
 
-当前进度：workspace 骨架已建立，`ai`（第一个移植单元）、`agent`（第 4.i 步）、`cli`（第 4.ii 步内置工具 + 第 4.iv 步会话入口）与 `tui`（第 4.iii 步终端 UI）已落地，`protocol` 在后续步骤中加入。
+当前进度：workspace 骨架已建立，`ai`（第一个移植单元）、`agent`（第 4.i 步）、`cli`（第 4.ii 步内置工具 + 第 4.iv 步会话入口）、`tui`（第 4.iii 步终端 UI）与 `protocol`（帧 / CBOR / RPC 信封）五个 crate 全部落地。
+
+`protocol` 已落地的内容（`crates/protocol`）：
+
+- `framing`：4 字节大端长度前缀的帧编解码，增量式（任意切分/粘包）、支持零长度帧，带单帧上限与截断检测；失败或结束后再次使用会报错。
+- `cbor`：pi 的**严格 CBOR 子集**自研实现（不使用通用 CBOR 库）：definite-length only、无 tag / indefinite-length / break、map 键必须是字符串且不得重复、整数与长度受 JS 安全整数范围约束；字节数 / 容器长度 / 嵌套深度上限的默认值与 pi 一致。`CborValue ↔ serde_json::Value` 互转用于协议载荷。
+- `protocol` / `codec`：`hello` / `request` / `cancel` / `response` / `service_update` / `attachment` 信封的严格校验（对象多字段即非法、`serverId` 必须是规范 UUID v4、`call` / `result` / `update` 必须是不透明 JSON）+ 带帧编解码与增量解码器。`PROTOCOL_VERSION = 8`；`ClientHandshake` 落实「客户端第一条帧必须是 hello」。
 
 `agent` 已落地的内容：工具元数据 + 工具 Service（`AgentTool`、`ToolRouter`）、`AgentEvent` / `AgentMessage` 事件类型、agent 编排循环（`agent_loop::run_agent_loop` / `run_agent_loop_continue`）、顺序与并行工具执行、`beforeToolCall` / `afterToolCall` / `finishTurn` 钩子、steer / follow-up 队列，以及带逐订阅者 mpsc 背压的有状态 `Agent`。
 

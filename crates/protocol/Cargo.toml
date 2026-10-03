@@ -1,0 +1,16 @@
+[package]
+name = "protocol"
+description = "Rust port of pi's `protocol` package: framing, strict CBOR subset, and RPC envelopes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+ciborium = "0.2.2"
