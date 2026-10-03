@@ -185,7 +185,7 @@ pub async fn run_agent_tui(
     result
 }
 
-/// 用一条事件通道驱动 TUI（[`run_agent_tui`] 与 `tui` 二进制都走这里）。
+/// 用一条事件通道驱动 TUI（[`run_agent_tui`] 与调用方自定义驱动都走这里）。
 pub async fn run_tui(
     mut events: mpsc::UnboundedReceiver<AgentEvent>,
     submissions: mpsc::UnboundedSender<String>,
