@@ -1,0 +1,19 @@
+[package]
+name = "pi-ai"
+description = "Rust port of pi's `ai` package: provider request/stream boundary built on tower."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tower = { workspace = true }
+futures-core = { workspace = true }
+tokio-util = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }

@@ -1,6 +1,24 @@
-[package]
-name = "tower-pi-agent"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
-[dependencies]
+[workspace.dependencies]
+# tower 骨架：feature 集与 design.md 第 2 节 / D9 保持一致
+tower = { version = "0.5.3", features = ["util", "timeout", "retry", "limit", "load-shed", "steer", "filter", "buffer"] }
+futures-core = "0.3"
+futures-util = "0.3"
+tokio-util = { version = "0.7", default-features = false }
+serde_json = "1"
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

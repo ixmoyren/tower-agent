@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v0.2（开放问题已确认）                                         |
+| 状态     | 草案 v0.3（开放问题已确认；第 9 节第 2 步已落地）                   |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -193,6 +193,8 @@ pi-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（�
 
 阶段 1 落成 `pi-protocol` / `pi-ai` / `pi-agent` / `pi-tui` / `pi-cli` 五个 crate，拆分依据是上面的模块边界而不是文件数量；公共 `PiError` / `BoxError` / Request/Response 类型放在 `pi-ai`，避免额外引入第 6 个 crate。后续如需可再细分，但不改变该依赖提取策略。
 
+当前进度：workspace 骨架已建立，`pi-ai`（第一个移植单元）与 `pi-cli`（原 CLI 入口迁移）已落地，其余三个 crate 在后续步骤中加入。
+
 ---
 
 ## 6. 关键设计决策
@@ -248,6 +250,6 @@ pi-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（�
 ## 9. 下一步
 
 1. ~~确认第 8 节的开放问题（至少 Q1、Q2、Q3）。~~ 已完成，结论见第 8 节"决策"列。
-2. 落地第一个移植单元：`ai::StreamFn → Service`，先写类型与 trait 边界（含 `PiError`、`StreamRequest`、`AssistantEventStream`）。
+2. ~~落地第一个移植单元：`ai::StreamFn → Service`，先写类型与 trait 边界（含 `PiError`、`StreamRequest`、`AssistantEventStream`）。~~ 已完成，落在 `crates/pi-ai`：`PiError`/`BoxError`、`StreamRequest`/`StreamOptions`/`SimpleStreamOptions`/`TranscriptContext`、`AssistantEventStream`（`futures_core::Stream`）、`AssistantMessageEvent`，以及 `StreamService`/`BoxStreamService`/`StreamFn` 边界与 `boxed_stream` 装箱助手。
 3. 建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。
 4. 再按 `agent` → `tools` → `tui` → `cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
