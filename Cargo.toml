@@ -9,10 +9,15 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 tower = { version = "0.5.3", features = ["util", "timeout", "retry", "limit", "load-shed", "steer", "filter", "buffer"] }
+base64 = "0.22"
 futures-core = "0.3"
 futures-util = "0.3"
-tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+nix = { version = "0.30", default-features = false, features = ["signal"] }
+similar = "2"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "sync", "macros", "time", "process", "io-util", "fs"] }
 tokio-util = { version = "0.7", default-features = false }
+unicode-normalization = "0.1"
 serde_json = "1"
 thiserror = "2"
 
