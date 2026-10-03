@@ -17,6 +17,7 @@ fn request() -> ai::http::HttpRequest {
         url: "https://example.test/v1/messages".into(),
         headers: HttpHeaders::new(),
         body: Vec::new(),
+        context: None,
     }
 }
 

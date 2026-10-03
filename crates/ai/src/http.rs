@@ -13,8 +13,22 @@ use futures_util::{StreamExt as _, future::BoxFuture};
 /// 请求/响应头（名字保持调用方给的大小写，比较时用大小写不敏感）。
 pub type HttpHeaders = BTreeMap<String, String>;
 
+/// 观测层需要的调用上下文：provider / api / model。
+///
+/// **不会**出现在线上——只挂在 [`HttpRequest`] 上供 `onPayload` / `onResponse` 这类
+/// 观测中间件读取（pi 把 `model` 直接传给回调）。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CallContext {
+    /// provider 标识（pi `ProviderId`）。
+    pub provider: String,
+    /// api 标识（如 `anthropic-messages`）。
+    pub api: String,
+    /// 模型 id。
+    pub model: String,
+}
+
 /// 一次 HTTP 请求；body 已经序列化好。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HttpRequest {
     /// HTTP 方法（目前只用 `POST`）。
     pub method: String,
@@ -24,6 +38,8 @@ pub struct HttpRequest {
     pub headers: HttpHeaders,
     /// 请求体。
     pub body: Vec<u8>,
+    /// 观测层上下文（不发送）。
+    pub context: Option<CallContext>,
 }
 
 /// 传输层错误。

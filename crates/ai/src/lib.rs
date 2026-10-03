@@ -15,6 +15,7 @@ pub mod http;
 mod json;
 mod message;
 mod model;
+pub mod models;
 pub mod provider;
 mod request;
 mod service;
@@ -30,10 +31,12 @@ pub use message::{
     UserContent, UserMessage,
 };
 pub use model::{InputModality, Model, ModelCost, ModelCostRates, ModelCostTier};
+pub use models::Models;
 pub use provider::{
     BoxProviderService, ProviderService, ProviderServiceExt,
     anthropic::{API as ANTHROPIC_MESSAGES_API, AnthropicConfig, AnthropicProvider},
-    layers::{HeaderTransport, RetryTransport},
+    layers::{HeaderTransport, ObserveTransport, PayloadHook, ResponseHook, RetryTransport},
+    openai::{API as OPENAI_COMPLETIONS_API, OpenAiConfig, OpenAiProvider},
 };
 pub use request::{
     DeferredHandle, DeferredRequest, DeferredWindow, ModelThinkingLevel, ProviderHeaders,

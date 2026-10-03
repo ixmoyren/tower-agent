@@ -14,8 +14,12 @@ use tower::{Service, ServiceExt as _};
 use crate::{
     AssistantEventStream, AssistantMessage, AssistantMessageEvent, ContentBlock, DoneReason,
     ErrorReason, ImageContent, Message, Model, PiError, StopReason, StreamRequest, TextContent,
-    ThinkingContent, ThinkingLevel, Tool, ToolCall, ToolResultMessage, Usage, UserContent,
-    http::{ByteStream, HttpHeaders, HttpRequest, HttpTransport},
+    ThinkingContent, ThinkingLevel, ToolCall, ToolResultMessage, UserContent,
+    http::{ByteStream, CallContext, HttpHeaders, HttpRequest, HttpTransport},
+    provider::common::{
+        empty_message, error_stream, retryable_status, set_header, system_and_tools, truncate,
+        update_usage_totals,
+    },
 };
 
 /// pi 里这条 provider 的 api 标识。
@@ -122,6 +126,11 @@ impl<T: HttpTransport> AnthropicProvider<T> {
             url: format!("{}/v1/messages", self.config.base_url.trim_end_matches('/')),
             headers,
             body,
+            context: Some(CallContext {
+                provider: request.model.provider.clone(),
+                api: request.model.api.clone(),
+                model: request.model.id.clone(),
+            }),
         };
 
         let response = self
@@ -167,31 +176,6 @@ impl<T: HttpTransport> Service<StreamRequest> for AnthropicProvider<T> {
         let provider = self.clone();
         Box::pin(async move { provider.execute(request).await })
     }
-}
-
-fn set_header(headers: &mut HttpHeaders, name: &str, value: Option<&str>) {
-    if let Some(existing) = headers
-        .keys()
-        .find(|key| key.eq_ignore_ascii_case(name))
-        .cloned()
-    {
-        headers.remove(&existing);
-    }
-    if let Some(value) = value {
-        headers.insert(name.to_string(), value.to_string());
-    }
-}
-
-fn retryable_status(status: u16) -> bool {
-    status == 408 || status == 429 || (500..600).contains(&status)
-}
-
-fn truncate(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    let head: String = text.chars().take(limit).collect();
-    format!("{head}...")
 }
 
 /// 内容块在流里的类型（pi 的实现用一个带 `partialJson` 的临时字段）。
@@ -588,9 +572,7 @@ impl StreamState {
     }
 
     fn update_totals(&mut self) {
-        let usage = &mut self.output.usage;
-        usage.total_tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
-        calculate_cost(&self.model, usage);
+        update_usage_totals(&self.model, &mut self.output.usage);
     }
 
     /// 流结束后收尾：没有 stop reason 视为错误；错误/取消编码成 `error` 事件。
@@ -658,104 +640,7 @@ fn map_stop_reason(reason: &str, details: Option<&JsonValue>) -> Result<StopReas
     })
 }
 
-/// 单条 `error` 事件的流（provider 明确报错时使用）。
-fn error_stream(model: &Model, message: String) -> AssistantEventStream {
-    let mut error = empty_message(model);
-    error.stop_reason = StopReason::Error;
-    error.error_message = Some(message);
-    AssistantEventStream::new(stream::iter(vec![AssistantMessageEvent::Error {
-        reason: ErrorReason::Error,
-        error,
-    }]))
-}
-
-fn empty_message(model: &Model) -> AssistantMessage {
-    AssistantMessage {
-        content: Vec::new(),
-        api: model.api.clone(),
-        provider: model.provider.clone(),
-        model: model.id.clone(),
-        response_model: None,
-        response_id: None,
-        provider_thinking_level: None,
-        thinking_level: None,
-        usage: Usage::default(),
-        stop_reason: StopReason::Pending,
-        deferred: None,
-        error_message: None,
-        raw_stop_reason: None,
-        end_turn: None,
-        timestamp: crate::provider::now_ms(),
-    }
-}
-
-/// 按模型费率计算成本（pi `calculateCost`）。
-fn calculate_cost(model: &Model, usage: &mut Usage) {
-    let mut rates = (
-        model.cost.input,
-        model.cost.output,
-        model.cost.cache_read,
-        model.cost.cache_write,
-    );
-    // 计价档位：命中阈值最高的一档作用于整个请求。
-    let mut threshold = None;
-    for tier in &model.cost.tiers {
-        if usage.input >= tier.input_tokens_above
-            && threshold.is_none_or(|current| tier.input_tokens_above >= current)
-        {
-            threshold = Some(tier.input_tokens_above);
-            rates = (tier.input, tier.output, tier.cache_read, tier.cache_write);
-        }
-    }
-    let per_million = |tokens: u64, rate: f64| (tokens as f64) / 1_000_000.0 * rate;
-    usage.cost.input = per_million(usage.input, rates.0);
-    usage.cost.output = per_million(usage.output, rates.1);
-    usage.cost.cache_read = per_million(usage.cache_read, rates.2);
-    usage.cost.cache_write = per_million(usage.cache_write, rates.3);
-    usage.cost.total =
-        usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
-}
-
 // ---------- 请求构造 ----------
-
-/// 从 transcript 重放 system prompt 与工具声明（pi `getCurrentSystemPrompt` / `getCurrentTools`）。
-fn system_and_tools(messages: &[Message]) -> (String, Vec<Tool>) {
-    let mut parts: Vec<String> = Vec::new();
-    let mut tools: Vec<Tool> = Vec::new();
-    for message in messages {
-        let Message::System(system) = message else {
-            continue;
-        };
-        let text = content_text(&system.content);
-        if !text.is_empty() {
-            parts.push(text);
-        }
-        for section in system.sections.values().flatten() {
-            parts.push(section.clone());
-        }
-        for removed in &system.tools_removed {
-            tools.retain(|tool| tool.name != removed.name);
-        }
-        for added in &system.tools_added {
-            match tools.iter_mut().find(|tool| tool.name == added.name) {
-                Some(existing) => *existing = added.clone(),
-                None => tools.push(added.clone()),
-            }
-        }
-    }
-    (parts.join("\n\n"), tools)
-}
-
-fn content_text(blocks: &[ContentBlock]) -> String {
-    blocks
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text(text) => Some(text.text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 
 fn thinking_budget(level: ThinkingLevel, budgets: Option<&crate::ThinkingBudgets>) -> u64 {
     let configured = budgets.and_then(|budgets| match level {

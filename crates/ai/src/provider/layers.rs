@@ -1,10 +1,11 @@
 //! provider 栈里的传输层中间件（对应 design.md 4.3 的 auth / retry）。
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures_util::future::BoxFuture;
+use serde_json::Value as JsonValue;
 
-use crate::http::{HttpError, HttpHeaders, HttpRequest, HttpResponse, HttpTransport};
+use crate::http::{CallContext, HttpError, HttpHeaders, HttpRequest, HttpResponse, HttpTransport};
 
 /// 头部注入层：把配置里的请求头合并进每个请求（auth 就落在这里）。
 ///
@@ -140,6 +141,73 @@ impl<T: HttpTransport> HttpTransport for RetryTransport<T> {
                     Err(error) => return Err(error),
                 }
             }
+        })
+    }
+}
+
+/// `onPayload` 钩子：拿到（已解析的）请求载荷与调用上下文，返回 `Some` 表示替换载荷。
+pub type PayloadHook = Arc<dyn Fn(&CallContext, &JsonValue) -> Option<JsonValue> + Send + Sync>;
+
+/// `onResponse` 钩子：拿到状态码、响应头与调用上下文（只观测，不改写）。
+pub type ResponseHook = Arc<dyn Fn(&CallContext, u16, &HttpHeaders) + Send + Sync>;
+
+/// 观测层：在请求发出前调用 `onPayload`，在拿到响应头后调用 `onResponse`。
+///
+/// 对应 pi `ProviderRequestOptions` 里的 `onPayload` / `onResponse`（design.md 4.2/4.3）。
+/// 载荷替换后再序列化；解析失败或钩子返回 `None` 时保持原样。
+#[derive(Clone)]
+pub struct ObserveTransport<T> {
+    inner: T,
+    on_payload: Option<PayloadHook>,
+    on_response: Option<ResponseHook>,
+}
+
+impl<T: HttpTransport> ObserveTransport<T> {
+    /// 构造（默认不挂任何钩子）。
+    pub fn new(inner: T) -> Self {
+        Self {
+            inner,
+            on_payload: None,
+            on_response: None,
+        }
+    }
+
+    /// 设置 `onPayload` 钩子。
+    #[must_use]
+    pub fn on_payload(mut self, hook: PayloadHook) -> Self {
+        self.on_payload = Some(hook);
+        self
+    }
+
+    /// 设置 `onResponse` 钩子。
+    #[must_use]
+    pub fn on_response(mut self, hook: ResponseHook) -> Self {
+        self.on_response = Some(hook);
+        self
+    }
+}
+
+impl<T: HttpTransport> HttpTransport for ObserveTransport<T> {
+    fn send(
+        &self,
+        mut request: HttpRequest,
+    ) -> BoxFuture<'static, Result<HttpResponse, HttpError>> {
+        if let (Some(hook), Some(context)) = (&self.on_payload, request.context.clone())
+            && let Ok(payload) = serde_json::from_slice::<JsonValue>(&request.body)
+            && let Some(replacement) = hook(&context, &payload)
+            && let Ok(body) = serde_json::to_vec(&replacement)
+        {
+            request.body = body;
+        }
+        let context = request.context.clone();
+        let on_response = self.on_response.clone();
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            let response = inner.send(request).await?;
+            if let (Some(hook), Some(context)) = (on_response, context) {
+                hook(&context, response.status, &response.headers);
+            }
+            Ok(response)
         })
     }
 }

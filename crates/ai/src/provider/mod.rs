@@ -10,7 +10,9 @@
 //! 编码进流，与 pi「错误编码进流」的契约一致。
 
 pub mod anthropic;
+pub(crate) mod common;
 pub mod layers;
+pub mod openai;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

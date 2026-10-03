@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v1.2（开放问题已确认；第 9 节第 2、3 步与第 4 步的四个阶段、`protocol` crate、以及真实 provider（Anthropic）已落地） |
+| 状态     | 草案 v1.3（开放问题已确认；第 9 节第 2、3 步与第 4 步的四个阶段、`protocol` crate、以及 provider 层（Anthropic + OpenAI 兼容 + Models 路由 + 观测层）已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -200,9 +200,11 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `http`：`HttpTransport` 接缝（真实实现是 `ReqwestTransport`，Q5 选型 reqwest + rustls）+ 请求/响应类型（响应体是分块字节流）。provider 只依赖这个 trait，因此测试可以用脚本化传输层覆盖，无网络。
 - `sse`：增量 SSE 解析（`event:` / 多行 `data:` / 注释 / CRLF，任意切分）。
 - `provider::anthropic`：Anthropic Messages provider —— 请求构造（system / messages / tools / thinking / temperature / metadata）、`text` / `thinking` / `redacted_thinking` / `tool_use` 四种内容块的流式映射、usage 与成本（含计价档位）、`stop_reason` 映射（`end_turn`→stop、`max_tokens`→length、`tool_use`→toolUse、`refusal`/未知→error），错误按契约区分：非重试的 4xx 与流内 `error` 编码进流，429/5xx/传输错误走 `Service::Error` 交给 retry 层。
-- `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）与 `RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条）。
+- `provider::openai`：OpenAI Chat Completions provider —— 一条实现覆盖大量兼容端点（OpenAI / Azure OpenAI / OpenRouter / Cerebras / Groq / DeepSeek …）。请求构造（system / tools / temperature / `stream_options.include_usage` / `user`）、`content` / `reasoning_content` / `tool_calls` 的流式映射（含分片 partial JSON）、`finish_reason` 映射、`data: [DONE]` 收尾；错误归属与 Anthropic 一致。
+- `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）、`RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条），以及 `ObserveTransport`（`onPayload` 可观测/替换载荷，`onResponse` 观测状态码与响应头；[`CallContext`] 携带 provider/api/model 但不上线）。
+- `models::Models`：`(provider, api) → provider Service` 的注册表与路由 Service，按 `StreamRequest.model` 转发；未注册路由返回 `PiError::Unsupported`。
 
-尚未移植的 provider 相关部分：其它 provider（openai-completions / google / bedrock / …）、`Models` 注册表路由、`onPayload` / `onResponse` 观测 Layer。
+尚未移植的 provider 相关部分：其它 provider（google-generative-ai / bedrock / vertex / mistral / …，它们的 API 形状各不相同）与模型目录刷新（`Models::refresh`）。CLI 也还没有接上真实 provider（仍用离线 faux）。
 
 `protocol` 已落地的内容（`crates/protocol`）：
 
