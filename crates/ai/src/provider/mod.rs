@@ -11,6 +11,7 @@
 
 pub mod anthropic;
 pub(crate) mod common;
+pub mod google;
 pub mod layers;
 pub mod openai;
 

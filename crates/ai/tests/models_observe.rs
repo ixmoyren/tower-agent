@@ -6,8 +6,8 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use ai::{
-    ANTHROPIC_MESSAGES_API, AnthropicProvider, Models, OPENAI_COMPLETIONS_API, ObserveTransport,
-    OpenAiProvider, PiError, RetryTransport,
+    ANTHROPIC_MESSAGES_API, AnthropicProvider, GOOGLE_GENERATIVE_AI_API, GoogleProvider, Models,
+    OPENAI_COMPLETIONS_API, ObserveTransport, OpenAiProvider, PiError, RetryTransport,
 };
 use support::{ScriptedResponse, ScriptedTransport, collect, kinds, request, test_model, user};
 use tower::ServiceExt as _;
@@ -17,6 +17,15 @@ type ObservedResponses = Arc<Mutex<Vec<(u16, Option<String>)>>>;
 
 fn anthropic_model() -> ai::Model {
     test_model()
+}
+
+fn google_model() -> ai::Model {
+    ai::Model {
+        api: GOOGLE_GENERATIVE_AI_API.into(),
+        provider: "google".into(),
+        id: "gemini-test".into(),
+        ..test_model()
+    }
 }
 
 fn openai_model() -> ai::Model {
@@ -38,6 +47,9 @@ const ANTHROPIC_OK: &str = concat!(
 async fn routes_by_provider_and_api() {
     let anthropic = ScriptedTransport::new(vec![ScriptedResponse::ok(ANTHROPIC_OK)]);
     let openai = ScriptedTransport::new(vec![ScriptedResponse::ok("data: [DONE]\n\n")]);
+    let google = ScriptedTransport::new(vec![ScriptedResponse::ok(
+        "data: {\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"STOP\"}]}\n\n",
+    )]);
 
     let mut models = Models::new();
     models.register(
@@ -50,15 +62,22 @@ async fn routes_by_provider_and_api() {
         OPENAI_COMPLETIONS_API,
         OpenAiProvider::new(openai.clone()).with_api_key("sk-o"),
     );
+    models.register(
+        "google",
+        GOOGLE_GENERATIVE_AI_API,
+        GoogleProvider::new(google.clone()).with_api_key("goog-key"),
+    );
     assert_eq!(
         models.routes(),
         vec![
             ("anthropic", ANTHROPIC_MESSAGES_API),
+            ("google", GOOGLE_GENERATIVE_AI_API),
             ("openai", OPENAI_COMPLETIONS_API)
         ]
     );
     assert!(models.supports(&anthropic_model()));
     assert!(models.supports(&openai_model()));
+    assert!(models.supports(&google_model()));
 
     let events = collect(
         models
@@ -84,6 +103,28 @@ async fn routes_by_provider_and_api() {
     assert_eq!(
         openai.requests()[0].url,
         "https://api.openai.com/v1/chat/completions"
+    );
+
+    let events = collect(
+        models
+            .clone()
+            .oneshot(request(google_model(), vec![user("hi")]))
+            .await
+            .expect("routed to google"),
+    )
+    .await;
+    assert_eq!(kinds(&events), vec!["done"]);
+    assert_eq!(google.request_count(), 1);
+    assert_eq!(
+        google.requests()[0].url,
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse"
+    );
+    assert_eq!(
+        google.requests()[0]
+            .headers
+            .get("x-goog-api-key")
+            .map(String::as_str),
+        Some("goog-key")
     );
 }
 

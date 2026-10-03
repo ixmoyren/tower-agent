@@ -35,6 +35,7 @@ pub use models::Models;
 pub use provider::{
     BoxProviderService, ProviderService, ProviderServiceExt,
     anthropic::{API as ANTHROPIC_MESSAGES_API, AnthropicConfig, AnthropicProvider},
+    google::{API as GOOGLE_GENERATIVE_AI_API, GoogleConfig, GoogleProvider},
     layers::{HeaderTransport, ObserveTransport, PayloadHook, ResponseHook, RetryTransport},
     openai::{API as OPENAI_COMPLETIONS_API, OpenAiConfig, OpenAiProvider},
 };
