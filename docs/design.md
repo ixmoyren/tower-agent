@@ -217,7 +217,7 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `render` 是纯函数：`&TuiState` → 缓冲区，三段布局（状态栏 / transcript / 提示栏），按显示宽度折行（宽字符按 2 列计算）并从底部对齐。
 - `app::Tui<B: Backend>` 把状态、输入编辑器与 ratatui 后端绑定；差分渲染由 `Terminal::draw` 承担（只写变化的单元格）。后端是泛型，因此生产用 termina、测试用 `TestBackend` 走同一套渲染代码。
 - `backend` 模块是**唯一**与具体后端耦合的地方：`init_terminal` / `restore_terminal` / `run_tui` / `run_agent_tui` / 全局按键。当前后端是 **termina**（`ratatui::backend::TerminaBackend`，由 manifest 的 `termina` feature 引入）；换 crossterm/termion/termwiz 只改这一个文件。
-- `editor` 模块是输入编辑器：**`ratatui-textarea`**（官方 Ratatui 开发者维护的 fork，git 引入、`termina` 输入适配、`default-features = false`）+ 一层 vim 键位。**默认 vim 普通模式**（`i/a/A/I/o/O` 进插入、`Esc` 回普通、`h j k l`/`w e b`/`0 $`/`gg G`、`x D C`、`p u Ctrl+r`、操作符 `d`/`y`/`c` + 动作，含 `dd`/`yy`/`dw`），**默认显示行号**（`set_line_number_style`），边框标题显示当前模式。Normal 模式 `Enter` 提交、`q` 退出；Insert 模式 `Enter` 换行。
+- `editor` 模块是输入编辑器：**`ratatui-textarea`**（官方 Ratatui 开发者维护的 fork，git 引入、`termina` 输入适配、`default-features = false`）+ 一层 vim 键位。**默认 vim 普通模式**，五种模式：Normal / Insert / **Visual**（`v` 逐字符、`V` 整行；`y` `d` `c` `p` 作用在选区上）/ **Replace**（`r` 替换一次、`R` 覆盖输入）/ Operator（`d`/`y`/`c` + 动作，含 `dd`/`yy`/`dw`）。Normal 键位：`i a A I o O`、`Esc`、`h j k l`/方向键、`w e b`、`0 ^ $`、`gg G`、`x D C`、`p u Ctrl+r`、`v V r R`。**默认显示行号**（`set_line_number_style`），边框标题显示当前模式。Normal 模式 `Enter` 提交、`q` 退出；Insert 模式 `Enter` 换行。
 - 二进制入口 `crates/tui/src/main.rs`：先跑一段脚本化演示会话，之后输入区提交的内容会被回显成一轮问答，`cargo run -p tui` 不需要 provider 也能试用编辑器。全局按键：`Ctrl+C` 随时退出、`PageUp/PageDown` 滚动会话记录；其余按键归编辑器。
 
 `cli` 已落地的会话入口（`crates/cli`）：

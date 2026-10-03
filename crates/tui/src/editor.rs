@@ -6,6 +6,9 @@
 //! - **默认 Normal 模式**；`i` / `a` / `A` / `I` / `o` / `O` 进 Insert，`Esc` 回 Normal。
 //! - Normal：`h j k l`、方向键、`w e b`、`0 ^ $`、`gg` / `G`、`x`、`D`、`C`、`p`、`u`、`Ctrl+r`、
 //!   以及操作符前缀 `d` / `y` / `c` + 动作（`dd`、`dw`、`de`、`d$`、`yy`、`cw` …）。
+//! - Visual：`v` 逐字符、`V` 整行；`y` 复制、`d` 删除、`c` 删除并进 Insert、`p` 用寄存器替换选区；
+//!   `Esc` / `v` 取消选择。
+//! - Replace：`r` 替换一次（回到 Normal）、`R` 覆盖输入（`Esc` 结束）。
 //! - Insert：所有按键（含 `Enter` 换行）原样交给编辑器。
 //! - `Enter`（Normal）**提交**，`q`（Normal）**退出**；`Ctrl+C` 由外层统一处理。
 //!
@@ -36,6 +39,10 @@ pub enum Mode {
     Normal,
     /// 插入模式。
     Insert,
+    /// 可视模式（`v` 逐字符 / `V` 整行）。
+    Visual,
+    /// 替换模式；`true` 表示只替换一次（`r`），`false` 表示覆盖输入（`R`）。
+    Replace(bool),
     /// 操作符待决（`d` / `y` / `c` 之后等待动作）。
     Operator(char),
 }
@@ -46,6 +53,9 @@ impl Mode {
         match self {
             Self::Normal => "NORMAL".into(),
             Self::Insert => "INSERT".into(),
+            Self::Visual => "VISUAL".into(),
+            Self::Replace(true) => "REPLACE(once)".into(),
+            Self::Replace(false) => "REPLACE".into(),
             Self::Operator(op) => format!("OPERATOR({op})"),
         }
     }
@@ -54,6 +64,8 @@ impl Mode {
         match self {
             Self::Normal => Style::default().fg(Color::Blue),
             Self::Insert => Style::default().fg(Color::Green),
+            Self::Visual => Style::default().fg(Color::Magenta),
+            Self::Replace(_) => Style::default().fg(Color::LightRed),
             Self::Operator(_) => Style::default().fg(Color::Yellow),
         }
     }
@@ -108,6 +120,8 @@ impl Editor {
         }
         match self.mode {
             Mode::Insert => self.handle_insert(input),
+            Mode::Visual => self.handle_visual(input),
+            Mode::Replace(once) => self.handle_replace(once, input),
             Mode::Normal => self.handle_normal(input),
             Mode::Operator(op) => self.handle_operator(op, input),
         }
@@ -148,14 +162,42 @@ impl Editor {
         EditorAction::None
     }
 
-    fn handle_normal(&mut self, input: Input) -> EditorAction {
+    /// 共享的移动键：Normal 与 Visual 都用它（Visual 处于选择状态，移动即扩展选区）。
+    ///
+    /// 返回 `true` 表示这次按键被当作移动处理。
+    fn apply_motion(&mut self, input: &Input) -> bool {
         // `gg` 的双键序列。
         if self.pending_g {
             self.pending_g = false;
             if input.key == Key::Char('g') && !input.ctrl {
                 self.textarea.move_cursor(CursorMove::Top);
-                return EditorAction::None;
+                return true;
             }
+        }
+        match (input.key, input.ctrl) {
+            (Key::Char('h') | Key::Left, false) => self.textarea.move_cursor(CursorMove::Back),
+            (Key::Char('j') | Key::Down, false) => self.textarea.move_cursor(CursorMove::Down),
+            (Key::Char('k') | Key::Up, false) => self.textarea.move_cursor(CursorMove::Up),
+            (Key::Char('l') | Key::Right, false) => {
+                self.textarea.move_cursor(CursorMove::Forward);
+            }
+            (Key::Char('w'), false) => self.textarea.move_cursor(CursorMove::WordForward),
+            (Key::Char('e'), false) => self.textarea.move_cursor(CursorMove::WordEnd),
+            (Key::Char('b'), false) => self.textarea.move_cursor(CursorMove::WordBack),
+            (Key::Char('0' | '^'), false) => self.textarea.move_cursor(CursorMove::Head),
+            (Key::Char('$'), false) => self.textarea.move_cursor(CursorMove::End),
+            (Key::Char('g'), false) => {
+                self.pending_g = true;
+            }
+            (Key::Char('G'), false) => self.textarea.move_cursor(CursorMove::Bottom),
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_normal(&mut self, input: Input) -> EditorAction {
+        if self.apply_motion(&input) {
+            return EditorAction::None;
         }
 
         match (input.key, input.ctrl) {
@@ -195,20 +237,6 @@ impl Editor {
                 self.textarea.move_cursor(CursorMove::Up);
                 self.set_mode(Mode::Insert);
             }
-            // 移动。
-            (Key::Char('h') | Key::Left, false) => self.textarea.move_cursor(CursorMove::Back),
-            (Key::Char('j') | Key::Down, false) => self.textarea.move_cursor(CursorMove::Down),
-            (Key::Char('k') | Key::Up, false) => self.textarea.move_cursor(CursorMove::Up),
-            (Key::Char('l') | Key::Right, false) => {
-                self.textarea.move_cursor(CursorMove::Forward);
-            }
-            (Key::Char('w'), false) => self.textarea.move_cursor(CursorMove::WordForward),
-            (Key::Char('e'), false) => self.textarea.move_cursor(CursorMove::WordEnd),
-            (Key::Char('b'), false) => self.textarea.move_cursor(CursorMove::WordBack),
-            (Key::Char('0' | '^'), false) => self.textarea.move_cursor(CursorMove::Head),
-            (Key::Char('$'), false) => self.textarea.move_cursor(CursorMove::End),
-            (Key::Char('g'), false) => self.pending_g = true,
-            (Key::Char('G'), false) => self.textarea.move_cursor(CursorMove::Bottom),
             // 编辑。
             (Key::Char('x'), false) => {
                 self.textarea.delete_next_char();
@@ -230,6 +258,20 @@ impl Editor {
             (Key::Char('r'), true) => {
                 self.textarea.redo();
             }
+            // 可视模式：`v` 逐字符，`V` 整行。
+            (Key::Char('v'), false) => {
+                self.textarea.start_selection();
+                self.set_mode(Mode::Visual);
+            }
+            (Key::Char('V'), false) => {
+                self.textarea.move_cursor(CursorMove::Head);
+                self.textarea.start_selection();
+                self.textarea.move_cursor(CursorMove::End);
+                self.set_mode(Mode::Visual);
+            }
+            // 替换模式：`r` 替换一次，`R` 覆盖输入。
+            (Key::Char('r'), false) => self.set_mode(Mode::Replace(true)),
+            (Key::Char('R'), false) => self.set_mode(Mode::Replace(false)),
             // 操作符前缀：进入选择 + 待决状态，后续动作扩展选择。
             (Key::Char(op @ ('d' | 'y' | 'c')), false) => {
                 self.textarea.start_selection();
@@ -290,6 +332,93 @@ impl Editor {
         EditorAction::None
     }
 
+    /// 可视模式：移动扩展选区，`y`/`d`/`c`/`p` 作用在选区上。
+    fn handle_visual(&mut self, input: Input) -> EditorAction {
+        // `Esc` 或再按一次 `v` 取消选择。
+        if input.key == Key::Esc || (input.key == Key::Char('v') && !input.ctrl) {
+            self.textarea.cancel_selection();
+            self.set_mode(Mode::Normal);
+            return EditorAction::None;
+        }
+        if self.apply_motion(&input) {
+            return EditorAction::None;
+        }
+        match (input.key, input.ctrl) {
+            // vim 的选区是「含端点」的：先补上光标所在字符再操作。
+            (Key::Char('y'), false) => {
+                self.textarea.move_cursor(CursorMove::Forward);
+                self.textarea.copy();
+                self.set_mode(Mode::Normal);
+            }
+            (Key::Char('d'), false) => {
+                self.textarea.move_cursor(CursorMove::Forward);
+                self.textarea.cut();
+                self.set_mode(Mode::Normal);
+            }
+            (Key::Char('c'), false) => {
+                self.textarea.move_cursor(CursorMove::Forward);
+                self.textarea.cut();
+                self.set_mode(Mode::Insert);
+            }
+            (Key::Char('p'), false) => {
+                self.textarea.move_cursor(CursorMove::Forward);
+                self.textarea.cut();
+                self.textarea.paste();
+                self.set_mode(Mode::Normal);
+            }
+            _ => {}
+        }
+        EditorAction::None
+    }
+
+    /// 替换模式：`once` 为 `r`（替换一个字符后回 Normal），否则为 `R`（覆盖直到 `Esc`）。
+    fn handle_replace(&mut self, once: bool, input: Input) -> EditorAction {
+        if input.key == Key::Esc {
+            self.set_mode(Mode::Normal);
+            return EditorAction::None;
+        }
+        let stay = if once {
+            Mode::Normal
+        } else {
+            Mode::Replace(false)
+        };
+
+        let Key::Char(ch) = input.key else {
+            self.set_mode(stay);
+            return EditorAction::None;
+        };
+        if input.ctrl || input.alt {
+            self.set_mode(stay);
+            return EditorAction::None;
+        }
+
+        let has_char_under_cursor = self.has_char_under_cursor();
+        // `r` 只在光标下有字符时替换（vim 里行尾按 r 不做事）；
+        // `R` 在行尾则直接追加。
+        if has_char_under_cursor || !once {
+            if has_char_under_cursor {
+                self.textarea.delete_next_char();
+            }
+            self.textarea.insert_char(ch);
+        }
+        self.set_mode(stay);
+        EditorAction::None
+    }
+
+    /// 某一行的字符数（`DataCursor` 的列是字符下标，不是字节）。
+    fn line_char_len(&self, row: usize) -> usize {
+        self.textarea
+            .lines()
+            .get(row)
+            .map_or(0, |line| line.chars().count())
+    }
+
+    /// 光标下是否有字符（行尾/空行时为 false）。
+    fn has_char_under_cursor(&self) -> bool {
+        let DataCursor(row, col) = self.textarea.cursor();
+        col < self.line_char_len(row)
+    }
+
     /// 选中整行（含行尾换行，最后一行取到行尾）。
     fn select_current_line(&mut self) {
         self.textarea.move_cursor(CursorMove::Head);
@@ -300,10 +429,7 @@ impl Editor {
 
     fn at_line_end(&self) -> bool {
         let DataCursor(row, col) = self.textarea.cursor();
-        let Some(line) = self.textarea.lines().get(row) else {
-            return true;
-        };
-        col + 1 >= line.len()
+        col + 1 >= self.line_char_len(row)
     }
 
     fn submit(&mut self) -> EditorAction {
@@ -506,6 +632,159 @@ mod tests {
         assert_eq!(editor.textarea().cursor().0, 2);
     }
 
+    /// 输入多行文本（`\n` 走 Enter 键，模拟 INSERT 模式下的换行）。
+    fn type_lines(editor: &mut Editor, lines: &[&str]) {
+        editor.handle(&key(KeyCode::Char('i')));
+        for (index, line) in lines.iter().enumerate() {
+            if index > 0 {
+                editor.handle(&key(KeyCode::Enter));
+            }
+            for ch in line.chars() {
+                editor.handle(&key(KeyCode::Char(ch)));
+            }
+        }
+        editor.handle(&key(KeyCode::Escape));
+    }
+
+    #[test]
+    fn visual_mode_deletes_the_selection() {
+        let mut editor = Editor::new();
+        type_text(&mut editor, "hello world");
+        editor.handle(&key(KeyCode::Char('0')));
+        editor.handle(&key(KeyCode::Char('v')));
+        assert_eq!(editor.mode(), Mode::Visual);
+        editor.handle(&key(KeyCode::Char('e')));
+        editor.handle(&key(KeyCode::Char('d')));
+        assert_eq!(editor.mode(), Mode::Normal);
+        assert_eq!(editor.text(), " world");
+    }
+
+    #[test]
+    fn visual_yank_then_paste_duplicates_the_selection() {
+        let mut editor = Editor::new();
+        type_lines(&mut editor, &["one", "two"]);
+        editor.handle(&key(KeyCode::Char('g')));
+        editor.handle(&key(KeyCode::Char('g')));
+        editor.handle(&key(KeyCode::Char('V')));
+        assert_eq!(editor.mode(), Mode::Visual);
+        editor.handle(&key(KeyCode::Char('y')));
+        assert_eq!(editor.mode(), Mode::Normal);
+        // y 之后光标停在下一行行首，p 把复制到的整行插回去。
+        editor.handle(&key(KeyCode::Char('p')));
+        assert_eq!(editor.text(), "one\none\ntwo");
+    }
+
+    #[test]
+    fn visual_line_mode_deletes_the_whole_line() {
+        let mut editor = Editor::new();
+        type_lines(&mut editor, &["one", "two", "three"]);
+        editor.handle(&key(KeyCode::Char('g')));
+        editor.handle(&key(KeyCode::Char('g')));
+        editor.handle(&key(KeyCode::Char('V')));
+        editor.handle(&key(KeyCode::Char('d')));
+        assert_eq!(editor.mode(), Mode::Normal);
+        assert_eq!(editor.text(), "two\nthree");
+    }
+
+    #[test]
+    fn visual_change_cuts_and_enters_insert_mode() {
+        let mut editor = Editor::new();
+        type_text(&mut editor, "hello world");
+        editor.handle(&key(KeyCode::Char('0')));
+        editor.handle(&key(KeyCode::Char('v')));
+        editor.handle(&key(KeyCode::Char('e')));
+        editor.handle(&key(KeyCode::Char('c')));
+        assert_eq!(editor.mode(), Mode::Insert);
+        assert_eq!(editor.text(), " world");
+    }
+
+    #[test]
+    fn esc_cancels_the_visual_selection_without_editing() {
+        let mut editor = Editor::new();
+        type_text(&mut editor, "hello");
+        editor.handle(&key(KeyCode::Char('0')));
+        editor.handle(&key(KeyCode::Char('v')));
+        editor.handle(&key(KeyCode::Char('e')));
+        editor.handle(&key(KeyCode::Escape));
+        assert_eq!(editor.mode(), Mode::Normal);
+        assert_eq!(editor.text(), "hello");
+    }
+
+    /// vim 的选区含光标所在字符：`v w w d` 会连第三个词的首字母一起删掉。
+    #[test]
+    fn visual_selection_is_inclusive_at_the_cursor() {
+        let mut editor = Editor::new();
+        type_text(&mut editor, "one two three");
+        editor.handle(&key(KeyCode::Char('0')));
+        editor.handle(&key(KeyCode::Char('v')));
+        editor.handle(&key(KeyCode::Char('w')));
+        editor.handle(&key(KeyCode::Char('w')));
+        editor.handle(&key(KeyCode::Char('d')));
+        assert_eq!(editor.mode(), Mode::Normal);
+        assert_eq!(editor.text(), "hree");
+    }
+
+    #[test]
+    fn replace_once_replaces_one_character_and_returns_to_normal() {
+        let mut editor = Editor::new();
+        type_text(&mut editor, "abc");
+        editor.handle(&key(KeyCode::Char('0')));
+        editor.handle(&key(KeyCode::Char('r')));
+        assert_eq!(editor.mode(), Mode::Replace(true));
+        editor.handle(&key(KeyCode::Char('X')));
+        assert_eq!(editor.mode(), Mode::Normal);
+        assert_eq!(editor.text(), "Xbc");
+    }
+
+    #[test]
+    fn replace_overtype_replaces_until_esc() {
+        let mut editor = Editor::new();
+        type_text(&mut editor, "abc");
+        editor.handle(&key(KeyCode::Char('0')));
+        editor.handle(&key(KeyCode::Char('R')));
+        assert_eq!(editor.mode(), Mode::Replace(false));
+        editor.handle(&key(KeyCode::Char('X')));
+        assert_eq!(editor.text(), "Xbc", "覆盖输入期间停留在替换模式");
+        editor.handle(&key(KeyCode::Char('Y')));
+        editor.handle(&key(KeyCode::Escape));
+        assert_eq!(editor.mode(), Mode::Normal);
+        assert_eq!(editor.text(), "XYc");
+    }
+
+    #[test]
+    fn replace_at_an_empty_line_appends() {
+        let mut editor = Editor::new();
+        type_lines(&mut editor, &["ab", ""]);
+        editor.handle(&key(KeyCode::Char('G')));
+        editor.handle(&key(KeyCode::Char('R')));
+        editor.handle(&key(KeyCode::Char('Z')));
+        editor.handle(&key(KeyCode::Escape));
+        assert_eq!(editor.text(), "ab\nZ");
+    }
+
+    #[test]
+    fn replace_once_on_an_empty_line_does_nothing() {
+        let mut editor = Editor::new();
+        type_lines(&mut editor, &["ab", ""]);
+        editor.handle(&key(KeyCode::Char('G')));
+        editor.handle(&key(KeyCode::Char('r')));
+        editor.handle(&key(KeyCode::Char('Z')));
+        assert_eq!(editor.mode(), Mode::Normal, "r 只替换一次");
+        assert_eq!(editor.text(), "ab\n", "空行上没有字符可替换");
+    }
+
+    #[test]
+    fn append_works_on_multibyte_lines() {
+        let mut editor = Editor::new();
+        type_text(&mut editor, "你好");
+        editor.handle(&key(KeyCode::Char('0')));
+        editor.handle(&key(KeyCode::Char('a')));
+        editor.handle(&key(KeyCode::Char('X')));
+        editor.handle(&key(KeyCode::Escape));
+        // 列是字符下标：a 之后应插在第一个字符之后，而不是跳到行尾。
+        assert_eq!(editor.text(), "你X好");
+    }
+
     #[test]
     fn mode_label_is_shown_in_the_block_title() {
         let mut editor = Editor::new();
@@ -515,5 +794,16 @@ mod tests {
         editor.handle(&key(KeyCode::Escape));
         editor.handle(&key(KeyCode::Char('d')));
         assert_eq!(editor.mode().label(), "OPERATOR(d)");
+        editor.handle(&key(KeyCode::Escape));
+        editor.handle(&key(KeyCode::Char('v')));
+        assert_eq!(editor.mode().label(), "VISUAL");
+        editor.handle(&key(KeyCode::Escape));
+        editor.handle(&key(KeyCode::Char('r')));
+        assert_eq!(editor.mode().label(), "REPLACE(once)");
+        editor.handle(&key(KeyCode::Char('z')));
+        editor.handle(&key(KeyCode::Char('R')));
+        assert_eq!(editor.mode().label(), "REPLACE");
+        editor.handle(&key(KeyCode::Escape));
+        assert_eq!(editor.mode().label(), "NORMAL");
     }
 }
