@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v0.3（开放问题已确认；第 9 节第 2 步已落地）                   |
+| 状态     | 草案 v0.4（开放问题已确认；第 9 节第 2、3 步已落地）                |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -229,7 +229,8 @@ pi-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（�
 对齐测试的两个现成抓手：
 
 - pi 侧有 faux provider（`packages/ai/src/providers/faux.ts`）与 `coding-agent/test/suite/harness.ts`，可用来生成确定的 provider 流事件序列做金标准。
-- Rust 侧可用 `tower-test` 的 mock 验证中间件顺序、`poll_ready` 与背压行为。
+- Rust 侧已有对应骨架：`crates/pi-ai/tests/support`（确定性 faux provider，对照 pi faux 的 `start → *_start/*_delta/*_end → done` 与 setup-failure 单 `error`）与 `crates/pi-ai/tests/conformance.rs`（固定金标准序列 + 事件协议不变量）。
+- 后续中间件顺序、`poll_ready` 与背压行为可用 `tower-test` 的 mock 补充验证。
 
 ---
 
@@ -251,5 +252,5 @@ pi-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（�
 
 1. ~~确认第 8 节的开放问题（至少 Q1、Q2、Q3）。~~ 已完成，结论见第 8 节"决策"列。
 2. ~~落地第一个移植单元：`ai::StreamFn → Service`，先写类型与 trait 边界（含 `PiError`、`StreamRequest`、`AssistantEventStream`）。~~ 已完成，落在 `crates/pi-ai`：`PiError`/`BoxError`、`StreamRequest`/`StreamOptions`/`SimpleStreamOptions`/`TranscriptContext`、`AssistantEventStream`（`futures_core::Stream`）、`AssistantMessageEvent`，以及 `StreamService`/`BoxStreamService`/`StreamFn` 边界与 `boxed_stream` 装箱助手。
-3. 建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。
+3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/pi-ai/tests/conformance.rs` + `crates/pi-ai/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
 4. 再按 `agent` → `tools` → `tui` → `cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
