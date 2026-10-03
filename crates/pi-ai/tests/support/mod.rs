@@ -6,7 +6,6 @@
 //! conformance 固定它，使同一份脚本产出唯一确定的序列。
 
 use std::{
-
     collections::VecDeque,
     future::Ready,
     pin::pin,

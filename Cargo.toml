@@ -10,6 +10,8 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 # tower 骨架：feature 集与 design.md 第 2 节 / D9 保持一致
 tower = { version = "0.5.3", features = ["util", "timeout", "retry", "limit", "load-shed", "steer", "filter", "buffer"] }
+# 运行时：design.md D6 选定 tokio；事件订阅用其 sync 原语
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 futures-core = "0.3"
 futures-util = "0.3"
 tokio-util = { version = "0.7", default-features = false }

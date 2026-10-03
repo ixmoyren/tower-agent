@@ -1,0 +1,21 @@
+[package]
+name = "pi-agent"
+description = "Rust port of pi's `agent` package: agent runtime, tool services, and events."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pi-ai = { path = "../pi-ai" }
+tower = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json.workspace = true

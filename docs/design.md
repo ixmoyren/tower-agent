@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v0.4（开放问题已确认；第 9 节第 2、3 步已落地）                |
+| 状态     | 草案 v0.5（开放问题已确认；第 9 节第 2、3 步与第 4 步的 `agent` 阶段已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -193,7 +193,13 @@ pi-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（�
 
 阶段 1 落成 `pi-protocol` / `pi-ai` / `pi-agent` / `pi-tui` / `pi-cli` 五个 crate，拆分依据是上面的模块边界而不是文件数量；公共 `PiError` / `BoxError` / Request/Response 类型放在 `pi-ai`，避免额外引入第 6 个 crate。后续如需可再细分，但不改变该依赖提取策略。
 
-当前进度：workspace 骨架已建立，`pi-ai`（第一个移植单元）与 `pi-cli`（原 CLI 入口迁移）已落地，其余三个 crate 在后续步骤中加入。
+当前进度：workspace 骨架已建立，`pi-ai`（第一个移植单元）、`pi-agent`（第 9 节第 4 步的 `agent` 阶段）与 `pi-cli`（原 CLI 入口迁移）已落地，`pi-protocol` / `pi-tui` 与内置工具在后续步骤中加入。
+
+`pi-agent` 已落地的内容：工具元数据 + 工具 Service（`AgentTool`、`ToolRouter`）、`AgentEvent` / `AgentMessage` 事件类型、agent 编排循环（`agent_loop::run_agent_loop` / `run_agent_loop_continue`）、顺序与并行工具执行、`beforeToolCall` / `afterToolCall` / `finishTurn` 钩子、steer / follow-up 队列，以及带逐订阅者 mpsc 背压的有状态 `Agent`。
+
+本轮相对设计的一处实现说明：`beforeToolCall` / `afterToolCall` 目前是 loop config 上的回调（与 pi 形状一致），而不是包裹单个工具 Service 的 tower Layer——它们需要 assistant 消息与 agent 上下文，且 `block` 要产出 `isError: true` 的工具结果而非 Service 错误。围绕工具 Service 的通用中间件（超时、限流、遥测）仍按第 4.3 节以 Layer 形式叠加。
+
+尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
 ---
 
@@ -254,3 +260,7 @@ pi-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（�
 2. ~~落地第一个移植单元：`ai::StreamFn → Service`，先写类型与 trait 边界（含 `PiError`、`StreamRequest`、`AssistantEventStream`）。~~ 已完成，落在 `crates/pi-ai`：`PiError`/`BoxError`、`StreamRequest`/`StreamOptions`/`SimpleStreamOptions`/`TranscriptContext`、`AssistantEventStream`（`futures_core::Stream`）、`AssistantMessageEvent`，以及 `StreamService`/`BoxStreamService`/`StreamFn` 边界与 `boxed_stream` 装箱助手。
 3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/pi-ai/tests/conformance.rs` + `crates/pi-ai/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
 4. 再按 `agent` → `tools` → `tui` → `cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
+   1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/pi-agent`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
+   2. `tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。
+   3. `tui`：`pi-tui` 差分渲染，订阅 `AgentEvent` 流。
+   4. `cli`：`pi-cli` 会话入口与扩展。
