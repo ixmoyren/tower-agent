@@ -7,9 +7,9 @@ use std::{
     task::{Context, Poll},
 };
 
+use ai::{ContentBlock, JsonObject, JsonValue, TextContent, Tool, ToolCall, Usage};
 use futures_core::Stream;
 use futures_util::future::BoxFuture;
-use pi_ai::{ContentBlock, JsonObject, JsonValue, TextContent, Tool, ToolCall, Usage};
 use tokio_util::sync::CancellationToken;
 use tower::{Service, ServiceExt, util::BoxCloneService};
 

@@ -149,9 +149,9 @@ mod tests {
         task::{Context, Poll},
     };
 
+    use ai::{ContentBlock, TextContent, ToolCall};
     use futures_core::Stream;
     use futures_util::{FutureExt as _, stream, task::noop_waker};
-    use pi_ai::{ContentBlock, TextContent, ToolCall};
     use tower::Service;
 
     use super::ToolRouter;

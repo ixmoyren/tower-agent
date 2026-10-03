@@ -1,4 +1,4 @@
-//! `pi-ai` 一致性（conformance）测试的测试辅助。
+//! `ai` 一致性（conformance）测试的测试辅助。
 //!
 //! 对齐 pi faux provider（`packages/ai/src/providers/faux.ts`）的确定性部分：
 //! 脚本化的 assistant 消息按 `start → *_start/*_delta/*_end → done` 回放，
@@ -12,14 +12,14 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_core::Stream;
-use futures_util::{FutureExt as _, stream, task::noop_waker};
-use pi_ai::{
+use ai::{
     AssistantEventStream, AssistantMessage, AssistantMessageEvent, ContentBlock, DoneReason,
     ErrorReason, JsonObject, Message, Model, PiError, SimpleStreamOptions, StopReason,
     StreamRequest, TextContent, ThinkingContent, ToolCall, TranscriptContext, Usage, UserContent,
     UserMessage,
 };
+use futures_core::Stream;
+use futures_util::{FutureExt as _, stream, task::noop_waker};
 use tokio_util::sync::CancellationToken;
 use tower::Service;
 

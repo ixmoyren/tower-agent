@@ -8,7 +8,7 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use pi_ai::{
+use ai::{
     AssistantMessageEvent, JsonObject, SimpleStreamOptions, StopReason, StreamOptions, ToolCall,
 };
 use support::{

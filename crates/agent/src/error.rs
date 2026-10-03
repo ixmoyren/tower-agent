@@ -20,7 +20,7 @@ pub enum AgentError {
 
     /// 建立 provider 流失败（凭据、传输、超时等）。
     #[error(transparent)]
-    Provider(#[from] pi_ai::PiError),
+    Provider(#[from] ai::PiError),
 
     /// 兜底变体，用于不值得单列的错误。
     #[error(transparent)]

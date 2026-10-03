@@ -4,7 +4,7 @@ mod support;
 
 use std::sync::Arc;
 
-use pi_agent::{
+use agent::{
     AgentEvent, AgentMessage, AgentTool, AgentToolResult, ToolExecutionMode,
     agent_loop::{
         AgentContext, BeforeToolCallResult, LoopConfig, TurnDecision, default_convert_to_llm,
@@ -20,24 +20,24 @@ use support::{
     error_script, test_model, text, text_script, tool_call, user,
 };
 
-fn config(model: &pi_ai::Model) -> LoopConfig {
+fn config(model: &ai::Model) -> LoopConfig {
     LoopConfig::new(model.clone(), Arc::new(default_convert_to_llm))
 }
 
 fn assistant_with(
-    model: &pi_ai::Model,
-    content: Vec<pi_ai::ContentBlock>,
-    stop: pi_ai::StopReason,
-) -> Vec<pi_ai::AssistantMessageEvent> {
+    model: &ai::Model,
+    content: Vec<ai::ContentBlock>,
+    stop: ai::StopReason,
+) -> Vec<ai::AssistantMessageEvent> {
     vec![
-        pi_ai::AssistantMessageEvent::Start {
-            partial: support::assistant(model, Vec::new(), pi_ai::StopReason::Pending),
+        ai::AssistantMessageEvent::Start {
+            partial: support::assistant(model, Vec::new(), ai::StopReason::Pending),
         },
-        pi_ai::AssistantMessageEvent::Done {
+        ai::AssistantMessageEvent::Done {
             reason: match stop {
-                pi_ai::StopReason::ToolUse => pi_ai::DoneReason::ToolUse,
-                pi_ai::StopReason::Length => pi_ai::DoneReason::Length,
-                _ => pi_ai::DoneReason::Stop,
+                ai::StopReason::ToolUse => ai::DoneReason::ToolUse,
+                ai::StopReason::Length => ai::DoneReason::Length,
+                _ => ai::DoneReason::Stop,
             },
             message: support::assistant(model, content, stop),
         },
@@ -83,7 +83,7 @@ async fn text_turn_matches_the_pi_event_lifecycle() {
     assert_eq!(new_messages.len(), 2, "prompt plus assistant message");
     assert!(matches!(
         new_messages.last(),
-        Some(AgentMessage::Message(pi_ai::Message::Assistant(_)))
+        Some(AgentMessage::Message(ai::Message::Assistant(_)))
     ));
 }
 
@@ -92,7 +92,7 @@ async fn unknown_tool_produces_an_error_result_and_continues() {
     let model = test_model();
     let call = tool_call("call-1", "ghost", args(json!({})));
     let scripts = vec![
-        assistant_with(&model, vec![call], pi_ai::StopReason::ToolUse),
+        assistant_with(&model, vec![call], ai::StopReason::ToolUse),
         text_script(&model, "recovered"),
     ];
     let stream = boxed_stream(ScriptedStreamService::new(scripts));
@@ -128,7 +128,7 @@ async fn unknown_tool_produces_an_error_result_and_continues() {
     assert!(ends[0].1, "unknown tool must be an error result");
     assert_eq!(
         match ends[0].2.content.first() {
-            Some(pi_ai::ContentBlock::Text(text)) => text.text.clone(),
+            Some(ai::ContentBlock::Text(text)) => text.text.clone(),
             _ => String::new(),
         },
         "Tool ghost not found"
@@ -143,7 +143,7 @@ async fn parallel_tools_end_in_completion_order_and_persist_in_source_order() {
     let call_a = tool_call("a", "alpha", args(json!({})));
     let call_b = tool_call("b", "beta", args(json!({})));
     let scripts = vec![
-        assistant_with(&model, vec![call_a, call_b], pi_ai::StopReason::ToolUse),
+        assistant_with(&model, vec![call_a, call_b], ai::StopReason::ToolUse),
         text_script(&model, "done"),
     ];
     let stream = boxed_stream(ScriptedStreamService::new(scripts));
@@ -221,7 +221,7 @@ async fn length_truncated_messages_fail_every_tool_call() {
     let model = test_model();
     let call = tool_call("call-1", "alpha", args(json!({})));
     let scripts = vec![
-        assistant_with(&model, vec![call], pi_ai::StopReason::Length),
+        assistant_with(&model, vec![call], ai::StopReason::Length),
         text_script(&model, "done"),
     ];
     let stream = boxed_stream(ScriptedStreamService::new(scripts));
@@ -259,7 +259,7 @@ async fn length_truncated_messages_fail_every_tool_call() {
         .expect("tool execution end");
     assert!(result.1);
     let text = match result.0.content.first() {
-        Some(pi_ai::ContentBlock::Text(text)) => text.text.clone(),
+        Some(ai::ContentBlock::Text(text)) => text.text.clone(),
         _ => String::new(),
     };
     assert!(text.contains("output token limit"), "got: {text}");
@@ -272,7 +272,7 @@ async fn terminate_ends_the_batch_after_one_request() {
     let stream = boxed_stream(ScriptedStreamService::new(vec![assistant_with(
         &model,
         vec![call],
-        pi_ai::StopReason::ToolUse,
+        ai::StopReason::ToolUse,
     )]));
     let sink = TestSink::new();
     let signal = CancellationToken::new();
@@ -312,7 +312,7 @@ async fn before_tool_call_can_block_a_call() {
     let model = test_model();
     let call = tool_call("call-1", "alpha", args(json!({})));
     let scripts = vec![
-        assistant_with(&model, vec![call], pi_ai::StopReason::ToolUse),
+        assistant_with(&model, vec![call], ai::StopReason::ToolUse),
         text_script(&model, "done"),
     ];
     let stream = boxed_stream(ScriptedStreamService::new(scripts));
@@ -359,7 +359,7 @@ async fn before_tool_call_can_block_a_call() {
     assert!(end.1);
     assert_eq!(
         match end.0.content.first() {
-            Some(pi_ai::ContentBlock::Text(text)) => text.text.clone(),
+            Some(ai::ContentBlock::Text(text)) => text.text.clone(),
             _ => String::new(),
         },
         "denied"
@@ -427,8 +427,8 @@ async fn error_stream_stops_the_run_and_reports_the_message() {
     };
     let assistant = messages.last().expect("assistant message");
     match assistant {
-        AgentMessage::Message(pi_ai::Message::Assistant(assistant)) => {
-            assert_eq!(assistant.stop_reason, pi_ai::StopReason::Error);
+        AgentMessage::Message(ai::Message::Assistant(assistant)) => {
+            assert_eq!(assistant.stop_reason, ai::StopReason::Error);
             assert_eq!(assistant.error_message.as_deref(), Some("boom"));
         }
         other => panic!("unexpected message: {other:?}"),
@@ -441,7 +441,7 @@ async fn sequential_mode_runs_one_tool_at_a_time() {
     let call_a = tool_call("a", "alpha", args(json!({})));
     let call_b = tool_call("b", "beta", args(json!({})));
     let scripts = vec![
-        assistant_with(&model, vec![call_a, call_b], pi_ai::StopReason::ToolUse),
+        assistant_with(&model, vec![call_a, call_b], ai::StopReason::ToolUse),
         text_script(&model, "done"),
     ];
     let stream = boxed_stream(ScriptedStreamService::new(scripts));

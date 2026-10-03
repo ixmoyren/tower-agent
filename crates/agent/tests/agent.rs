@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use pi_agent::{Agent, AgentEvent, AgentInitialState, AgentOptions, AgentState, QueueMode};
+use agent::{Agent, AgentEvent, AgentInitialState, AgentOptions, AgentState, QueueMode};
 use tokio::sync::Semaphore;
 
 use support::{ScriptedStreamService, boxed_stream, test_model, text_script, user};
@@ -236,7 +236,7 @@ async fn state_snapshot_tracks_pending_tool_calls() {
     let state = AgentState {
         system_prompt: String::new(),
         model: test_model(),
-        thinking_level: pi_ai::ModelThinkingLevel::Off,
+        thinking_level: ai::ModelThinkingLevel::Off,
         tools: Vec::new(),
         messages: Vec::new(),
         is_streaming: false,

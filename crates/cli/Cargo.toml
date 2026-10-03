@@ -1,5 +1,5 @@
 [package]
-name = "pi-cli"
+name = "cli"
 description = "tower-pi-agent CLI entry point (pi `packages/coding-agent`)."
 version.workspace = true
 edition.workspace = true

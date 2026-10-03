@@ -1,6 +1,6 @@
 [package]
-name = "pi-ai"
-description = "Rust port of pi's `ai` package: provider request/stream boundary built on tower."
+name = "agent"
+description = "Rust port of pi's `agent` package: agent runtime, tool services, and events."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,11 +9,13 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+ai = { path = "../ai" }
 tower = { workspace = true }
 futures-core = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }
 tokio-util = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-futures-util = { workspace = true }
+serde_json.workspace = true

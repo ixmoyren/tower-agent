@@ -4,7 +4,7 @@
 //! 它会依次发起 provider 请求、执行工具、注入 steer/follow-up 消息，并把每条
 //! [`AgentEvent`] 交给 [`EventSink`]。事件是 push 的、多订阅者的，不进通用 tower
 //! 中间件（design.md D1/D3）；一次 provider 调用的请求边界仍然是
-//! [`pi_ai::StreamService`]。
+//! [`ai::StreamService`]。
 //!
 //! 行为对齐清单（design.md 第 7 节）中由本模块负责的部分：
 //!
@@ -18,14 +18,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use futures_util::{
-    StreamExt,
-    future::{BoxFuture, join_all},
-};
-use pi_ai::{
+use ai::{
     AssistantMessage, AssistantMessageEvent, BoxStreamService, ContentBlock, JsonObject, JsonValue,
     Message, Model, ModelThinkingLevel, SimpleStreamOptions, StopReason, StreamRequest,
     SystemMessage, Tool, ToolCall, ToolResultMessage, TranscriptContext, Usage,
+};
+use futures_util::{
+    StreamExt,
+    future::{BoxFuture, join_all},
 };
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
@@ -1135,7 +1135,7 @@ fn error_assistant_message(model: &Model, text: &str, stop_reason: StopReason) -
         content: if text.is_empty() {
             Vec::new()
         } else {
-            vec![ContentBlock::Text(pi_ai::TextContent {
+            vec![ContentBlock::Text(ai::TextContent {
                 text: text.into(),
                 text_signature: None,
             })]
@@ -1181,7 +1181,7 @@ pub fn create_initial_system_message(
         content: system_prompt
             .filter(|prompt| !prompt.is_empty())
             .map(|prompt| {
-                vec![ContentBlock::Text(pi_ai::TextContent {
+                vec![ContentBlock::Text(ai::TextContent {
                     text: prompt.into(),
                     text_signature: None,
                 })]
@@ -1232,7 +1232,7 @@ pub fn current_system_message(messages: &[AgentMessage]) -> Option<SystemMessage
         content: if joined.is_empty() {
             Vec::new()
         } else {
-            vec![ContentBlock::Text(pi_ai::TextContent {
+            vec![ContentBlock::Text(ai::TextContent {
                 text: joined,
                 text_signature: None,
             })]
@@ -1287,7 +1287,7 @@ const NO_CHANGES: ToolStateChanges = ToolStateChanges {
 #[derive(Debug, Clone, Default)]
 struct ToolStateChanges {
     tools_added: Vec<Tool>,
-    tools_removed: Vec<pi_ai::ToolReference>,
+    tools_removed: Vec<ai::ToolReference>,
 }
 
 /// 把可执行工具集相对 transcript 的差异声明成 system 消息（pi `declareToolChanges`）。
@@ -1423,7 +1423,7 @@ fn tool_state_changes(previous: &[Tool], current: &[Tool]) -> ToolStateChanges {
                 .find(|candidate| candidate.name == tool.name)
                 .is_none_or(|existing| !declarations_equal(tool, existing))
         })
-        .map(|tool| pi_ai::ToolReference {
+        .map(|tool| ai::ToolReference {
             name: tool.name.clone(),
         })
         .collect();

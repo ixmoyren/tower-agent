@@ -1,4 +1,4 @@
-//! `pi-agent` — Rust 对应 pi 的 `packages/agent`（`pi-agent-core`）。
+//! `agent` — Rust 对应 pi 的 `packages/agent`（`pi-agent-core`）。
 //!
 //! 当前落地：工具执行边界（`AgentTool.execute → Service`，按 Q3 建模为
 //! `Stream<AgentToolResult>`）、按名分发的工具路由、`AgentEvent` / `AgentMessage`

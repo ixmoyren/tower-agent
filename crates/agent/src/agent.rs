@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use pi_ai::{
+use ai::{
     BoxStreamService, ContentBlock, Message, Model, ModelThinkingLevel, SimpleStreamOptions,
     StopReason, TextContent, Usage, UserContent, UserMessage,
 };
@@ -669,8 +669,8 @@ fn lock(core: &Arc<Mutex<Core>>) -> MutexGuard<'_, Core> {
     core.lock().expect("agent core mutex poisoned")
 }
 
-fn failure_message(model: &Model, text: &str, stop_reason: StopReason) -> pi_ai::AssistantMessage {
-    pi_ai::AssistantMessage {
+fn failure_message(model: &Model, text: &str, stop_reason: StopReason) -> ai::AssistantMessage {
+    ai::AssistantMessage {
         content: vec![ContentBlock::Text(TextContent {
             text: String::new(),
             text_signature: None,

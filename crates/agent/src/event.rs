@@ -1,6 +1,6 @@
 //! agent 事件协议与 agent 消息（pi `AgentEvent` / `AgentMessage`）。
 
-use pi_ai::{AssistantMessageEvent, JsonValue, Message, ToolResultMessage};
+use ai::{AssistantMessageEvent, JsonValue, Message, ToolResultMessage};
 
 use crate::AgentToolResult;
 
@@ -151,7 +151,7 @@ impl AgentEvent {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pi_ai::{
+    use ai::{
         AssistantMessage, AssistantMessageEvent, Message, StopReason, ToolCall, ToolResultMessage,
         Usage, UserContent, UserMessage,
     };
@@ -216,7 +216,7 @@ mod tests {
             Some("assistant")
         );
         assert_eq!(
-            AgentMessage::message(Message::System(pi_ai::SystemMessage {
+            AgentMessage::message(Message::System(ai::SystemMessage {
                 content: Vec::new(),
                 sections: BTreeMap::new(),
                 tools_added: Vec::new(),

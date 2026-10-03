@@ -1,4 +1,4 @@
-//! pi-agent 集成测试的共享脚本化替身。
+//! agent 集成测试的共享脚本化替身。
 //!
 //! 这些替身对应 pi 侧的 faux provider 与 harness：provider 流是固定的金标准事件
 //! 序列，工具是确定性结果 + 可控闸门，便于断言事件顺序与并发语义。
@@ -12,17 +12,17 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_util::{future::BoxFuture, stream};
-use pi_agent::{
+use agent::{
     AgentError, AgentEvent, AgentMessage, AgentTool, AgentToolResult, ToolCallRequest,
     ToolResultStream,
     agent_loop::{AgentContext, BoxFut, EventSink},
 };
-use pi_ai::{
+use ai::{
     AssistantEventStream, AssistantMessage, AssistantMessageEvent, BoxStreamService, ContentBlock,
     DoneReason, JsonObject, JsonValue, Message, Model, PiError, StopReason, StreamRequest,
     TextContent, ToolCall, ToolResultMessage, Usage,
 };
+use futures_util::{future::BoxFuture, stream};
 use tokio::sync::Semaphore;
 use tower::Service;
 
@@ -83,8 +83,8 @@ pub fn tool_call(id: &str, name: &str, arguments: JsonObject) -> ContentBlock {
 
 /// 用户消息。
 pub fn user(text_value: impl Into<String>) -> AgentMessage {
-    AgentMessage::Message(Message::User(pi_ai::UserMessage {
-        content: pi_ai::UserContent::Text(text_value.into()),
+    AgentMessage::Message(Message::User(ai::UserMessage {
+        content: ai::UserContent::Text(text_value.into()),
         timestamp: 0,
     }))
 }
@@ -124,7 +124,7 @@ pub fn error_script(model: &Model, message: &str) -> Vec<AssistantMessageEvent> 
     let mut error = assistant(model, Vec::new(), StopReason::Error);
     error.error_message = Some(message.into());
     vec![AssistantMessageEvent::Error {
-        reason: pi_ai::ErrorReason::Error,
+        reason: ai::ErrorReason::Error,
         error,
     }]
 }

@@ -1,4 +1,4 @@
-//! `pi-ai` — Rust 对应 pi 的 `packages/ai`。
+//! `ai` — Rust 对应 pi 的 `packages/ai`。
 //!
 //! 本 crate 当前只落地第一个移植单元：`StreamFn → Service` 的类型与 trait 边界。
 //! 行为仍以 pi 参考实现为准。
