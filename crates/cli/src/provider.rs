@@ -74,6 +74,21 @@ impl ProviderKind {
         }
     }
 
+    /// `--provider` 的规范取值。
+    ///
+    /// 一个 provider 标识可能对应多条 API（`openai` 与 `openai-responses`），
+    /// 所以错误提示按取值而不是按 provider 标识来列。
+    #[must_use]
+    pub fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Faux => "faux",
+            Self::Anthropic => "anthropic",
+            Self::OpenAi => "openai",
+            Self::OpenAiResponses => "openai-responses",
+            Self::Google => "google",
+        }
+    }
+
     /// API 标识（pi `Api`）。
     #[must_use]
     pub fn api(self) -> &'static str {
@@ -133,7 +148,10 @@ impl std::fmt::Display for ProviderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unknown(value) => {
-                let names: Vec<&str> = ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
+                let names: Vec<&str> = ProviderKind::ALL
+                    .iter()
+                    .map(|kind| kind.canonical_name())
+                    .collect();
                 write!(f, "未知 provider：{value}（可用：{}）", names.join(" / "))
             }
             Self::MissingApiKey { provider, env } => write!(

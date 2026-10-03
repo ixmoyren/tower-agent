@@ -102,11 +102,12 @@ fn print_mode_reads_the_prompt_from_stdin_when_no_positional_argument_is_given()
 }
 
 #[test]
-fn unknown_option_fails_with_usage() {
+fn unknown_option_is_rejected_by_clap() {
     let output = cli().arg("--nope").output().expect("run cli");
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("未知选项：--nope"));
-    assert!(stderr(&output).contains("用法"));
+    let text = stderr(&output);
+    assert!(text.contains("--nope"), "got:\n{text}");
+    assert!(text.contains("Usage"), "got:\n{text}");
 }
 
 #[test]

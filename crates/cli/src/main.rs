@@ -7,7 +7,7 @@
 use std::{io::Read as _, path::PathBuf, process::ExitCode};
 
 use cli::{
-    args::{USAGE, parse},
+    args::parse,
     provider::{self, ProviderKind, ProviderStackOptions},
     session::{Session, run_print, run_tui},
     tools,
@@ -17,19 +17,18 @@ fn main() -> ExitCode {
     let args = match parse(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(error) => {
-            eprintln!("参数错误：{error}\n\n{USAGE}");
-            return ExitCode::FAILURE;
+            // clap 已经格式化好：`--help` / `--version` 走 stdout 且视为成功，
+            // 参数错误走 stderr 且视为失败。
+            let code = if error.use_stderr() {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            };
+            let _ = error.print();
+            return code;
         }
     };
 
-    if args.help {
-        println!("{USAGE}");
-        return ExitCode::SUCCESS;
-    }
-    if args.version {
-        println!("cli {}", env!("CARGO_PKG_VERSION"));
-        return ExitCode::SUCCESS;
-    }
     if args.list_tools {
         print_tools();
         return ExitCode::SUCCESS;
@@ -39,10 +38,10 @@ fn main() -> ExitCode {
         .cwd
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let prompt = match args.prompt.clone().or_else(read_stdin_prompt) {
+    let prompt = match args.prompt_text().or_else(read_stdin_prompt) {
         Some(prompt) => prompt,
         None => {
-            eprintln!("没有提示词。传入提示词，或通过 stdin 提供。\n\n{USAGE}");
+            eprintln!("没有提示词。传入提示词，或通过 stdin 提供；运行 `cli --help` 查看用法。");
             return ExitCode::FAILURE;
         }
     };

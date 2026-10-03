@@ -12,6 +12,7 @@ workspace = true
 agent = { path = "../agent" }
 ai = { path = "../ai" }
 base64 = { workspace = true }
+clap = { workspace = true }
 dirs = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
