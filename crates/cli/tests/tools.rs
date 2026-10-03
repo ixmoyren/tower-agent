@@ -434,6 +434,42 @@ async fn bash_reports_a_timeout_as_an_error_result() {
     );
 }
 
+/// 超时/取消时要杀掉**整个进程组**，而不只是直接子进程：
+/// 这里让子进程 fork 一个后台写文件的孙进程，只有进程组被杀掉它才会停。
+#[tokio::test]
+async fn bash_timeout_kills_the_whole_process_tree() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let ticker = dir.path().join("ticker.txt");
+    let bash = cli::tools::create_bash_tool(dir.path());
+
+    let command = format!(
+        "bash -c 'while true; do echo tick >> {}; sleep 0.05; done' & sleep 30",
+        ticker.display()
+    );
+    let results = run_tool(
+        &bash,
+        serde_json::json!({ "command": command, "timeout": 0.5 }),
+    )
+    .await;
+    let last = results.last().expect("terminal result");
+    assert!(last.is_error, "timeout is an error result");
+    assert!(first_text(last).contains("Command timed out"));
+
+    // 给后台进程一点时间暴露问题，再确认它已停止写入。
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let first = std::fs::read_to_string(&ticker).unwrap_or_default();
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let second = std::fs::read_to_string(&ticker).unwrap_or_default();
+    assert_eq!(
+        first, second,
+        "background writer must stop once the process group is killed"
+    );
+    assert!(
+        !first.is_empty(),
+        "the background writer did run before the kill"
+    );
+}
+
 #[tokio::test]
 async fn bash_truncates_large_output_and_reports_a_temp_file() {
     let dir = tempfile::tempdir().expect("temp dir");

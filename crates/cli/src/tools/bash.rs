@@ -397,11 +397,11 @@ fn parse_bash_args(args: &JsonObject) -> Result<(String, Option<f64>), String> {
 
 #[cfg(unix)]
 fn kill_process_group(pgid: i32) {
-    use nix::{
-        sys::signal::{Signal, killpg},
-        unistd::Pid,
-    };
-    let _ = killpg(Pid::from_raw(pgid), Signal::SIGKILL);
+    use rustix::process::{Pid, Signal, kill_process_group};
+    // `kill(-pgid, SIGKILL)`：杀掉整棵进程树，而不只是直接子进程。
+    if let Some(pid) = Pid::from_raw(pgid) {
+        let _ = kill_process_group(pid, Signal::KILL);
+    }
 }
 
 #[cfg(not(unix))]
