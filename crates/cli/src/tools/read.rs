@@ -168,8 +168,9 @@ impl ReadTool {
 
         let mut result = text_result(output_text);
         if truncation.truncated {
-            result.details =
-                Some(serde_json::json!({ "truncation": truncation_json(&truncation) }));
+            result.details = Some(
+                serde_json::json!({ "truncation": super::support::truncation_json(&truncation) }),
+            );
         }
         result
     }
@@ -301,24 +302,6 @@ fn is_animated_png(buffer: &[u8]) -> bool {
 
 fn is_bmp(buffer: &[u8]) -> bool {
     buffer.len() >= 26 && read_u32_le(buffer, 2).is_some_and(|size| size as usize >= 26)
-}
-
-fn truncation_json(truncation: &super::truncate::TruncationResult) -> ai::JsonValue {
-    serde_json::json!({
-        "truncated": truncation.truncated,
-        "truncatedBy": truncation.truncated_by.map(|by| match by {
-            super::truncate::TruncatedBy::Lines => "lines",
-            super::truncate::TruncatedBy::Bytes => "bytes",
-        }),
-        "totalLines": truncation.total_lines,
-        "totalBytes": truncation.total_bytes,
-        "outputLines": truncation.output_lines,
-        "outputBytes": truncation.output_bytes,
-        "lastLinePartial": truncation.last_line_partial,
-        "firstLineExceedsLimit": truncation.first_line_exceeds_limit,
-        "maxLines": truncation.max_lines,
-        "maxBytes": truncation.max_bytes,
-    })
 }
 
 /// 构造 `read` 工具。

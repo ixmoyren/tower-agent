@@ -13,7 +13,10 @@ base64 = "0.23"
 dirs = "7"
 futures-core = "0.3"
 futures-util = "0.3"
+globset = "0.4"
+ignore = "0.4"
 nix = { version = "0.31", default-features = false, features = ["signal"] }
+regex = "1"
 similar = "3"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "sync", "macros", "time", "process", "io-util", "fs"] }

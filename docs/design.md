@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v0.6（开放问题已确认；第 9 节第 2、3 步、第 4 步的 `agent` 阶段与 `tools` 阶段主体已落地） |
+| 状态     | 草案 v0.7（开放问题已确认；第 9 节第 2、3 步与第 4 步的 `agent`、`tools` 阶段已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -201,7 +201,15 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 
 尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
-`cli` 已落地的内置工具（`crates/cli/src/tools`）：`read` / `write` / `edit` / `bash`，以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。尚未移植的工具：`ls` / `find` / `grep` / `powershell`。与本轮相关的实现差异：`read` 不做图片自动缩放；`bash` 不注入 `PI_*` 会话环境变量、进程组杀死只在类 Unix 平台启用、输出累加器是 pi 的有界版本的简化版。
+`cli` 已落地的内置工具（`crates/cli/src/tools`）：pi `allToolNames` 全集 `read` / `bash` / `powershell` / `edit` / `write` / `grep` / `find` / `ls`，以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
+
+与 pi 的实现差异（都是"进程内实现替代外部二进制"或环境能力所限）：
+
+- `read` 不做图片自动缩放（离线缺图像处理能力），图片按 MIME 嗅探后原样作为附件。
+- `bash` 不注入 `PI_*` 会话环境变量（`ToolCallRequest` 不携带会话上下文）、进程组杀死只在类 Unix 平台启用、输出累加器是 pi 有界版本的简化版。
+- `find` 不调用外部 `fd`，改用 `ignore` + `globset` 在进程内实现相同语义（`*` 不跨分隔符、无 `/` 的模式按文件名匹配、`**/` 前缀规则、尊重 `.gitignore` 且含隐藏文件、非 git 仓库内也应用 `.gitignore`）。
+- `grep` 不调用外部 `rg`，改用 `regex` + `ignore` 实现相同输出形状与截断/提示文案，并跳过二进制文件。
+- `powershell` 与 pi 一样只在 Windows 上可用：找不到 `pwsh`/`powershell` 时每次调用返回错误结果。
 
 ---
 
@@ -263,6 +271,6 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/ai/tests/conformance.rs` + `crates/ai/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
 4. 再按 `agent` → `tools` → `tui` → `cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
    1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/agent`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
-   2. `tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。部分完成：~~`read` / `write` / `edit` / `bash` 及其共享基础设施~~ 已落地在 `crates/cli/src/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `bash` / `read` / `write` / `edit`），含 31 个单元测试与 8 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）；`ls` / `find` / `grep` / `powershell` 待移植。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
+   2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/cli/src/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `bash` / `read` / `write` / `edit` / `ls` / `find` / `grep`，`powershell` 复用 shell 执行逻辑），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
    3. `tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。
    4. `cli`：`cli` crate 的会话入口与扩展。

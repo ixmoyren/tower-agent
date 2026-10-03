@@ -30,6 +30,9 @@ const UPDATE_THROTTLE: Duration = Duration::from_millis(100);
 const STRUCTURED_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 /// `timeout` 参数（秒）的上限（pi `MAX_TIMEOUT_MS / 1000`）。
 const MAX_TIMEOUT_SECONDS: f64 = 2_147_483.647;
+/// PowerShell 的 UTF-8 输出设置（pi `UTF8_OUTPUT_PREFIX`）。
+const POWERSHELL_UTF8_PREFIX: &str =
+    "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}\n";
 
 /// `bash` 工具的选项。
 #[derive(Debug, Clone, Default)]
@@ -44,12 +47,66 @@ pub struct BashToolOptions {
 #[derive(Clone)]
 pub struct BashTool {
     cwd: PathBuf,
+    spec: ShellSpec,
     command_prefix: Option<String>,
+}
+
+/// 一个 shell 工具的静态配置：bash 与 PowerShell 共用同一套执行逻辑。
+#[derive(Debug, Clone)]
+struct ShellSpec {
+    tool_name: &'static str,
     shell: String,
+    temp_prefix: &'static str,
+    /// 每次执行前固定注入的脚本片段（PowerShell 用来设置 UTF-8 输出编码）。
+    init_script: Option<&'static str>,
+    description: String,
+}
+
+impl ShellSpec {
+    /// 描述文案与 pi 的 `createShellToolDefinition` 一致：`Execute a {shell_name} command ...`。
+    fn new(
+        tool_name: &'static str,
+        shell_name: &str,
+        shell: String,
+        temp_prefix: &'static str,
+        init_script: Option<&'static str>,
+    ) -> Self {
+        Self {
+            tool_name,
+            shell,
+            temp_prefix,
+            init_script,
+            description: shell_description(shell_name),
+        }
+    }
+
+    fn bash(shell: String) -> Self {
+        Self::new("bash", "bash", shell, "pi-bash", None)
+    }
+
+    fn powershell(shell: String) -> Self {
+        Self::new(
+            "powershell",
+            "PowerShell",
+            shell,
+            "pi-powershell",
+            Some(POWERSHELL_UTF8_PREFIX),
+        )
+    }
+}
+
+fn shell_description(shell_name: &str) -> String {
+    format!(
+        "Execute a {shell_name} command in the current working directory. Returns stdout and stderr. \
+         Output is truncated to last {} lines or {}KB (whichever is hit first). If truncated, \
+         full output is saved to a temp file. Optionally provide a timeout in seconds.",
+        DEFAULT_MAX_LINES,
+        DEFAULT_MAX_BYTES / 1024
+    )
 }
 
 impl BashTool {
-    /// 用工作目录构造。
+    /// 用工作目录构造一个 `bash` 工具。
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self::with_options(cwd, BashToolOptions::default())
     }
@@ -58,26 +115,39 @@ impl BashTool {
     pub fn with_options(cwd: impl Into<PathBuf>, options: BashToolOptions) -> Self {
         Self {
             cwd: cwd.into(),
+            spec: ShellSpec::bash(options.shell_path.unwrap_or_else(|| "bash".into())),
             command_prefix: options.command_prefix,
-            shell: options.shell_path.unwrap_or_else(|| "bash".into()),
         }
     }
 
-    /// 工具名。
-    pub const NAME: &'static str = "bash";
-
-    /// 发给模型的工具描述（与 pi 一致）。
-    pub fn description() -> String {
-        format!(
-            "Execute a bash command in the current working directory. Returns stdout and stderr. \
-             Output is truncated to last {} lines or {}KB (whichever is hit first). If truncated, \
-             full output is saved to a temp file. Optionally provide a timeout in seconds.",
-            DEFAULT_MAX_LINES,
-            DEFAULT_MAX_BYTES / 1024
-        )
+    /// 构造一个 `powershell` 工具（pi 里只在 Windows 可用；找不到可执行文件时每次调用都会返回错误结果）。
+    pub fn powershell(cwd: impl Into<PathBuf>) -> Self {
+        let shell = find_on_path(&["pwsh", "pwsh.exe", "powershell.exe", "powershell"])
+            .unwrap_or_else(|| "pwsh".into());
+        Self {
+            cwd: cwd.into(),
+            spec: ShellSpec::powershell(shell),
+            command_prefix: None,
+        }
     }
 
-    /// 参数的 JSON Schema。
+    /// `bash` 工具名。
+    pub const NAME: &'static str = "bash";
+
+    /// `powershell` 工具名。
+    pub const POWERSHELL_NAME: &'static str = "powershell";
+
+    /// 工具名。
+    pub fn name(&self) -> &'static str {
+        self.spec.tool_name
+    }
+
+    /// 发给模型的工具描述（与 pi 一致）。
+    pub fn description(&self) -> String {
+        self.spec.description.clone()
+    }
+
+    /// 参数的 JSON Schema（bash 与 PowerShell 相同）。
     pub fn parameters() -> ai::JsonValue {
         serde_json::json!({
             "type": "object",
@@ -103,9 +173,18 @@ impl BashTool {
                 return;
             }
         };
-        let command = match self.command_prefix.as_ref() {
-            Some(prefix) => format!("{prefix}\n{command}"),
-            None => command,
+        // 顺序与 pi 一致：先注入工具自身的初始化脚本（PowerShell 的 UTF-8 设置），
+        // 再拼接调用方配置的命令前缀，最后才是命令本体。
+        let mut prefixes: Vec<&str> = Vec::new();
+        if let Some(init) = self.spec.init_script {
+            prefixes.push(init);
+        }
+        if let Some(prefix) = self.command_prefix.as_deref() {
+            prefixes.push(prefix);
+        }
+        let command = match prefixes.is_empty() {
+            true => command,
+            false => format!("{}\n{command}", prefixes.join("\n")),
         };
         if tokio::fs::metadata(&self.cwd).await.is_err() {
             let _ = updates
@@ -125,7 +204,7 @@ impl BashTool {
             })
             .await;
 
-        let mut child = match Command::new(&self.shell)
+        let mut child = match Command::new(&self.spec.shell)
             .arg("-c")
             .arg(&command)
             .current_dir(&self.cwd)
@@ -152,7 +231,7 @@ impl BashTool {
         let mut stdout_open = stdout.is_some();
         let mut stderr_open = stderr.is_some();
 
-        let mut accumulator = OutputAccumulator::new("pi-bash");
+        let mut accumulator = OutputAccumulator::new(self.spec.temp_prefix);
         let started = Instant::now();
         let deadline = timeout.map(|seconds| started + Duration::from_secs_f64(seconds));
         let mut last_update = started;
@@ -698,20 +777,49 @@ fn decode_stream(pending: &mut Vec<u8>, data: &[u8], out: &mut String) {
 
 /// 构造 `bash` 工具。
 pub fn create_bash_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
-    agent::AgentTool::new(BashTool::NAME, BashTool::new(cwd))
+    let tool = BashTool::new(cwd);
+    agent::AgentTool::new(BashTool::NAME, tool.clone())
         .label(BashTool::NAME)
-        .description(BashTool::description())
+        .description(tool.description())
         .parameters(BashTool::parameters())
-        .output_schema(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "output": { "type": "string" },
-                "truncated": { "type": "boolean" },
-                "full_output_path": { "type": "string" },
-                "exit_code": { "type": "number" },
-                "wall_time_seconds": { "type": "number" }
+        .output_schema(shell_output_schema())
+}
+
+/// 构造 `powershell` 工具（对应 pi `createPowerShellTool`）。
+pub fn create_powershell_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+    let tool = BashTool::powershell(cwd);
+    agent::AgentTool::new(BashTool::POWERSHELL_NAME, tool.clone())
+        .label(BashTool::POWERSHELL_NAME)
+        .description(tool.description())
+        .parameters(BashTool::parameters())
+        .output_schema(shell_output_schema())
+}
+
+fn shell_output_schema() -> ai::JsonValue {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "output": { "type": "string" },
+            "truncated": { "type": "boolean" },
+            "full_output_path": { "type": "string" },
+            "exit_code": { "type": "number" },
+            "wall_time_seconds": { "type": "number" }
+        }
+    })
+}
+
+/// 在 `PATH` 上查找第一个存在的可执行文件（用于挑选 PowerShell 可执行文件名）。
+fn find_on_path(names: &[&str]) -> Option<String> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        for name in names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().into_owned());
             }
-        }))
+        }
+    }
+    None
 }
 
 #[cfg(test)]

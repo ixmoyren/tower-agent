@@ -12,10 +12,13 @@ workspace = true
 agent = { path = "../agent" }
 ai = { path = "../ai" }
 base64 = { workspace = true }
-dirs.workspace = true
+dirs = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
+globset = { workspace = true }
+ignore = { workspace = true }
 nix = { workspace = true }
+regex = { workspace = true }
 serde_json = { workspace = true }
 similar = { workspace = true }
 tempfile = { workspace = true }

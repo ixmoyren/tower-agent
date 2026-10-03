@@ -4,6 +4,8 @@ use agent::{AgentError, AgentToolResult, ToolResultStream};
 use ai::{ContentBlock, JsonObject, JsonValue, TextContent};
 use futures_util::future::BoxFuture;
 
+use super::truncate::{TruncatedBy, TruncationResult};
+
 /// 工具服务统一的 future 类型。
 pub type ToolFuture = BoxFuture<'static, Result<ToolResultStream, AgentError>>;
 
@@ -76,6 +78,26 @@ pub fn opt_f64(args: &JsonObject, key: &str) -> Result<Option<f64>, String> {
 /// 用一个终态结果构造 [`ToolResultStream`]。
 pub fn once(result: AgentToolResult) -> ToolResultStream {
     ToolResultStream::once(result)
+}
+
+/// 把 [`TruncationResult`] 转成 pi `TruncationResult` 的 JSON 形状（用于 `details`）。
+pub fn truncation_json(truncation: &TruncationResult) -> JsonValue {
+    serde_json::json!({
+        "content": truncation.content,
+        "truncated": truncation.truncated,
+        "truncatedBy": truncation.truncated_by.map(|by| match by {
+            TruncatedBy::Lines => "lines",
+            TruncatedBy::Bytes => "bytes",
+        }),
+        "totalLines": truncation.total_lines,
+        "totalBytes": truncation.total_bytes,
+        "outputLines": truncation.output_lines,
+        "outputBytes": truncation.output_bytes,
+        "lastLinePartial": truncation.last_line_partial,
+        "firstLineExceedsLimit": truncation.first_line_exceeds_limit,
+        "maxLines": truncation.max_lines,
+        "maxBytes": truncation.max_bytes,
+    })
 }
 
 #[cfg(test)]

@@ -58,6 +58,185 @@ fn first_text(result: &agent::AgentToolResult) -> String {
 }
 
 #[tokio::test]
+async fn default_tools_match_pi_tool_names() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let tools = cli::tools::default_tools(dir.path());
+    let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
+    assert_eq!(
+        names,
+        vec![
+            "read",
+            "bash",
+            "powershell",
+            "edit",
+            "write",
+            "grep",
+            "find",
+            "ls"
+        ],
+        "pi allToolNames order"
+    );
+    assert_eq!(cli::tools::tool_names(), names);
+}
+
+#[tokio::test]
+async fn ls_sorts_marks_directories_and_reports_limits() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir(dir.path().join("zeta")).unwrap();
+    std::fs::create_dir(dir.path().join("Alpha")).unwrap();
+    std::fs::write(dir.path().join("beta.txt"), "x").unwrap();
+    std::fs::write(dir.path().join(".hidden"), "x").unwrap();
+    std::fs::create_dir(dir.path().join("empty")).unwrap();
+    let ls = cli::tools::create_ls_tool(dir.path());
+
+    let results = run_tool(&ls, serde_json::json!({})).await;
+    let text = first_text(&results[0]);
+    assert_eq!(
+        text, ".hidden\nAlpha/\nbeta.txt\nempty/\nzeta/",
+        "sorted case-insensitively, directories suffixed, dotfiles included"
+    );
+
+    let results = run_tool(&ls, serde_json::json!({ "path": "empty" })).await;
+    assert_eq!(first_text(&results[0]), "(empty directory)");
+
+    let results = run_tool(&ls, serde_json::json!({ "path": "beta.txt" })).await;
+    assert!(results[0].is_error);
+    assert!(first_text(&results[0]).starts_with("Not a directory:"));
+
+    let results = run_tool(&ls, serde_json::json!({ "path": "nope" })).await;
+    assert!(results[0].is_error);
+    assert!(first_text(&results[0]).starts_with("Path not found:"));
+
+    let results = run_tool(&ls, serde_json::json!({ "limit": 2 })).await;
+    let text = first_text(&results[0]);
+    assert!(
+        text.contains("2 entries limit reached. Use limit=4 for more"),
+        "got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn find_matches_globs_and_respects_gitignore() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    std::fs::write(dir.path().join(".gitignore"), "ignored.txt\nbuild/\n").unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join("build")).unwrap();
+    std::fs::write(dir.path().join("src/main.ts"), "x").unwrap();
+    std::fs::write(dir.path().join("src/main.ts.snap"), "x").unwrap();
+    std::fs::write(dir.path().join("kept.txt"), "x").unwrap();
+    std::fs::write(dir.path().join("ignored.txt"), "x").unwrap();
+    std::fs::write(dir.path().join("build/out.txt"), "x").unwrap();
+    let find = cli::tools::create_find_tool(dir.path());
+
+    let results = run_tool(&find, serde_json::json!({ "pattern": "*.txt" })).await;
+    let text = first_text(&results[0]);
+    let mut found: Vec<&str> = text.lines().collect();
+    found.sort_unstable();
+    assert_eq!(found, vec!["kept.txt"], "ignored files are filtered");
+
+    let results = run_tool(&find, serde_json::json!({ "pattern": "src/**/*.ts" })).await;
+    let text = first_text(&results[0]);
+    let mut found: Vec<&str> = text.lines().collect();
+    found.sort_unstable();
+    assert_eq!(found, vec!["src/main.ts"]);
+
+    let results = run_tool(&find, serde_json::json!({ "pattern": "*.nope" })).await;
+    assert_eq!(first_text(&results[0]), "No files found matching pattern");
+
+    let results = run_tool(&find, serde_json::json!({ "pattern": "*.ts", "limit": 1 })).await;
+    assert!(first_text(&results[0]).contains("1 results limit reached"));
+}
+
+#[tokio::test]
+async fn grep_reports_matches_options_and_context() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("a.txt"), "Hello\nthere\nHELLO again\n").unwrap();
+    std::fs::write(dir.path().join("b.rs"), "hello from rust\n").unwrap();
+    let grep = cli::tools::create_grep_tool(dir.path());
+
+    let results = run_tool(&grep, serde_json::json!({ "pattern": "Hello" })).await;
+    assert_eq!(first_text(&results[0]), "a.txt:1: Hello");
+
+    let results = run_tool(
+        &grep,
+        serde_json::json!({ "pattern": "hello", "ignoreCase": true }),
+    )
+    .await;
+    let text = first_text(&results[0]);
+    assert!(text.contains("a.txt:1: Hello"), "got: {text}");
+    assert!(text.contains("a.txt:3: HELLO again"), "got: {text}");
+    assert!(text.contains("b.rs:1: hello from rust"), "got: {text}");
+
+    let results = run_tool(
+        &grep,
+        serde_json::json!({ "pattern": "hello", "glob": "*.rs" }),
+    )
+    .await;
+    assert_eq!(first_text(&results[0]), "b.rs:1: hello from rust");
+
+    // 上下文行用 `-` 分隔，命中行用 `:` 分隔。
+    let results = run_tool(
+        &grep,
+        serde_json::json!({ "pattern": "there", "context": 1 }),
+    )
+    .await;
+    assert_eq!(
+        first_text(&results[0]),
+        "a.txt-1- Hello\na.txt:2: there\na.txt-3- HELLO again"
+    );
+
+    // literal 让正则元字符按字面匹配。
+    std::fs::write(dir.path().join("lit.txt"), "a.b\naxb\n").unwrap();
+    let results = run_tool(
+        &grep,
+        serde_json::json!({ "pattern": "a.b", "literal": true }),
+    )
+    .await;
+    assert_eq!(first_text(&results[0]), "lit.txt:1: a.b");
+
+    let results = run_tool(&grep, serde_json::json!({ "pattern": "zzz-not-here" })).await;
+    assert_eq!(first_text(&results[0]), "No matches found");
+
+    let results = run_tool(&grep, serde_json::json!({ "pattern": "(" })).await;
+    assert!(results[0].is_error);
+    assert!(first_text(&results[0]).starts_with("Invalid regex pattern:"));
+}
+
+#[tokio::test]
+async fn grep_truncates_long_lines() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let long = "x".repeat(600);
+    std::fs::write(dir.path().join("long.txt"), format!("{long}needle\n")).unwrap();
+    let grep = cli::tools::create_grep_tool(dir.path());
+
+    let results = run_tool(&grep, serde_json::json!({ "pattern": "needle" })).await;
+    let text = first_text(&results[0]);
+    assert!(text.contains("... [truncated]"), "got: {text}");
+    assert!(
+        text.contains("Some lines truncated to 500 chars. Use read tool to see full lines"),
+        "got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn powershell_tool_is_registered_with_pi_metadata() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let tools = cli::tools::default_tools(dir.path());
+    let powershell = tools
+        .iter()
+        .find(|tool| tool.name() == "powershell")
+        .unwrap();
+    assert_eq!(powershell.display_label(), "powershell");
+    assert!(
+        powershell
+            .tool_description()
+            .starts_with("Execute a PowerShell command")
+    );
+    assert!(powershell.declared_output_schema().is_some());
+}
+
+#[tokio::test]
 async fn write_then_read_round_trips_and_creates_parents() {
     let dir = tempfile::tempdir().expect("temp dir");
     let tools = cli::tools::default_tools(dir.path());
