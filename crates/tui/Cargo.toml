@@ -11,9 +11,7 @@ workspace = true
 [dependencies]
 agent = { path = "../agent" }
 ai = { path = "../ai" }
-ratatui = { workspace = true }
+ratatui = { version = "0.30", default-features = false, features = ["all-widgets", "termina", "layout-cache", "macros", "underline-color"] }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 unicode-width = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }

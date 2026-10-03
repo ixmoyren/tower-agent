@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                  |
 |----------|---------------------------------------------------------------------|
-| 状态     | 草案 v0.8（开放问题已确认；第 9 节第 2、3 步与第 4 步的 `agent`、`tools`、`tui` 阶段已落地） |
+| 状态     | 草案 v0.9（开放问题已确认；第 9 节第 2、3 步与第 4 步的 `agent`、`tools`、`tui` 阶段已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）            |
 | 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                     |
@@ -216,7 +216,8 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `model::TuiState` 是唯一状态来源，由 `AgentEvent` 归约（`MessageUpdate` 驱动流式文本，`ToolExecutionStart/Update/End` 驱动工具条目原地更新，`TurnEnd` 记录错误）。
 - `render` 是纯函数：`&TuiState` → 缓冲区，三段布局（状态栏 / transcript / 提示栏），按显示宽度折行（宽字符按 2 列计算）并从底部对齐。
 - `app::Tui<B: Backend>` 把状态与 ratatui 后端绑定；差分渲染由 `Terminal::draw` 承担（只写变化的单元格）。后端是泛型，因此生产用 crossterm、测试用 `TestBackend` 走同一套渲染代码。
-- `backend` 模块是**唯一**与具体后端耦合的地方：`init_terminal` / `restore_terminal` / `run_agent_tui` + 按键映射。当前后端是 ratatui 的默认 `CrosstermBackend`；换 termion/termwiz 只改这一个文件。
+- `backend` 模块是**唯一**与具体后端耦合的地方：`init_terminal` / `restore_terminal` / `run_tui` / `run_agent_tui` / 按键映射。当前后端是 **termina**（`ratatui::backend::TerminaBackend`，由 manifest 的 `termina` feature 引入）；换 crossterm/termion/termwiz 只改这一个文件。
+- 二进制入口 `crates/tui/src/main.rs`：跑一段脚本化的演示会话（流式文本 → 工具执行 → 收尾回答），`cargo run -p tui` 不需要 provider 就能观察渲染效果；退出 `q`/`Esc`/`Ctrl+C`，滚动 `↑`/`↓`/`PageUp`/`PageDown`。真正的 agent 接线留给 `cli` 阶段（用 `run_agent_tui`）。
 - 不使用 tower：TUI 订阅事件流，不是"请求 → 响应"边界（第 4.1 节）。
 
 ---
@@ -280,5 +281,5 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 4. 再按 `agent` → `tools` → `tui` → `cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
    1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/agent`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/cli/src/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `bash` / `read` / `write` / `edit` / `ls` / `find` / `grep`，`powershell` 复用 shell 执行逻辑），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
-   3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `backend`）：`ratatui` 0.30 渲染，`TuiState` 归约 agent 事件，`Tui<B: Backend>` 泛型宿主 + `run_agent_tui` crossterm 事件循环（含滚动与退出按键）。共 11 个单元测试 + 6 个 `TestBackend` 端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，本仓库离线缓存里可用的是 crossterm 与 termwiz（termion 不在缓存内），当前选用 crossterm，切换点集中在 `backend.rs`。
+   3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `backend` + `main.rs` 二进制）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（含滚动与退出按键）。测试：11 个 lib 单元 + 2 个二进制单元 + 6 个 `TestBackend` 端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
    4. `cli`：`cli` crate 的会话入口与扩展。

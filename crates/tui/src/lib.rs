@@ -9,9 +9,9 @@
 //!   它只把变化的单元格写到后端（对应 design.md 4.2 的"TUI 差分渲染"）。
 //! - [`backend::run_agent_tui`] 是生产入口：订阅 [`agent::Subscription`]，处理键盘输入并重绘。
 //!
-//! 后端：ratatui 0.30 把具体后端拆成了独立 crate。当前用的是
-//! `ratatui::backend::CrosstermBackend`（ratatui 的默认后端）。要换 termion/termwiz，
-//! 只需改 [`backend`] 模块里的 `init_terminal` / `run_agent_tui`，其余代码与后端无关。
+//! 后端：ratatui 0.30 把具体后端拆成了独立 crate。当前用的是 **termina**
+//! （`ratatui::backend::TerminaBackend`，由 manifest 里的 `termina` feature 引入）。
+//! 要换 crossterm/termion/termwiz，只需改 [`backend`] 模块，其余代码与后端无关。
 //!
 //! 本 crate **不使用 tower**：TUI 订阅的是事件流，不是"请求 → 响应"边界（design.md 4.1）。
 
