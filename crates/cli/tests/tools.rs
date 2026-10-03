@@ -11,6 +11,7 @@ use ai::{
     DoneReason, JsonObject, JsonValue, Model, PiError, StopReason, StreamRequest, TextContent,
     ToolCall, Usage,
 };
+use base64::Engine as _;
 use futures_util::{StreamExt as _, future::BoxFuture, stream};
 use tokio::sync::Semaphore;
 use tower::{Service, util::BoxCloneService};
@@ -89,6 +90,42 @@ async fn write_then_read_round_trips_and_creates_parents() {
     let results = run_tool(&read, serde_json::json!({ "path": "nested/hello.txt" })).await;
     assert_eq!(first_text(&results[0]), "hello\nworld\n");
     assert!(!results[0].is_error);
+}
+
+#[tokio::test]
+async fn read_attaches_images_with_base64_data() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    // Minimum bytes that pi's PNG sniff accepts: signature + IHDR chunk, not animated.
+    let mut png = Vec::new();
+    png.extend_from_slice(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    png.extend_from_slice(&[0, 0, 0, 13]);
+    png.extend_from_slice(b"IHDR");
+    png.extend_from_slice(&[0u8; 13]);
+    png.extend_from_slice(&[0u8; 4]);
+    std::fs::write(dir.path().join("pixel.png"), &png).unwrap();
+    let read = cli::tools::create_read_tool(dir.path());
+
+    let results = run_tool(&read, serde_json::json!({ "path": "pixel.png" })).await;
+    let result = &results[0];
+    assert!(!result.is_error);
+    assert_eq!(first_text(result), "Read image file [image/png]");
+    let image = result
+        .content
+        .iter()
+        .find_map(|block| match block {
+            ContentBlock::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("an image content block");
+    assert_eq!(image.mime_type, "image/png");
+    // No circular check: every PNG starts with the well-known base64 prefix.
+    assert!(image.data.starts_with("iVBORw0KGgo"), "got: {}", image.data);
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(&image.data)
+            .expect("payload is base64"),
+        png
+    );
 }
 
 #[tokio::test]

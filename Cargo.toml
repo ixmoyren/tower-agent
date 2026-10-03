@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 tower = { version = "0.5.3", features = ["util", "timeout", "retry", "limit", "load-shed", "steer", "filter", "buffer"] }
-base64 = "0.22"
+base64 = "0.23"
 dirs = "6"
 futures-core = "0.3"
 futures-util = "0.3"
