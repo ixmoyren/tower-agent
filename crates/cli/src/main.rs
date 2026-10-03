@@ -48,7 +48,7 @@ fn main() -> ExitCode {
 
     // 目前只有 faux provider；`--faux` 是显式写法，便于脚本自解释。
     let provider = FauxProvider::new().boxed();
-    let session = Session::with_model(cwd, provider, model());
+    let session = std::sync::Arc::new(Session::with_model(cwd, provider, model()));
 
     let outcome = if args.print {
         run_print_blocking(&session, prompt)
@@ -100,7 +100,7 @@ fn run_print_blocking(session: &Session, prompt: String) -> std::io::Result<()> 
 }
 
 /// 默认模式：跑一轮并交给 TUI 渲染（只读视图，`q`/`Esc`/`Ctrl+C` 退出）。
-fn run_tui_blocking(session: &Session, prompt: String) -> std::io::Result<()> {
+fn run_tui_blocking(session: &std::sync::Arc<Session>, prompt: String) -> std::io::Result<()> {
     let runtime = single_thread_runtime()?;
     runtime.block_on(run_tui(session, Some(prompt), "tower-pi-agent"))
 }

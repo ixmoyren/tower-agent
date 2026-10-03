@@ -1,23 +1,32 @@
 //! [`Tui`]：把 [`TuiState`] 与一个 ratatui 后端绑在一起的最小宿主。
 //!
-//! 后端是泛型参数，所以生产环境用 `CrosstermBackend`，测试用 `TestBackend` 断言缓冲区，
+//! 后端是泛型参数，所以生产环境用 `TerminaBackend`，测试用 `TestBackend` 断言缓冲区，
 //! 两边走同一套渲染代码。
 
 use agent::AgentEvent;
-use ratatui::{Terminal, backend::Backend};
+use ratatui::{Terminal, backend::Backend, termina::event::Event};
 
-use crate::{model::TuiState, render};
+use crate::{
+    editor::{Editor, EditorAction},
+    model::TuiState,
+    render,
+};
 
-/// 终端 UI 宿主：持有后端与视图状态，负责把事件折进状态并重绘。
+/// 终端 UI 宿主：持有后端、视图状态与输入编辑器，负责把事件折进状态并重绘。
 pub struct Tui<B: Backend> {
     terminal: Terminal<B>,
     state: TuiState,
+    editor: Editor,
 }
 
 impl<B: Backend> Tui<B> {
     /// 用一个已初始化的终端构造。
     pub fn new(terminal: Terminal<B>, state: TuiState) -> Self {
-        Self { terminal, state }
+        Self {
+            terminal,
+            state,
+            editor: Editor::new(),
+        }
     }
 
     /// 当前视图状态。
@@ -30,15 +39,30 @@ impl<B: Backend> Tui<B> {
         &mut self.state
     }
 
+    /// 输入编辑器。
+    pub fn editor(&self) -> &Editor {
+        &self.editor
+    }
+
     /// 折入一个 agent 事件（不重绘）。
     pub fn handle(&mut self, event: &AgentEvent) {
         self.state.apply(event);
     }
 
+    /// 把一次终端输入交给编辑器并返回其动作。
+    ///
+    /// 输入类型是 termina 的事件（编辑器基于 `ratatui-textarea` 的 `termina` feature）；
+    /// 后端泛型只影响渲染，不影响输入类型。
+    pub fn handle_input(&mut self, event: &Event) -> EditorAction {
+        self.editor.handle(event)
+    }
+
     /// 重绘一次。ratatui 只会把变化的单元格写到后端。
     pub fn draw(&mut self) -> Result<(), B::Error> {
         let state = self.state.clone();
-        self.terminal.draw(|frame| render::render(frame, &state))?;
+        let editor = &self.editor;
+        self.terminal
+            .draw(|frame| render::render(frame, &state, editor))?;
         Ok(())
     }
 

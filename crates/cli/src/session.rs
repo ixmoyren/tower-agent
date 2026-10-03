@@ -11,10 +11,12 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
-use agent::{Agent, AgentError, AgentEvent, AgentOptions, AgentState, Subscription};
-use ai::{BoxStreamService, Message, Model};
+use agent::{Agent, AgentError, AgentEvent, AgentMessage, AgentOptions, AgentState, Subscription};
+use ai::{BoxStreamService, Message, Model, UserContent, UserMessage};
+use tokio::sync::mpsc;
 
 /// 会话。
 pub struct Session {
@@ -68,10 +70,32 @@ impl Session {
         self.agent.continue_run().await
     }
 
+    /// 提交一条用户输入。
+    ///
+    /// 空闲时直接开启新一轮；正在跑的时候用 `steer` 注入，等当前 turn 结束后生效——
+    /// 这样用户在 agent 工作期间继续输入不会撞上 "already processing"。
+    pub async fn submit(&self, text: impl Into<String>) -> Result<(), AgentError> {
+        let text = text.into();
+        if self.agent.is_streaming() {
+            self.agent.steer(user_message(text));
+            Ok(())
+        } else {
+            self.agent.prompt_text(text).await
+        }
+    }
+
     /// 取消进行中的一轮。
     pub fn abort(&self) {
         self.agent.abort();
     }
+}
+
+/// 构造一条用户消息。
+fn user_message(text: impl Into<String>) -> AgentMessage {
+    AgentMessage::Message(Message::User(UserMessage {
+        content: UserContent::Text(text.into()),
+        timestamp: agent::agent_loop::now_ms(),
+    }))
 }
 
 /// provider 未上报模型时的占位模型。
@@ -158,22 +182,43 @@ pub fn write_event<W: Write>(out: &mut W, event: &AgentEvent) -> std::io::Result
 /// 用 TUI 渲染这条会话：先订阅，再跑一轮，最后交给 [`tui::run_agent_tui`]。
 ///
 /// TUI 目前是只读视图（编辑器在后续步骤落地），按 `q`/`Esc`/`Ctrl+C` 退出。
+/// 用 TUI 渲染这条会话：订阅事件、把输入区提交的文本交给 agent，直到用户退出。
+///
+/// 编辑器默认 vim 普通模式（`i` 插入 / `Esc` 普通 / `Enter` 提交 / `q` 退出）。
+/// 用户退出时会取消还在进行的一轮，等驱动任务收尾后返回。
 pub async fn run_tui(
-    session: &Session,
+    session: &Arc<Session>,
     prompt: Option<String>,
     title: &str,
 ) -> std::io::Result<()> {
     let subscription = session.subscribe();
-    match prompt {
-        Some(prompt) => {
-            // 会话推进与 TUI 渲染在同一个任务上并发；TUI 一直显示到用户按键退出。
-            let (asked, rendered) = tokio::join!(
-                session.ask(prompt),
-                tui::run_agent_tui(subscription, title.to_string())
-            );
-            rendered?;
-            asked.map_err(|error| std::io::Error::other(error.to_string()))
+    let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();
+
+    let driver_session = Arc::clone(session);
+    let driver = tokio::spawn(async move {
+        let mut first_error: Option<AgentError> = None;
+        if let Some(prompt) = prompt
+            && let Err(error) = driver_session.submit(prompt).await
+        {
+            first_error = Some(error);
         }
-        None => tui::run_agent_tui(subscription, title.to_string()).await,
+        while let Some(text) = submissions_rx.recv().await {
+            if let Err(error) = driver_session.submit(text).await {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error
+    });
+
+    let rendered = tui::run_agent_tui(subscription, submissions_tx, title.to_string()).await;
+
+    // 用户退出：取消进行中的一轮，并等驱动任务自然收尾（避免直接 abort 丢掉取消语义）。
+    session.abort();
+    let driver_result = driver.await;
+
+    rendered?;
+    if let Ok(Some(error)) = driver_result {
+        return Err(std::io::Error::other(error.to_string()));
     }
+    Ok(())
 }

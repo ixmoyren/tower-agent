@@ -13,21 +13,34 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{EntryKind, TuiState};
+use crate::{
+    editor::Editor,
+    model::{EntryKind, TuiState},
+};
+
+/// 输入区高度（3 行文本 + 上下边框）。
+pub const EDITOR_HEIGHT: u16 = 5;
 
 /// 把当前状态渲染到 `frame`。
-pub fn render(frame: &mut Frame, state: &TuiState) {
+pub fn render(frame: &mut Frame, state: &TuiState, editor: &Editor) {
     let area = frame.area();
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
+        Constraint::Length(EDITOR_HEIGHT),
         Constraint::Length(1),
     ])
     .split(area);
 
     render_header(frame, chunks[0], state);
     render_transcript(frame, chunks[1], state);
-    render_footer(frame, chunks[2], state);
+    render_editor(frame, chunks[2], editor);
+    render_footer(frame, chunks[3], state);
+}
+
+/// 输入区：`ratatui-textarea` 自带边框标题（模式）与行号样式。
+fn render_editor(frame: &mut Frame, area: Rect, editor: &Editor) {
+    frame.render_widget(editor.textarea(), area);
 }
 
 fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
@@ -64,7 +77,7 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let hints = "q quit · ↑/↓ scroll · PgUp/PgDn page · Home/End";
+    let hints = "Enter 提交 · i 插入 · Esc 普通 · q 退出 · PgUp/PgDn 滚动记录";
     let mut spans = vec![Span::styled(hints, Style::default().fg(Color::DarkGray))];
     if let Some(error) = state.error() {
         spans.push(Span::raw("  "));
@@ -232,6 +245,59 @@ mod tests {
     fn wrap_line_counts_wide_characters_as_two_columns() {
         // "你好" is 4 columns wide, so only two characters fit in 4 columns.
         assert_eq!(wrap_line("你好世界", 4), vec!["你好", "世界"]);
+    }
+
+    #[test]
+    fn layout_reserves_space_for_the_editor_with_line_numbers() {
+        use ratatui::termina::event::{Event, KeyCode, KeyEvent, Modifiers};
+
+        fn key(code: KeyCode) -> Event {
+            Event::Key(KeyEvent::new(code, Modifiers::NONE))
+        }
+
+        let mut state = TuiState::new("t");
+        state.push_message(&agent::AgentMessage::Message(ai::Message::User(
+            ai::UserMessage {
+                content: ai::UserContent::Text("hi".into()),
+                timestamp: 0,
+            },
+        )));
+
+        // 用真实按键输入两行，验证行号与模式标题。
+        let mut editor = Editor::new();
+        editor.handle(&key(KeyCode::Char('i')));
+        for ch in "hello".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
+        editor.handle(&key(KeyCode::Enter));
+        for ch in "world".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
+        editor.handle(&key(KeyCode::Escape));
+
+        let backend = ratatui::backend::TestBackend::new(30, 14);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render(frame, &state, &editor))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let mut rendered = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                rendered.push_str(buffer[(x, y)].symbol());
+            }
+            rendered.push('\n');
+        }
+
+        assert!(rendered.contains("NORMAL"), "模式标题在输入区:\n{rendered}");
+        assert!(rendered.contains("1 hello"), "行号 + 第一行:\n{rendered}");
+        assert!(rendered.contains("2 world"), "行号 + 第二行:\n{rendered}");
+        assert!(rendered.contains("Enter"), "提示栏:\n{rendered}");
+        assert!(rendered.contains("Esc"), "提示栏含 Esc 提示:\n{rendered}");
+        assert!(
+            rendered.contains("› hi"),
+            "transcript 仍在上面:\n{rendered}"
+        );
     }
 
     #[test]

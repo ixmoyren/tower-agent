@@ -215,15 +215,16 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 
 - `model::TuiState` 是唯一状态来源，由 `AgentEvent` 归约（`MessageUpdate` 驱动流式文本，`ToolExecutionStart/Update/End` 驱动工具条目原地更新，`TurnEnd` 记录错误）。
 - `render` 是纯函数：`&TuiState` → 缓冲区，三段布局（状态栏 / transcript / 提示栏），按显示宽度折行（宽字符按 2 列计算）并从底部对齐。
-- `app::Tui<B: Backend>` 把状态与 ratatui 后端绑定；差分渲染由 `Terminal::draw` 承担（只写变化的单元格）。后端是泛型，因此生产用 crossterm、测试用 `TestBackend` 走同一套渲染代码。
-- `backend` 模块是**唯一**与具体后端耦合的地方：`init_terminal` / `restore_terminal` / `run_tui` / `run_agent_tui` / 按键映射。当前后端是 **termina**（`ratatui::backend::TerminaBackend`，由 manifest 的 `termina` feature 引入）；换 crossterm/termion/termwiz 只改这一个文件。
-- 二进制入口 `crates/tui/src/main.rs`：跑一段脚本化的演示会话（流式文本 → 工具执行 → 收尾回答），`cargo run -p tui` 不需要 provider 就能观察渲染效果；退出 `q`/`Esc`/`Ctrl+C`，滚动 `↑`/`↓`/`PageUp`/`PageDown`。真正的 agent 接线留给 `cli` 阶段（用 `run_agent_tui`）。
+- `app::Tui<B: Backend>` 把状态、输入编辑器与 ratatui 后端绑定；差分渲染由 `Terminal::draw` 承担（只写变化的单元格）。后端是泛型，因此生产用 termina、测试用 `TestBackend` 走同一套渲染代码。
+- `backend` 模块是**唯一**与具体后端耦合的地方：`init_terminal` / `restore_terminal` / `run_tui` / `run_agent_tui` / 全局按键。当前后端是 **termina**（`ratatui::backend::TerminaBackend`，由 manifest 的 `termina` feature 引入）；换 crossterm/termion/termwiz 只改这一个文件。
+- `editor` 模块是输入编辑器：**`ratatui-textarea`**（官方 Ratatui 开发者维护的 fork，git 引入、`termina` 输入适配、`default-features = false`）+ 一层 vim 键位。**默认 vim 普通模式**（`i/a/A/I/o/O` 进插入、`Esc` 回普通、`h j k l`/`w e b`/`0 $`/`gg G`、`x D C`、`p u Ctrl+r`、操作符 `d`/`y`/`c` + 动作，含 `dd`/`yy`/`dw`），**默认显示行号**（`set_line_number_style`），边框标题显示当前模式。Normal 模式 `Enter` 提交、`q` 退出；Insert 模式 `Enter` 换行。
+- 二进制入口 `crates/tui/src/main.rs`：先跑一段脚本化演示会话，之后输入区提交的内容会被回显成一轮问答，`cargo run -p tui` 不需要 provider 也能试用编辑器。全局按键：`Ctrl+C` 随时退出、`PageUp/PageDown` 滚动会话记录；其余按键归编辑器。
 
 `cli` 已落地的会话入口（`crates/cli`）：
 
 - `args`：命令行解析（提示词、`-C/--cwd`、`--print`、`--list-tools`、`--faux`、`--help`、`--version`、`--` 终止选项解析）；手写解析便于单测覆盖。
 - `session::Session`：持有 `agent::Agent` + 八个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`。
-- `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI），TUI 模式与 agent 会话用 `tokio::join!` 在同一任务上并发推进。
+- `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、**流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。
 - `faux`：**确定性的离线 provider**。真实 provider（anthropic/openai/…）属于 `ai` crate 的 provider 层，尚未移植；为了让会话入口今天就能运行与被测试，faux 按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
 - 二进制 `cli`：`--list-tools` 打印八个工具，`--print` 跑一轮并打纯文本事件，默认用 TUI 渲染；没有位置参数时从 stdin 读提示词。
 - 尚未移植：真实 provider、交互式输入编辑器（TUI 目前是只读视图）、扩展/MCP/compaction。
@@ -290,7 +291,7 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 4. 再按 `agent` → `tools` → `tui` → `cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
    1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/agent`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/cli/src/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `bash` / `read` / `write` / `edit` / `ls` / `find` / `grep`，`powershell` 复用 shell 执行逻辑），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
-   3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `backend` + `main.rs` 二进制）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（含滚动与退出按键）。测试：11 个 lib 单元 + 2 个二进制单元 + 6 个 `TestBackend` 端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
+   3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `editor` / `backend` + `main.rs` 二进制）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件，**`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。测试：25 个 lib 单元（含 12 个编辑器用例）+ 2 个二进制单元 + 7 个 `TestBackend` 端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
    4. `cli`：`cli` crate 的会话入口与扩展。
       - 会话入口已完成：~~`args` / `session` / `faux` / 二进制入口~~ 落在 `crates/cli`（`args` / `session` / `faux` + `main.rs`）。会话把 agent、八个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（只读视图），无位置参数时从 stdin 读提示词。真实 provider 属于 `ai` crate 的 provider 层（尚未移植），当前用 `--faux` 的确定性离线 provider 端到端跑通会话。
       - 测试：7 个 `args` 单元测试、3 个 `faux` 单元测试、3 个二进制单元测试、5 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路与纯文本渲染断言）、6 个**真正运行 `cli` 二进制**的端到端测试（`--help` / `--version` / `--list-tools` / `--print` / stdin 提示词 / 错误参数）。

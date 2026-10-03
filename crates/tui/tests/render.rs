@@ -44,7 +44,7 @@ fn tui(width: u16, height: u16) -> Tui<TestBackend> {
 
 #[test]
 fn renders_header_transcript_and_footer() {
-    let mut tui = tui(40, 8);
+    let mut tui = tui(40, 14);
     tui.handle(&AgentEvent::AgentStart);
     tui.handle(&AgentEvent::MessageStart {
         message: user("hello"),
@@ -78,14 +78,14 @@ fn renders_header_transcript_and_footer() {
         "assistant message rendered:\n{rendered}"
     );
     assert!(
-        rendered.contains("q quit"),
+        rendered.contains("Enter"),
         "footer hints rendered:\n{rendered}"
     );
 }
 
 #[test]
 fn streaming_text_is_rendered_with_a_cursor_and_cleared_on_end() {
-    let mut tui = tui(30, 6);
+    let mut tui = tui(30, 12);
     tui.handle(&AgentEvent::AgentStart);
     tui.handle(&AgentEvent::MessageStart {
         message: assistant(""),
@@ -111,7 +111,7 @@ fn streaming_text_is_rendered_with_a_cursor_and_cleared_on_end() {
 
 #[test]
 fn tool_entries_render_and_update_in_place() {
-    let mut tui = tui(60, 8);
+    let mut tui = tui(60, 14);
     tui.handle(&AgentEvent::AgentStart);
     tui.handle(&AgentEvent::ToolExecutionStart {
         tool_call_id: "call-1".into(),
@@ -156,7 +156,7 @@ fn tool_entries_render_and_update_in_place() {
 
 #[test]
 fn error_is_shown_in_the_footer() {
-    let mut tui = tui(60, 6);
+    let mut tui = tui(120, 12);
     let mut message = match assistant("") {
         AgentMessage::Message(Message::Assistant(a)) => *a,
         _ => unreachable!(),
@@ -177,7 +177,7 @@ fn error_is_shown_in_the_footer() {
 
 #[test]
 fn long_transcripts_follow_the_bottom_and_can_scroll_up() {
-    let mut tui = tui(20, 5);
+    let mut tui = tui(20, 12);
     for index in 0..12 {
         let text = format!("line-{index:02}");
         tui.handle(&AgentEvent::MessageStart {
@@ -213,6 +213,36 @@ fn long_transcripts_follow_the_bottom_and_can_scroll_up() {
         rendered.contains("line-11"),
         "back to the bottom:\n{rendered}"
     );
+}
+
+/// 输入按键经 `Tui` 宿主路由到编辑器，Enter 提交后编辑器清空。
+#[test]
+fn editor_input_routes_through_the_tui_host() {
+    use ratatui::termina::event::{Event, KeyCode, KeyEvent, Modifiers};
+    use tui::EditorAction;
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(KeyEvent::new(code, Modifiers::NONE))
+    }
+
+    let mut tui = tui(40, 14);
+    assert_eq!(
+        tui.handle_input(&key(KeyCode::Char('i'))),
+        EditorAction::None
+    );
+    for ch in "帮我看看".chars() {
+        assert_eq!(
+            tui.handle_input(&key(KeyCode::Char(ch))),
+            EditorAction::None
+        );
+    }
+    tui.handle_input(&key(KeyCode::Escape));
+    let action = tui.handle_input(&key(KeyCode::Enter));
+    assert_eq!(action, EditorAction::Submit("帮我看看".into()));
+
+    // 提交后清空并回到普通模式。
+    assert_eq!(tui.editor().mode(), tui::Mode::Normal);
+    assert_eq!(tui.editor().text(), "");
 }
 
 #[test]

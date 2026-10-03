@@ -2,9 +2,11 @@
 //!
 //! agent 的真正接线在后续的 `cli` 阶段（`backend::run_agent_tui` 就是给它用的入口）；
 //! 这里用一个固定的 `AgentEvent` 序列驱动同一套渲染路径，所以 `cargo run -p tui`
-//! 不需要 provider 也能看到流式文本、工具执行与状态栏。
+//! 不需要 provider 也能看到流式文本、工具执行与状态栏。输入区提交的内容会被回显成
+//! 一轮"问答"，方便观察编辑器的行为。
 //!
-//! 退出：`q` / `Esc` / `Ctrl+C`；滚动：`↑` / `↓` / `PageUp` / `PageDown`。
+//! 编辑器默认 vim 普通模式（`i` 插入、`Esc` 回普通、`Enter` 提交、`q` 退出）；
+//! `PageUp` / `PageDown` 滚动会话记录，`Ctrl+C` 随时退出。
 
 use std::time::Duration;
 
@@ -143,16 +145,56 @@ fn demo_script() -> Vec<AgentEvent> {
 // 单线程运行时足够：输入读取跑在独立 OS 线程上，事件循环本身不需要多线程调度。
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (events_tx, events_rx) = mpsc::unbounded_channel();
+    let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();
+
+    // 开场：脚本化的演示会话。
+    let demo_tx = events_tx.clone();
     tokio::spawn(async move {
         for event in demo_script() {
-            if tx.send(event).is_err() {
+            if demo_tx.send(event).is_err() {
                 return;
             }
             tokio::time::sleep(DEMO_STEP).await;
         }
     });
-    run_tui(rx, "tower-pi-agent · tui demo").await
+
+    // 交互：把输入区提交的文本回显成一轮问答（没有真实 provider）。
+    tokio::spawn(async move {
+        while let Some(text) = submissions_rx.recv().await {
+            let question = user(&text);
+            let answer = assistant(
+                &format!("[demo] 收到：{text}"),
+                StopReason::Stop,
+                Vec::new(),
+            );
+            let events = [
+                AgentEvent::TurnStart,
+                AgentEvent::MessageStart {
+                    message: question.clone(),
+                },
+                AgentEvent::MessageEnd { message: question },
+                AgentEvent::MessageStart {
+                    message: answer.clone(),
+                },
+                AgentEvent::MessageEnd {
+                    message: answer.clone(),
+                },
+                AgentEvent::TurnEnd {
+                    message: answer,
+                    tool_results: Vec::new(),
+                },
+            ];
+            for event in events {
+                if events_tx.send(event).is_err() {
+                    return;
+                }
+                tokio::time::sleep(DEMO_STEP).await;
+            }
+        }
+    });
+
+    run_tui(events_rx, submissions_tx, "tower-pi-agent · tui demo").await
 }
 
 #[cfg(test)]

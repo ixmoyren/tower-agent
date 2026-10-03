@@ -11,11 +11,8 @@ workspace = true
 [dependencies]
 agent = { path = "../agent" }
 ai = { path = "../ai" }
-# 只启用真正用到的 feature：termina 后端 + 全部 widget + 布局缓存 + 宏。
-# 不启用 `underline-color`：UI 只用前景色与 BOLD；该 feature 会通过
-# `ratatui-crossterm?/underline-color`、`ratatui-termwiz?/underline-color`
-# 这两个弱依赖引用把 crossterm / termwiz 后端写进 Cargo.lock。
 ratatui = { version = "0.30", default-features = false, features = ["all-widgets", "termina", "layout-cache", "macros"] }
+ratatui-textarea = { git = "https://github.com/ixmoyren/ratatui-textarea", default-features = false, features = ["termina"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 unicode-width = { workspace = true }

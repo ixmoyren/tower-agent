@@ -17,10 +17,14 @@
 
 pub mod app;
 pub mod backend;
+pub mod editor;
 pub mod model;
 pub mod render;
 
 pub use app::Tui;
-pub use backend::{Action, action_for, init_terminal, restore_terminal, run_agent_tui};
+pub use backend::{
+    Action, AppTerminal, action_for, init_terminal, restore_terminal, run_agent_tui, run_tui,
+};
+pub use editor::{Editor, EditorAction, Mode};
 pub use model::{Entry, EntryKind, TuiState, render_message};
-pub use render::{render, transcript_lines};
+pub use render::{EDITOR_HEIGHT, render, transcript_lines};

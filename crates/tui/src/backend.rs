@@ -33,7 +33,7 @@ use ratatui::{
 };
 use tokio::sync::mpsc;
 
-use crate::{app::Tui, model::TuiState};
+use crate::{app::Tui, editor::EditorAction, model::TuiState};
 
 /// 本 crate 使用的终端类型（termina 后端 + 平台终端）。
 pub type AppTerminal = Terminal<TerminaBackend<PlatformTerminal>>;
@@ -129,25 +129,23 @@ pub fn spawn_input_reader(reader: EventReader) -> InputReader {
 }
 
 /// 一次按键映射成的 UI 动作。
+///
+/// 只有与编辑器无关的全局按键会走到这里；其余按键交给 [`crate::Editor`]（vim 键位）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     /// 退出。
     Quit,
-    /// 向上滚动一行。
-    ScrollUp,
-    /// 向下滚动一行。
-    ScrollDown,
     /// 向上翻一屏。
     PageUp,
     /// 向下翻一屏。
     PageDown,
-    /// 回到最新内容。
-    Bottom,
-    /// 忽略。
+    /// 交给编辑器处理。
     None,
 }
 
-/// 按键 → 动作（`q` / `Esc` / `Ctrl+C` 退出，方向键与 PageUp/PageDown 滚动）。
+/// 全局按键 → 动作：`Ctrl+C` 退出，`PageUp`/`PageDown` 滚动会话记录。
+///
+/// `q`、`Esc`、方向键等都归编辑器（vim），不在这里处理。
 pub fn action_for(event: &Event) -> Action {
     let Event::Key(key) = event else {
         return Action::None;
@@ -160,19 +158,18 @@ pub fn action_for(event: &Event) -> Action {
         return Action::Quit;
     }
     match key.code {
-        KeyCode::Char('q') | KeyCode::Escape => Action::Quit,
-        KeyCode::Up => Action::ScrollUp,
-        KeyCode::Down => Action::ScrollDown,
         KeyCode::PageUp => Action::PageUp,
         KeyCode::PageDown => Action::PageDown,
-        KeyCode::Home | KeyCode::End => Action::Bottom,
         _ => Action::None,
     }
 }
 
 /// 订阅 agent 事件并渲染 TUI，直到用户退出（生产入口）。
+///
+/// `submissions` 把用户在输入区提交的文本交给调用方，由调用方驱动 agent。
 pub async fn run_agent_tui(
     mut subscription: Subscription,
+    submissions: mpsc::UnboundedSender<String>,
     title: impl Into<String>,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -183,7 +180,7 @@ pub async fn run_agent_tui(
             }
         }
     });
-    let result = run_tui(rx, title).await;
+    let result = run_tui(rx, submissions, title).await;
     pump.abort();
     result
 }
@@ -191,13 +188,14 @@ pub async fn run_agent_tui(
 /// 用一条事件通道驱动 TUI（[`run_agent_tui`] 与 `tui` 二进制都走这里）。
 pub async fn run_tui(
     mut events: mpsc::UnboundedReceiver<AgentEvent>,
+    submissions: mpsc::UnboundedSender<String>,
     title: impl Into<String>,
 ) -> io::Result<()> {
     let (terminal, reader) = init_terminal()?;
     let mut tui = Tui::new(terminal, TuiState::new(title));
     let mut input = spawn_input_reader(reader);
 
-    let result = run_loop(&mut tui, &mut events, &mut input).await;
+    let result = run_loop(&mut tui, &mut events, &mut input, &submissions).await;
 
     let mut terminal = tui.into_terminal();
     let restored = restore_terminal(&mut terminal);
@@ -208,6 +206,7 @@ async fn run_loop(
     tui: &mut Tui<TerminaBackend<PlatformTerminal>>,
     events: &mut mpsc::UnboundedReceiver<AgentEvent>,
     input: &mut InputReader,
+    submissions: &mpsc::UnboundedSender<String>,
 ) -> io::Result<()> {
     tui.draw()?;
     loop {
@@ -216,12 +215,16 @@ async fn run_loop(
             Some(key) = input.recv() => {
                 match action_for(&key) {
                     Action::Quit => return Ok(()),
-                    Action::ScrollUp => tui.scroll_up(1),
-                    Action::ScrollDown => tui.scroll_down(1),
                     Action::PageUp => tui.scroll_up(10),
                     Action::PageDown => tui.scroll_down(10),
-                    Action::Bottom => tui.scroll_to_bottom(),
-                    Action::None => continue,
+                    Action::None => match tui.handle_input(&key) {
+                        EditorAction::Quit => return Ok(()),
+                        EditorAction::Submit(text) => {
+                            // 接收端已经没了（调用方退出）就忽略这次提交。
+                            let _ = submissions.send(text);
+                        }
+                        EditorAction::None => {}
+                    },
                 }
             }
             // 两个通道都关闭（agent 结束且输入线程退出）时收尾。
@@ -242,9 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn quit_keys_map_to_quit() {
-        assert_eq!(action_for(&key(KeyCode::Char('q'))), Action::Quit);
-        assert_eq!(action_for(&key(KeyCode::Escape)), Action::Quit);
+    fn ctrl_c_is_the_only_quit_key() {
         assert_eq!(
             action_for(&Event::Key(KeyEvent::new(
                 KeyCode::Char('c'),
@@ -252,15 +253,17 @@ mod tests {
             ))),
             Action::Quit
         );
+        // `q` / `Esc` 归编辑器（vim），不再当作全局退出键。
+        assert_eq!(action_for(&key(KeyCode::Char('q'))), Action::None);
+        assert_eq!(action_for(&key(KeyCode::Escape)), Action::None);
     }
 
     #[test]
-    fn scroll_keys_map_to_scroll_actions() {
-        assert_eq!(action_for(&key(KeyCode::Up)), Action::ScrollUp);
-        assert_eq!(action_for(&key(KeyCode::Down)), Action::ScrollDown);
+    fn page_keys_scroll_the_transcript() {
         assert_eq!(action_for(&key(KeyCode::PageUp)), Action::PageUp);
         assert_eq!(action_for(&key(KeyCode::PageDown)), Action::PageDown);
-        assert_eq!(action_for(&key(KeyCode::Home)), Action::Bottom);
+        // 方向键归编辑器。
+        assert_eq!(action_for(&key(KeyCode::Up)), Action::None);
         assert_eq!(action_for(&key(KeyCode::Char('x'))), Action::None);
     }
 
