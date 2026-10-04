@@ -8,6 +8,11 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+# 仅供测试使用的确定性离线 provider（`provider::faux`）。由消费者的
+# `[dev-dependencies]` 打开，正常构建不会编进任何二进制。
+test-util = []
+
 [dependencies]
 tower = { workspace = true }
 futures-core = { workspace = true }

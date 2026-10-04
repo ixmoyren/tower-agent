@@ -1,8 +1,9 @@
-//! 离线 faux provider：在没有真实模型的情况下把会话端到端跑通。
+//! 确定性离线 provider，**测试 provider**：不联网、不调用模型，只按固定规则产生事件流。
 //!
-//! 真实的 provider（anthropic/openai/…）属于 `ai` crate 的 provider 层，尚未移植
-//! （design.md 第 5 节 / Q5）。为了让 `cli` 的会话入口今天就能运行和被测试，这里提供一个
-//! **确定性的**离线 provider：它不联网、不调用模型，只按固定规则产生事件流。
+//! 它挂在 `test-util` feature 下（见 `Cargo.toml`），正常构建不会编进任何二进制；
+//! 需要它的消费者（例如 `cli` 的会话测试）在 `[dev-dependencies]` 里带 feature 引入即可。
+//! 目的有二：一是把会话端到端跑通而不依赖真实模型与凭据；二是给上层一个可复现、
+//! 可脚本化的 provider 流。
 //!
 //! 规则（最后一条消息决定行为）：
 //!
@@ -18,7 +19,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use ai::{
+use crate::{
     AssistantEventStream, AssistantMessage, AssistantMessageEvent, BoxStreamService, ContentBlock,
     DoneReason, InputModality, JsonObject, Message, Model, PiError, StopReason, StreamRequest,
     TextContent, ToolCall, Usage, UserContent,
@@ -27,6 +28,7 @@ use futures_util::{future::BoxFuture, stream};
 use tower::Service;
 
 /// 构造 faux provider 的模型元数据。
+#[must_use]
 pub fn model() -> Model {
     Model {
         id: "faux".into(),
@@ -48,16 +50,19 @@ pub struct FauxProvider {
 
 impl FauxProvider {
     /// 构造一个 faux provider。
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// 已处理的请求数。
+    #[must_use]
     pub fn call_count(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
     }
 
     /// 装箱成 agent 需要的 [`BoxStreamService`]。
+    #[must_use]
     pub fn boxed(self) -> BoxStreamService {
         tower::util::BoxCloneService::new(self)
     }
@@ -112,8 +117,8 @@ fn parse_tool_directive(text: &str) -> Option<(String, JsonObject)> {
     }
     let arguments = match parts.next().map(str::trim) {
         None | Some("") => JsonObject::new(),
-        Some(raw) => match serde_json::from_str::<ai::JsonValue>(raw) {
-            Ok(ai::JsonValue::Object(map)) => map,
+        Some(raw) => match serde_json::from_str::<crate::JsonValue>(raw) {
+            Ok(crate::JsonValue::Object(map)) => map,
             // 参数不是 JSON 对象时退化成空参数，让工具自己报参数错误。
             _ => JsonObject::new(),
         },
@@ -201,7 +206,7 @@ fn tool_call_stream(
     arguments: JsonObject,
 ) -> Vec<AssistantMessageEvent> {
     let call = ToolCall {
-        id: format!("faux-call-{}", name),
+        id: format!("faux-call-{name}"),
         name,
         arguments,
         thought_signature: None,
@@ -246,8 +251,8 @@ mod tests {
     fn request(model: &Model, messages: Vec<Message>) -> StreamRequest {
         StreamRequest {
             model: model.clone(),
-            context: ai::TranscriptContext::new(messages),
-            options: ai::SimpleStreamOptions::default(),
+            context: crate::TranscriptContext::new(messages),
+            options: crate::SimpleStreamOptions::default(),
         }
     }
 
@@ -267,7 +272,7 @@ mod tests {
     }
 
     fn user(text: &str) -> Message {
-        Message::User(ai::UserMessage {
+        Message::User(crate::UserMessage {
             content: UserContent::Text(text.into()),
             timestamp: 0,
         })
@@ -308,7 +313,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_result_produces_a_summary() {
-        let result = ai::ToolResultMessage {
+        let result = crate::ToolResultMessage {
             tool_call_id: "call-1".into(),
             tool_name: "read".into(),
             content: vec![text_block("第一行\n第二行")],

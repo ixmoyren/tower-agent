@@ -20,4 +20,5 @@ tower = { workspace = true }
 tui = { path = "../tui" }
 
 [dev-dependencies]
+ai = { path = "../ai", features = ["test-util"] }
 tempfile = { workspace = true }

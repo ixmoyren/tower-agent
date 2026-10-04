@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -20,6 +20,9 @@ use crate::{
 
 /// 输入区高度（3 行文本 + 上下边框）。
 pub const EDITOR_HEIGHT: u16 = 5;
+
+/// 斜杠命令菜单里最多同时显示几项（pi 的 `autocompleteMaxVisible` 默认是 5）。
+const MENU_MAX_ITEMS: usize = 5;
 
 /// 把当前状态渲染到 `frame`。
 pub fn render(frame: &mut Frame, state: &TuiState, editor: &Editor) {
@@ -35,12 +38,80 @@ pub fn render(frame: &mut Frame, state: &TuiState, editor: &Editor) {
     render_header(frame, chunks[0], state);
     render_transcript(frame, chunks[1], state);
     render_editor(frame, chunks[2], editor);
+    render_command_menu(frame, chunks[2], editor);
     render_footer(frame, chunks[3], state);
 }
 
 /// 输入区：`ratatui-textarea` 自带边框标题（模式）与行号样式。
 fn render_editor(frame: &mut Frame, area: Rect, editor: &Editor) {
     frame.render_widget(editor.textarea(), area);
+}
+
+/// 斜杠命令菜单：悬浮在输入区正上方，最多显示 [`MENU_MAX_ITEMS`] 项。
+fn render_command_menu(frame: &mut Frame, area: Rect, editor: &Editor) {
+    let Some(items) = editor.command_menu() else {
+        return;
+    };
+    if items.is_empty() || area.height == 0 || area.width < 8 {
+        return;
+    }
+
+    let visible = items.len().min(MENU_MAX_ITEMS);
+    let height = u16::try_from(visible).unwrap_or(1) + 2;
+    let height = height.min(area.height);
+    let rect = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(height),
+        width: area.width.min(80),
+        height,
+    };
+
+    // 选中项始终留在可见窗口里（与 pi 的 autocomplete 列表一致）。
+    let selected = editor.menu_selection().min(items.len() - 1);
+    let start = selected
+        .saturating_sub(MENU_MAX_ITEMS - 1)
+        .min(items.len().saturating_sub(MENU_MAX_ITEMS));
+    let rows: Vec<ListItem<'_>> = items
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(MENU_MAX_ITEMS)
+        .map(|(index, command)| {
+            let mut spans = vec![Span::styled(
+                format!("/{}", command.name),
+                Style::default().fg(Color::Cyan),
+            )];
+            if let Some(hint) = command.argument_hint {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+            }
+            if !command.ported {
+                spans.push(Span::styled(
+                    " · 尚未移植",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                command.description,
+                Style::default().fg(Color::DarkGray),
+            ));
+            let item = ListItem::new(Line::from(spans));
+            if index == selected {
+                item.style(Style::default().add_modifier(Modifier::REVERSED))
+            } else {
+                item
+            }
+        })
+        .collect();
+
+    let menu = List::new(rows).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 命令（Tab 补全 · Enter 执行） "),
+    );
+    frame.render_widget(Clear, rect);
+    frame.render_widget(menu, rect);
 }
 
 fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
@@ -77,7 +148,7 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let hints = "Enter 提交 · i 插入 · Esc 普通 · q 退出 · PgUp/PgDn 滚动记录";
+    let hints = "Enter 提交 · / 命令 · i 插入 · Esc 普通 · q 退出 · PgUp/PgDn 滚动记录";
     let mut spans = vec![Span::styled(hints, Style::default().fg(Color::DarkGray))];
     if let Some(error) = state.error() {
         spans.push(Span::raw("  "));
@@ -148,6 +219,7 @@ fn prefix_for(kind: EntryKind) -> &'static str {
         EntryKind::Assistant => "",
         EntryKind::System => "· ",
         EntryKind::Tool => "",
+        EntryKind::Notice => "» ",
     }
 }
 
@@ -157,6 +229,7 @@ fn style_for(kind: EntryKind) -> Style {
         EntryKind::Assistant => Style::default(),
         EntryKind::System => Style::default().fg(Color::DarkGray),
         EntryKind::Tool => Style::default().fg(Color::Yellow),
+        EntryKind::Notice => Style::default().fg(Color::LightBlue),
     }
 }
 
@@ -275,7 +348,8 @@ mod tests {
         }
         editor.handle(&key(KeyCode::Escape));
 
-        let backend = ratatui::backend::TestBackend::new(30, 14);
+        // 提示栏现在还要放 `/ 命令` 的提示，用宽一点的终端保证整条提示都能渲染出来。
+        let backend = ratatui::backend::TestBackend::new(72, 14);
         let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
         terminal
             .draw(|frame| render(frame, &state, &editor))
@@ -317,5 +391,48 @@ mod tests {
             .map(|span| span.content.as_ref())
             .collect();
         assert_eq!(rendered, "› hi");
+    }
+
+    #[test]
+    fn slash_menu_lists_pi_commands_above_the_editor() {
+        use ratatui::termina::event::{Event, KeyCode, KeyEvent, Modifiers};
+
+        let state = TuiState::new("t");
+        let mut editor = Editor::new();
+        // 普通模式下打 `/` 打开菜单（等价于 pi 里在输入框敲斜杠）。
+        editor.handle(&Event::Key(KeyEvent::new(
+            KeyCode::Char('/'),
+            Modifiers::NONE,
+        )));
+
+        let backend = ratatui::backend::TestBackend::new(72, 16);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render(frame, &state, &editor))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let mut rendered = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                rendered.push_str(buffer[(x, y)].symbol());
+            }
+            rendered.push('\n');
+        }
+
+        // 宽字符在缓冲区里各占两列，断言只看 ASCII 的命令名。
+        assert!(rendered.contains("/settings"), "首条命令:\n{rendered}");
+        assert!(rendered.contains("/model"), "菜单包含 model:\n{rendered}");
+    }
+
+    #[test]
+    fn notices_are_rendered_with_their_own_prefix() {
+        let mut state = TuiState::new("t");
+        state.push_notice("已开始新会话。");
+        let rendered: String = transcript_lines(&state, 40)[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(rendered, "» 已开始新会话。");
     }
 }

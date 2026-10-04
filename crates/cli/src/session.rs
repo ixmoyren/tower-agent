@@ -5,8 +5,8 @@
 //! - [`Session`] 持有 `agent::Agent`（编排循环 + 队列 + 事件总线）与内置工具集；
 //! - 事件通过 [`Session::subscribe`] 拿到的 `agent::Subscription` 流出，
 //!   既可以交给 [`tui::run_agent_tui`] 渲染，也可以用 [`run_print`] 打成纯文本（便于脚本与测试）；
-//! - provider 由调用方注入（[`Session::new`] 的 `stream` 参数），真实的 provider 层尚未移植，
-//!   所以二进制默认用 [`crate::faux::FauxProvider`]。
+//! - provider 由调用方注入（[`Session::new`] 的 `stream` 参数）；测试用确定性的离线
+//!   provider [`ai::provider::faux::FauxProvider`]，二进制则接真实 provider。
 
 use std::{
     io::Write,
@@ -14,8 +14,10 @@ use std::{
     sync::Arc,
 };
 
-use agent::{Agent, AgentError, AgentEvent, AgentMessage, AgentOptions, AgentState, Subscription};
-use ai::{BoxStreamService, Message, Model, UserContent, UserMessage};
+use agent::{
+    Agent, AgentError, AgentEvent, AgentMessage, AgentOptions, AgentState, AgentTool, Subscription,
+};
+use ai::{BoxStreamService, Message, Model, ModelThinkingLevel, UserContent, UserMessage};
 use tokio::sync::mpsc;
 
 /// 会话。
@@ -87,6 +89,176 @@ impl Session {
     /// 取消进行中的一轮。
     pub fn abort(&self) {
         self.agent.abort();
+    }
+
+    /// 替换当前模型（`--model` 与 TUI 的 `/model` 都走这里）。
+    pub fn set_model(&self, model: Model) {
+        self.agent.set_model(model);
+    }
+
+    /// 替换思考级别（`--thinking` 与 `/thinking`）。
+    pub fn set_thinking_level(&self, level: ModelThinkingLevel) {
+        self.agent.set_thinking_level(level);
+    }
+
+    /// 替换可执行工具集（`--tools` / `--exclude-tools` / `--no-tools`）。
+    pub fn set_tools(&self, tools: Vec<AgentTool>) {
+        self.agent.set_tools(tools);
+    }
+
+    /// 重置会话（`/new`）：清空 transcript 与队列，保留 system prompt 与工具。
+    pub fn reset(&self) -> Result<(), AgentError> {
+        self.agent.reset()
+    }
+}
+
+/// `off` / `minimal` / … / `max` → [`ModelThinkingLevel`]（pi `--thinking` / `/thinking` 的取值）。
+#[must_use]
+pub fn parse_thinking_level(value: &str) -> Option<ModelThinkingLevel> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" => Some(ModelThinkingLevel::Off),
+        "minimal" => Some(ModelThinkingLevel::Level(ai::ThinkingLevel::Minimal)),
+        "low" => Some(ModelThinkingLevel::Level(ai::ThinkingLevel::Low)),
+        "medium" => Some(ModelThinkingLevel::Level(ai::ThinkingLevel::Medium)),
+        "high" => Some(ModelThinkingLevel::Level(ai::ThinkingLevel::High)),
+        "xhigh" => Some(ModelThinkingLevel::Level(ai::ThinkingLevel::XHigh)),
+        "max" => Some(ModelThinkingLevel::Level(ai::ThinkingLevel::Max)),
+        _ => None,
+    }
+}
+
+/// [`ModelThinkingLevel`] → pi 的取值字符串。
+#[must_use]
+pub fn thinking_level_name(level: ModelThinkingLevel) -> &'static str {
+    match level {
+        ModelThinkingLevel::Off => "off",
+        ModelThinkingLevel::Level(ai::ThinkingLevel::Minimal) => "minimal",
+        ModelThinkingLevel::Level(ai::ThinkingLevel::Low) => "low",
+        ModelThinkingLevel::Level(ai::ThinkingLevel::Medium) => "medium",
+        ModelThinkingLevel::Level(ai::ThinkingLevel::High) => "high",
+        ModelThinkingLevel::Level(ai::ThinkingLevel::XHigh) => "xhigh",
+        ModelThinkingLevel::Level(ai::ThinkingLevel::Max) => "max",
+    }
+}
+
+/// pi 的思考级别取值（帮助文案与错误提示共用）。
+pub const THINKING_LEVELS: &str = "off, minimal, low, medium, high, xhigh, max";
+
+/// 用户可选的 provider 列表（`/model` 的错误提示用；不含测试用的 faux）。
+#[must_use]
+pub fn available_providers() -> String {
+    crate::provider::ProviderKind::ALL
+        .iter()
+        .map(|kind| kind.canonical_name())
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
+impl tui::CommandHost for Session {
+    fn new_session(&self) -> Result<(), String> {
+        self.reset().map_err(|error| error.to_string())
+    }
+
+    fn session_info(&self) -> Vec<String> {
+        let state = self.state();
+        vec![
+            format!("工作目录：{}", self.cwd().display()),
+            format!(
+                "模型：{}（provider {} / api {}）",
+                state.model.id, state.model.provider, state.model.api
+            ),
+            format!("思考级别：{}", thinking_level_name(state.thinking_level)),
+            format!(
+                "消息：{} 条 · 工具：{} 个",
+                state.messages.len(),
+                state.tools.len()
+            ),
+            format!(
+                "状态：{}",
+                if state.is_streaming {
+                    "running"
+                } else {
+                    "idle"
+                }
+            ),
+        ]
+    }
+
+    fn model(&self, arg: Option<&str>) -> Result<String, String> {
+        let current = self.state().model;
+        let Some(arg) = arg else {
+            return Ok(format!(
+                "当前模型：{}（provider {} / api {}）\n用法：/model <provider>/<id> 或 /model <id>",
+                current.id, current.provider, current.api
+            ));
+        };
+
+        let (requested, id) = match arg.split_once('/') {
+            Some((provider, id)) => (Some(provider.trim()), id.trim()),
+            None => (None, arg.trim()),
+        };
+        if id.is_empty() {
+            return Err("模型 id 不能为空。用法：/model <provider>/<id>".into());
+        }
+
+        // 没写 `provider/` 时：先看它是不是 provider 名（用它的默认模型），否则按当前
+        // provider 的模型 id 处理。
+        let kind = match requested {
+            Some(provider) => crate::provider::ProviderKind::parse(provider).ok_or_else(|| {
+                format!(
+                    "未知 provider：{provider}（可用：{}）",
+                    available_providers()
+                )
+            })?,
+            None => match crate::provider::ProviderKind::parse(id) {
+                Some(kind) => kind,
+                None => crate::provider::ProviderKind::ALL
+                    .into_iter()
+                    .find(|kind| kind.api() == current.api)
+                    .ok_or_else(|| format!("当前 provider（{}）无法识别", current.provider))?,
+            },
+        };
+        let model_id = match requested {
+            Some(_) => id,
+            None => {
+                if crate::provider::ProviderKind::parse(id).is_some() {
+                    kind.default_model_id()
+                } else {
+                    id
+                }
+            }
+        };
+
+        if kind.id() != current.provider {
+            return Err(format!(
+                "本移植版的 provider 在启动时固定（当前 {}），换 provider 请用 `--provider` 重启。",
+                current.provider
+            ));
+        }
+
+        let model = crate::provider::model_for(kind, model_id);
+        self.set_model(model.clone());
+        Ok(format!(
+            "模型已切换为：{}（provider {}）",
+            model.id, model.provider
+        ))
+    }
+
+    fn thinking(&self, arg: Option<&str>) -> Result<String, String> {
+        match arg {
+            None => Ok(format!(
+                "当前思考级别：{}\n用法：/thinking <{}>",
+                thinking_level_name(self.state().thinking_level),
+                THINKING_LEVELS
+            )),
+            Some(value) => match parse_thinking_level(value) {
+                Some(level) => {
+                    self.set_thinking_level(level);
+                    Ok(format!("思考级别已设为：{}", thinking_level_name(level)))
+                }
+                None => Err(format!("未知思考级别：{value}（可用：{THINKING_LEVELS}）")),
+            },
+        }
     }
 }
 
@@ -192,6 +364,8 @@ pub async fn run_tui(
 ) -> std::io::Result<()> {
     let subscription = session.subscribe();
     let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();
+    // 斜杠命令（`/new`、`/model`…）在 TUI 里执行，通过这个 trait 回调到会话。
+    let host: Arc<dyn tui::CommandHost> = session.clone();
 
     let driver_session = Arc::clone(session);
     let driver = tokio::spawn(async move {
@@ -209,7 +383,7 @@ pub async fn run_tui(
         first_error
     });
 
-    let rendered = tui::run_agent_tui(subscription, submissions_tx, title.to_string()).await;
+    let rendered = tui::run_agent_tui(subscription, submissions_tx, host, title.to_string()).await;
 
     // 用户退出：取消进行中的一轮，并等驱动任务自然收尾（避免直接 abort 丢掉取消语义）。
     session.abort();
@@ -237,13 +411,14 @@ mod tests {
     use ai::{
         AssistantEventStream, AssistantMessage, AssistantMessageEvent, BoxStreamService,
         ContentBlock, DoneReason, PiError, StopReason, StreamRequest, TextContent, Usage,
+        provider::faux::{FauxProvider, model},
     };
     use futures_util::{future::BoxFuture, stream};
     use tokio::sync::Semaphore;
     use tower::Service;
+    use tui::CommandHost as _;
 
-    use super::{Session, run_print};
-    use crate::faux::{FauxProvider, model};
+    use super::{Session, parse_thinking_level, run_print, thinking_level_name};
 
     fn session(cwd: &std::path::Path) -> Session {
         Session::with_model(cwd, FauxProvider::new().boxed(), model())
@@ -535,5 +710,62 @@ mod tests {
         assert!(text.contains("[tool:ok] read"), "got: {text}");
         assert!(text.contains("[assistant]"), "got: {text}");
         assert!(text.contains("[agent] end"), "got: {text}");
+    }
+
+    #[test]
+    fn thinking_levels_round_trip_pi_names() {
+        for name in ["off", "minimal", "low", "medium", "high", "xhigh", "max"] {
+            let level = parse_thinking_level(name).expect("known level");
+            assert_eq!(thinking_level_name(level), name);
+            // 大小写不敏感，和 pi 一样。
+            assert_eq!(parse_thinking_level(&name.to_uppercase()), Some(level));
+        }
+        assert!(parse_thinking_level("nope").is_none());
+    }
+
+    #[tokio::test]
+    async fn command_host_reports_and_updates_session_state() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let setup = crate::provider::build_with_api_key(
+            crate::provider::ProviderKind::Anthropic,
+            Some("claude-test"),
+            crate::provider::ProviderStackOptions::default(),
+            Some("test-key"),
+        )
+        .expect("provider setup");
+        let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone());
+
+        let info = session.session_info().join("\n");
+        assert!(info.contains("claude-test"), "got: {info}");
+        assert!(info.contains("anthropic"), "got: {info}");
+
+        // 同一 provider 下换模型 id：真的换掉。
+        let message = session.model(Some("claude-other")).expect("switch model");
+        assert!(message.contains("claude-other"), "got: {message}");
+        assert_eq!(session.state().model.id, "claude-other");
+        assert_eq!(session.state().model.provider, "anthropic");
+
+        // 换 provider 需要重启（本移植版的 stream service 在启动时固定）。
+        assert!(session.model(Some("faux/faux")).is_err());
+
+        // 思考级别：读回 pi 的名字。
+        session.thinking(Some("high")).expect("set thinking");
+        assert_eq!(thinking_level_name(session.state().thinking_level), "high");
+        assert!(session.thinking(Some("nope")).is_err());
+    }
+
+    #[tokio::test]
+    async fn new_session_resets_the_transcript() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let session = session(dir.path());
+        session.ask("你好").await.expect("turn succeeds");
+        assert_eq!(
+            session.state().messages.len(),
+            3,
+            "system + user + assistant"
+        );
+
+        session.new_session().expect("reset");
+        assert_eq!(session.state().messages.len(), 1, "只剩 system 基线");
     }
 }

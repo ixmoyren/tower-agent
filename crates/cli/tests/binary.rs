@@ -23,6 +23,11 @@ fn help_and_version_exit_successfully() {
     let output = cli().arg("--version").output().expect("run cli");
     assert!(output.status.success());
     assert!(stdout(&output).starts_with("cli "));
+
+    // pi 的版本短选项是 `-v`。
+    let output = cli().arg("-v").output().expect("run cli");
+    assert!(output.status.success());
+    assert!(stdout(&output).starts_with("cli "));
 }
 
 #[test]
@@ -43,62 +48,6 @@ fn list_tools_prints_every_builtin_tool() {
         assert!(text.contains(name), "missing `{name}` in:\n{text}");
     }
     assert!(text.contains("内置工具（8 个）"), "got:\n{text}");
-}
-
-#[test]
-fn print_mode_runs_a_full_turn_with_a_real_tool() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    std::fs::write(dir.path().join("note.txt"), "来自文件的内容\n").unwrap();
-
-    let output = cli()
-        .args([
-            "--print",
-            "--faux",
-            "-C",
-            dir.path().to_str().expect("utf-8 path"),
-            "!read {\"path\":\"note.txt\"}",
-        ])
-        .output()
-        .expect("run cli");
-
-    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
-    let text = stdout(&output);
-    assert!(text.contains("[agent] start"), "got:\n{text}");
-    assert!(text.contains("[user] !read"), "got:\n{text}");
-    assert!(text.contains("[tool] read"), "got:\n{text}");
-    assert!(text.contains("[tool:ok] read"), "got:\n{text}");
-    assert!(text.contains("来自文件的内容"), "got:\n{text}");
-    assert!(text.contains("[assistant]"), "got:\n{text}");
-    assert!(text.contains("[agent] end"), "got:\n{text}");
-}
-
-#[test]
-fn print_mode_reads_the_prompt_from_stdin_when_no_positional_argument_is_given() {
-    use std::{io::Write as _, process::Stdio};
-
-    let mut child = cli()
-        .args(["--print"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn cli");
-    child
-        .stdin
-        .as_mut()
-        .expect("stdin is piped")
-        .write_all("来自标准输入".as_bytes())
-        .expect("write stdin");
-    let output = child.wait_with_output().expect("wait cli");
-
-    assert!(
-        output.status.success(),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("[user] 来自标准输入"), "got:\n{text}");
-    assert!(text.contains("[faux] 收到：来自标准输入"), "got:\n{text}");
 }
 
 #[test]
@@ -135,16 +84,6 @@ fn real_provider_without_api_key_fails_clearly() {
 }
 
 #[test]
-fn explicit_provider_faux_runs_a_full_turn() {
-    let output = cli()
-        .args(["--print", "--provider", "faux", "你好"])
-        .output()
-        .expect("run cli");
-    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
-    assert!(stdout(&output).contains("[faux] 收到：你好"));
-}
-
-#[test]
 fn missing_prompt_fails_with_usage() {
     // stdin 是空管道时没有提示词可用。
     use std::process::Stdio;
@@ -155,4 +94,53 @@ fn missing_prompt_fails_with_usage() {
         .expect("run cli");
     assert!(!output.status.success());
     assert!(stderr(&output).contains("没有提示词"));
+}
+
+#[test]
+fn faux_is_not_a_selectable_provider() {
+    // faux 是测试替身，不编进二进制：既没有 `--faux`，`--provider faux` 也不认。
+    let output = cli().args(["--faux", "hi"]).output().expect("run cli");
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("--faux"),
+        "got:\n{}",
+        stderr(&output)
+    );
+
+    let output = cli()
+        .args(["--print", "--provider", "faux", "hi"])
+        .output()
+        .expect("run cli");
+    assert!(!output.status.success());
+    let text = stderr(&output);
+    assert!(text.contains("未知 provider：faux"), "got:\n{text}");
+    assert!(!text.contains("faux /"), "可用列表里不应有 faux：\n{text}");
+}
+
+#[test]
+fn default_provider_comes_from_the_environment() {
+    // 三个环境变量都没有时给出明确提示，而不是默默退回 faux。
+    let output = cli()
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("GEMINI_API_KEY")
+        .args(["--print", "hi"])
+        .output()
+        .expect("run cli");
+    assert!(!output.status.success());
+    let text = stderr(&output);
+    assert!(text.contains("没有可用的 provider"), "got:\n{text}");
+    assert!(text.contains("ANTHROPIC_API_KEY"), "got:\n{text}");
+}
+
+#[test]
+fn api_key_requires_an_explicit_provider() {
+    let output = cli()
+        .args(["--print", "--api-key", "sk-test", "hi"])
+        .output()
+        .expect("run cli");
+    assert!(!output.status.success());
+    let text = stderr(&output);
+    assert!(text.contains("--api-key"), "got:\n{text}");
+    assert!(text.contains("--provider"), "got:\n{text}");
 }

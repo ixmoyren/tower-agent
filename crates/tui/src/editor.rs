@@ -77,6 +77,8 @@ pub struct Editor {
     mode: Mode,
     /// 双键序列的前缀（目前只有 `g`）。
     pending_g: bool,
+    /// 斜杠命令菜单里当前选中的项。
+    menu_selection: usize,
 }
 
 impl Default for Editor {
@@ -92,6 +94,7 @@ impl Editor {
             textarea: TextArea::default(),
             mode: Mode::Normal,
             pending_g: false,
+            menu_selection: 0,
         };
         editor.configure();
         editor
@@ -110,6 +113,16 @@ impl Editor {
     /// 当前内容（按行拼接），用于测试与调试。
     pub fn text(&self) -> String {
         self.textarea.lines().join("\n")
+    }
+
+    /// 当前输入触发的斜杠命令菜单（`/` 开头且还没进入参数时为 `Some`）。
+    pub fn command_menu(&self) -> Option<Vec<&'static crate::command::SlashCommand>> {
+        crate::command::menu(&self.text())
+    }
+
+    /// 菜单里当前选中的下标（已按菜单长度收敛）。
+    pub fn menu_selection(&self) -> usize {
+        self.menu_selection
     }
 
     /// 处理一次终端事件。
@@ -135,7 +148,7 @@ impl Editor {
         self.textarea
             .set_cursor_line_style(Style::default().add_modifier(Modifier::DIM));
         self.textarea
-            .set_placeholder_text("输入提示词：i 插入 · Esc 普通 · Enter 提交");
+            .set_placeholder_text("输入提示词：/ 命令 · i 插入 · Esc 普通 · Enter 提交");
         self.refresh_block();
     }
 
@@ -158,8 +171,51 @@ impl Editor {
             self.set_mode(Mode::Normal);
             return EditorAction::None;
         }
+        if let Some(items) = self.command_menu() {
+            let len = items.len();
+            match (input.key, input.ctrl) {
+                (Key::Up, false) | (Key::Char('p'), true) => {
+                    self.menu_selection = menu_index(self.menu_selection, len, -1);
+                    return EditorAction::None;
+                }
+                (Key::Down, false) | (Key::Char('n'), true) => {
+                    self.menu_selection = menu_index(self.menu_selection, len, 1);
+                    return EditorAction::None;
+                }
+                (Key::Tab, false) => {
+                    self.complete_menu_selection(&items);
+                    return EditorAction::None;
+                }
+                (Key::Enter, false) => {
+                    let command = items[menu_index(self.menu_selection, len, 0)];
+                    let text = format!("/{}", command.name);
+                    self.clear();
+                    return EditorAction::Submit(text);
+                }
+                _ => {}
+            }
+        }
         self.textarea.input_without_shortcuts(input);
+        self.clamp_menu_selection();
         EditorAction::None
+    }
+
+    /// Tab 补全：把选中的命令写进输入框（带参数的补一个空格）。
+    fn complete_menu_selection(&mut self, items: &[&'static crate::command::SlashCommand]) {
+        let command = items[menu_index(self.menu_selection, items.len(), 0)];
+        let mut completed = format!("/{}", command.name);
+        if command.argument_hint.is_some() {
+            completed.push(' ');
+        }
+        self.textarea = TextArea::default();
+        self.configure();
+        self.textarea.insert_str(completed);
+        self.menu_selection = 0;
+    }
+
+    fn clamp_menu_selection(&mut self) {
+        let len = self.command_menu().map_or(0, |items| items.len());
+        self.menu_selection = menu_index(self.menu_selection, len, 0);
     }
 
     /// 共享的移动键：Normal 与 Visual 都用它（Visual 处于选择状态，移动即扩展选区）。
@@ -206,6 +262,13 @@ impl Editor {
             }
             (Key::Enter, false) => return self.submit(),
             (Key::Char('q'), false) => return EditorAction::Quit,
+            // `/` 打开命令菜单（本移植版没有 vim 搜索，这个键位给斜杠命令用）。
+            (Key::Char('/'), false) => {
+                self.textarea.cancel_selection();
+                self.set_mode(Mode::Insert);
+                self.textarea.insert_char('/');
+                self.menu_selection = 0;
+            }
             // 进入插入模式的各种方式。
             (Key::Char('i'), false) => {
                 self.textarea.cancel_selection();
@@ -447,8 +510,19 @@ impl Editor {
         self.textarea = TextArea::default();
         self.pending_g = false;
         self.mode = Mode::Normal;
+        self.menu_selection = 0;
         self.configure();
     }
+}
+
+/// 在长度为 `len` 的菜单里移动选中项：`delta` 为 -1 向上 / 1 向下 / 0 只收敛；
+/// 越界会绕回另一端。
+fn menu_index(selection: usize, len: usize, delta: isize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    let current = selection.min(len - 1) as isize;
+    (current + delta).rem_euclid(len as isize) as usize
 }
 
 #[cfg(test)]
@@ -805,5 +879,67 @@ mod tests {
         assert_eq!(editor.mode().label(), "REPLACE");
         editor.handle(&key(KeyCode::Escape));
         assert_eq!(editor.mode().label(), "NORMAL");
+    }
+
+    #[test]
+    fn slash_in_normal_mode_opens_the_command_menu() {
+        let mut editor = Editor::new();
+        assert!(editor.command_menu().is_none());
+        editor.handle(&key(KeyCode::Char('/')));
+        assert_eq!(editor.mode(), Mode::Insert);
+        assert_eq!(editor.text(), "/");
+        // 菜单列出 pi 的全部内置命令。
+        assert_eq!(editor.command_menu().map(|items| items.len()), Some(24));
+    }
+
+    #[test]
+    fn typing_filters_the_command_menu_and_closes_on_arguments() {
+        let mut editor = Editor::new();
+        editor.handle(&key(KeyCode::Char('/')));
+        for ch in "mod".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
+        let items = editor.command_menu().expect("菜单仍然打开");
+        assert_eq!(items[0].name, "model", "前缀匹配排最前：{items:?}");
+
+        // 空格之后进入参数，菜单关闭。
+        editor.handle(&key(KeyCode::Char(' ')));
+        assert!(editor.command_menu().is_none());
+    }
+
+    #[test]
+    fn tab_completes_and_enter_runs_the_selected_command() {
+        let mut editor = Editor::new();
+        editor.handle(&key(KeyCode::Char('/')));
+        editor.handle(&key(KeyCode::Down));
+        assert_eq!(editor.text(), "/");
+        // 第二条是 `model`（带参数提示，补全时留一个空格）。
+        editor.handle(&key(KeyCode::Tab));
+        assert_eq!(editor.text(), "/model ");
+
+        // Enter 直接执行选中的命令。
+        let mut editor = Editor::new();
+        editor.handle(&key(KeyCode::Char('/')));
+        editor.handle(&key(KeyCode::Down));
+        assert_eq!(
+            editor.handle(&key(KeyCode::Enter)),
+            EditorAction::Submit("/model".into())
+        );
+        assert_eq!(editor.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn unknown_slash_text_is_submitted_verbatim() {
+        let mut editor = Editor::new();
+        editor.handle(&key(KeyCode::Char('/')));
+        for ch in "nope x".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
+        assert!(editor.command_menu().is_none());
+        editor.handle(&key(KeyCode::Escape));
+        assert_eq!(
+            editor.handle(&key(KeyCode::Enter)),
+            EditorAction::Submit("/nope x".into())
+        );
     }
 }

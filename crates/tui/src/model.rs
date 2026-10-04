@@ -20,6 +20,8 @@ pub enum EntryKind {
     System,
     /// 一次工具执行（开始/完成共用一条，完成时就地更新）。
     Tool,
+    /// 本地提示：斜杠命令的输出、错误说明等（不来自 agent）。
+    Notice,
 }
 
 /// 一条 transcript 条目。
@@ -146,6 +148,25 @@ impl TuiState {
             kind,
             text: render_message(message),
         });
+    }
+
+    /// 追加一条本地提示（斜杠命令的结果）。
+    pub fn push_notice(&mut self, text: impl Into<String>) {
+        self.entries.push(Entry {
+            kind: EntryKind::Notice,
+            text: text.into(),
+        });
+    }
+
+    /// 清空 transcript（`/new`：agent 侧已经 [`agent::Agent::reset`]）。
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.streaming = None;
+        self.pending_tools.clear();
+        self.tool_entries.clear();
+        self.error = None;
+        self.running = false;
+        self.scroll = 0;
     }
 
     /// 归约一个 agent 事件。
@@ -429,5 +450,24 @@ mod tests {
             timestamp: 0,
         })));
         assert_eq!(render_message(&message), "[tool ls({})]");
+    }
+
+    #[test]
+    fn notices_are_appended_and_clear_resets_everything() {
+        let mut state = TuiState::new("t");
+        state.push_message(&AgentMessage::Message(Message::User(ai::UserMessage {
+            content: ai::UserContent::Text("hi".into()),
+            timestamp: 0,
+        })));
+        state.push_notice("已开始新会话。");
+        assert_eq!(state.entries().len(), 2);
+        assert_eq!(state.entries()[1].kind, EntryKind::Notice);
+
+        state.apply(&AgentEvent::AgentStart);
+        state.clear();
+        assert!(state.entries().is_empty());
+        assert!(state.streaming().is_none());
+        assert!(!state.is_running());
+        assert_eq!(state.scroll(), 0);
     }
 }

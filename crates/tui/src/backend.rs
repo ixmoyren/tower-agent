@@ -33,7 +33,12 @@ use ratatui::{
 };
 use tokio::sync::mpsc;
 
-use crate::{app::Tui, editor::EditorAction, model::TuiState};
+use crate::{
+    app::Tui,
+    command::{self, CommandHost},
+    editor::EditorAction,
+    model::TuiState,
+};
 
 /// 本 crate 使用的终端类型（termina 后端 + 平台终端）。
 pub type AppTerminal = Terminal<TerminaBackend<PlatformTerminal>>;
@@ -170,6 +175,7 @@ pub fn action_for(event: &Event) -> Action {
 pub async fn run_agent_tui(
     mut subscription: Subscription,
     submissions: mpsc::UnboundedSender<String>,
+    host: Arc<dyn CommandHost>,
     title: impl Into<String>,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -180,7 +186,7 @@ pub async fn run_agent_tui(
             }
         }
     });
-    let result = run_tui(rx, submissions, title).await;
+    let result = run_tui(rx, submissions, host, title).await;
     pump.abort();
     result
 }
@@ -189,13 +195,21 @@ pub async fn run_agent_tui(
 pub async fn run_tui(
     mut events: mpsc::UnboundedReceiver<AgentEvent>,
     submissions: mpsc::UnboundedSender<String>,
+    host: Arc<dyn CommandHost>,
     title: impl Into<String>,
 ) -> io::Result<()> {
     let (terminal, reader) = init_terminal()?;
     let mut tui = Tui::new(terminal, TuiState::new(title));
     let mut input = spawn_input_reader(reader);
 
-    let result = run_loop(&mut tui, &mut events, &mut input, &submissions).await;
+    let result = run_loop(
+        &mut tui,
+        &mut events,
+        &mut input,
+        &submissions,
+        host.as_ref(),
+    )
+    .await;
 
     let mut terminal = tui.into_terminal();
     let restored = restore_terminal(&mut terminal);
@@ -207,6 +221,7 @@ async fn run_loop(
     events: &mut mpsc::UnboundedReceiver<AgentEvent>,
     input: &mut InputReader,
     submissions: &mpsc::UnboundedSender<String>,
+    host: &dyn CommandHost,
 ) -> io::Result<()> {
     tui.draw()?;
     loop {
@@ -220,8 +235,18 @@ async fn run_loop(
                     Action::None => match tui.handle_input(&key) {
                         EditorAction::Quit => return Ok(()),
                         EditorAction::Submit(text) => {
-                            // 接收端已经没了（调用方退出）就忽略这次提交。
-                            let _ = submissions.send(text);
+                            match text.strip_prefix('/') {
+                                // 斜杠命令由 TUI 自己执行（pi 的内置命令在这里生效）。
+                                Some(command) => {
+                                    if !run_slash_command(tui, host, command) {
+                                        return Ok(());
+                                    }
+                                }
+                                // 普通输入交给调用方驱动 agent；接收端没了就忽略。
+                                None => {
+                                    let _ = submissions.send(text);
+                                }
+                            }
                         }
                         EditorAction::None => {}
                     },
@@ -231,6 +256,73 @@ async fn run_loop(
             else => return Ok(()),
         }
         tui.draw()?;
+    }
+}
+
+/// 执行一条斜杠命令；返回 `false` 表示用户要退出 TUI（`/quit`）。
+///
+/// 命令名来自 [`command::BUILTIN_SLASH_COMMANDS`]，因此菜单里能看到的命令这里一定认；
+/// 已经实现的会真的执行，其余给出明确的“尚未移植”提示而不是静默失败。
+fn run_slash_command(
+    tui: &mut Tui<TerminaBackend<PlatformTerminal>>,
+    host: &dyn CommandHost,
+    input: &str,
+) -> bool {
+    match evaluate_command(host, input) {
+        CommandOutcome::Quit => false,
+        CommandOutcome::Clear(notice) => {
+            tui.state_mut().clear();
+            tui.state_mut().push_notice(notice);
+            true
+        }
+        CommandOutcome::Notice(notice) => {
+            tui.state_mut().push_notice(notice);
+            true
+        }
+    }
+}
+
+/// 斜杠命令的执行结果（与终端状态无关，便于单测）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CommandOutcome {
+    /// 退出 TUI（`/quit`）。
+    Quit,
+    /// 清空 transcript 后给出提示（`/new`）。
+    Clear(String),
+    /// 追加一条提示。
+    Notice(String),
+}
+
+fn evaluate_command(host: &dyn CommandHost, input: &str) -> CommandOutcome {
+    let mut parts = input.splitn(2, char::is_whitespace);
+    let name = parts.next().unwrap_or_default();
+    let arg = parts.next().map(str::trim).filter(|arg| !arg.is_empty());
+
+    let Some(command) = command::lookup(name) else {
+        return CommandOutcome::Notice(format!("未知命令：/{name}（输入 `/` 查看可用命令）"));
+    };
+
+    match command.name {
+        "quit" => CommandOutcome::Quit,
+        "new" => match host.new_session() {
+            Ok(()) => CommandOutcome::Clear("已开始新会话。".into()),
+            Err(error) => CommandOutcome::Notice(format!("/new 失败：{error}")),
+        },
+        "session" => CommandOutcome::Notice(host.session_info().join("\n")),
+        "model" => notice(host.model(arg)),
+        "thinking" => notice(host.thinking(arg)),
+        "hotkeys" => CommandOutcome::Notice(command::hotkeys().join("\n")),
+        _ => CommandOutcome::Notice(format!(
+            "/{name} 尚未移植到 tower-pi-agent（pi 里的说明：{}）。",
+            command.description
+        )),
+    }
+}
+
+fn notice(result: Result<String, String>) -> CommandOutcome {
+    match result {
+        Ok(text) => CommandOutcome::Notice(text),
+        Err(error) => CommandOutcome::Notice(format!("错误：{error}")),
     }
 }
 
@@ -277,5 +369,92 @@ mod tests {
         });
         assert_eq!(action_for(&release), Action::None);
         assert_eq!(action_for(&Event::FocusIn), Action::None);
+    }
+
+    /// 一个记录调用的假宿主；命令执行只依赖 [`CommandHost`]，不需要真会话。
+    struct FakeHost {
+        new_session: Result<(), String>,
+    }
+
+    impl CommandHost for FakeHost {
+        fn new_session(&self) -> Result<(), String> {
+            self.new_session.clone()
+        }
+
+        fn session_info(&self) -> Vec<String> {
+            vec!["cwd: /tmp".into(), "model: faux".into()]
+        }
+
+        fn model(&self, arg: Option<&str>) -> Result<String, String> {
+            Ok(match arg {
+                Some(arg) => format!("模型已切换为：{arg}"),
+                None => "当前模型：faux".into(),
+            })
+        }
+
+        fn thinking(&self, arg: Option<&str>) -> Result<String, String> {
+            Ok(match arg {
+                Some(arg) => format!("思考级别已设为：{arg}"),
+                None => "当前思考级别：off".into(),
+            })
+        }
+    }
+
+    fn fake_host() -> FakeHost {
+        FakeHost {
+            new_session: Ok(()),
+        }
+    }
+
+    #[test]
+    fn quit_asks_the_loop_to_exit() {
+        assert_eq!(evaluate_command(&fake_host(), "quit"), CommandOutcome::Quit);
+    }
+
+    #[test]
+    fn new_clears_the_transcript_or_reports_the_failure() {
+        assert_eq!(
+            evaluate_command(&fake_host(), "new"),
+            CommandOutcome::Clear("已开始新会话。".into())
+        );
+        let busy = FakeHost {
+            new_session: Err("Agent is already processing".into()),
+        };
+        assert_eq!(
+            evaluate_command(&busy, "new"),
+            CommandOutcome::Notice("/new 失败：Agent is already processing".into())
+        );
+    }
+
+    #[test]
+    fn implemented_commands_pass_arguments_to_the_host() {
+        assert_eq!(
+            evaluate_command(&fake_host(), "model anthropic/claude-x"),
+            CommandOutcome::Notice("模型已切换为：anthropic/claude-x".into())
+        );
+        assert_eq!(
+            evaluate_command(&fake_host(), "thinking high"),
+            CommandOutcome::Notice("思考级别已设为：high".into())
+        );
+        assert_eq!(
+            evaluate_command(&fake_host(), "session"),
+            CommandOutcome::Notice("cwd: /tmp\nmodel: faux".into())
+        );
+        match evaluate_command(&fake_host(), "hotkeys") {
+            CommandOutcome::Notice(text) => assert!(text.contains("命令菜单"), "got: {text}"),
+            other => panic!("expected a notice, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unported_and_unknown_commands_are_reported() {
+        match evaluate_command(&fake_host(), "compact") {
+            CommandOutcome::Notice(text) => assert!(text.contains("尚未移植"), "got: {text}"),
+            other => panic!("expected a notice, got {other:?}"),
+        }
+        match evaluate_command(&fake_host(), "nope") {
+            CommandOutcome::Notice(text) => assert!(text.contains("未知命令"), "got: {text}"),
+            other => panic!("expected a notice, got {other:?}"),
+        }
     }
 }

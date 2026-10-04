@@ -205,8 +205,9 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `provider::openai_responses`：OpenAI Responses provider —— 与 chat completions 又是另一套协议：请求体是类型化 `input` item 列表（`function_call` / `function_call_output` 与消息平级、`store: false`、`max_output_tokens` 下限 16），流是 **事件类型化**的 SSE（`response.output_text.delta`、`response.reasoning_summary_text.delta`、`response.function_call_arguments.delta|done`、`response.output_item.done`、`response.completed|incomplete|failed`），需要按 `output_index` 把 deltas 归并到对应输出项，并用终态 item 修正文本/参数。
 - `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）、`RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条）、`ObserveTransport`（`onPayload` 可观测/替换载荷，`onResponse` 观测状态码与响应头；[`CallContext`] 携带 provider/api/model 但不上线），以及 `TimeoutService`（`timeoutMs`：只约束 `call` 返回的「建立请求」future，超时映射成 `PiError::Timeout`）。
 - `models::Models`：三块内容 —— `(provider, api) → provider Service` 的路由 Service、`(provider, model id) → Model` 的模型目录，以及 `refresh`：逐个 provider 调用注册的目录来源，成功替换该 provider 的目录并统计 added/updated/removed，失败保留旧条目并把错误记进报告（对应 pi `Models.refresh()` 返回 `{ aborted, errors }` 的语义）。选项支持 `allow_network` / `providers`（限定范围）/ `signal`（取消）。未注册路由返回 `PiError::Unsupported`。
+- `provider::faux`：确定性离线 provider， **仅供测试**——挂在 `test-util` feature（或 `cfg(test)`）下，正常构建不编入任何二进制（`cli` 在 `[dev-dependencies]` 里带 feature 引入）。它只是一个测试 provider，不单独成 crate，用来在不联网、不调用模型的情况下把会话端到端跑通（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
 
-尚未移植的 provider 相关部分：bedrock-converse / vertex / mistral-conversations / pi-messages / cloudflare 等（其中 bedrock 还需要 SigV4 与事件流签名）。CLI 已接上真实 provider：`--provider`（`faux` / `anthropic` / `openai` / `openai-responses` / `google`）+ `--model` 组装 `timeout → retry → provider` 的栈，凭据来自各家的环境变量（`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`），缺凭据时明确报错。
+尚未移植的 provider 相关部分：bedrock-converse / vertex / mistral-conversations / pi-messages / cloudflare 等（其中 bedrock 还需要 SigV4 与事件流签名）。CLI 已接上真实 provider：`--provider`（`anthropic` / `openai` / `openai-responses` / `google`）+ `--model` 组装 `timeout → retry → provider` 的栈，凭据来自各家的环境变量（`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`），缺凭据时明确报错。
 
 `protocol` 已落地的内容（`crates/protocol`）：
 
@@ -239,16 +240,18 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `editor` 模块是输入编辑器： **`ratatui-textarea`**（官方 Ratatui 开发者维护的 fork，git 引入、`termina` 输入适配、`default-features = false`）+ 一层 vim 键位。 **默认 vim 普通模式**，五种模式：Normal / Insert / **Visual**（`v` 逐字符、`V` 整行；`y` `d` `c` `p` 作用在选区上）/ **Replace**（`r` 替换一次、`R` 覆盖输入）/ Operator（`d`/`y`/`c` + 动作，含 `dd`/`yy`/`dw`）。Normal 键位：`i a A I o O`、`Esc`、`h j k l`/方向键、`w e b`、`0 ^ $`、`gg G`、`x D C`、`p u Ctrl+r`、`v V r R`。 **默认显示行号**（`set_line_number_style`
   ），边框标题显示当前模式。Normal 模式 `Enter` 提交、`q` 退出；Insert 模式 `Enter` 换行。
 
-`tui` 是 **纯库**（与 pi `packages/tui` 一致）：不含二进制，事件循环由 `backend::run_agent_tui` / `run_tui` 暴露给调用方。可运行的 TUI 入口在 `cli`（默认模式，见下），它把真实会话（`faux` 或真实 provider + 内置工具）接到同一套渲染上；`cargo run -p cli` 即可试用编辑器。全局按键：`Ctrl+C` 随时退出、`PageUp/PageDown` 滚动会话记录；其余按键归编辑器。
+`tui` 是 **纯库**（与 pi `packages/tui` 一致）：不含二进制，事件循环由 `backend::run_agent_tui` / `run_tui` 暴露给调用方。可运行的 TUI 入口在 `cli`（默认模式，见下），它把真实会话（真实 provider + 内置工具）接到同一套渲染上；`cargo run -p cli` 即可试用编辑器。全局按键：`Ctrl+C` 随时退出、`PageUp/PageDown` 滚动会话记录；其余按键归编辑器。
 
 `cli` 已落地的会话入口（`crates/cli`）：
 
-- `args`：命令行解析，用 **`clap` derive** 定义参数表（提示词、`-C/--cwd`、`--print`、`--list-tools`、`--provider`、`--model`、`--faux`、`--help`、`--version`、`--` 终止选项解析）；帮助/版本/参数错误由 clap 生成（帮助模板改成中文），`--provider` / `--model` 的取值语义仍由 `provider` 模块校验以保留中文错误。
-- `provider`：把 `--provider` / `--model` 映射到 `ai` 的真实 provider 栈——`ProviderKind`（`faux` / `anthropic` / `openai` / `openai-responses` / `google`）给出 `(provider, api)`、凭据环境变量与默认模型 id；`build` 读环境变量并用 `Models` 注册路由 + 模型目录，真实 provider 用 `RetryTransport → ReqwestTransport` 加 `TimeoutService`（建立请求超时）。缺凭据返回 `MissingApiKey`，未知 provider 返回 `Unknown`（都带可读文案）。
-- `session::Session`：持有 `agent::Agent` + 八个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`。
-- `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、 **流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。
-- `faux`： **确定性的离线 provider**（默认 provider），不联网也能端到端跑通会话；按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
-- 二进制 `cli`：`--list-tools` 打印八个工具，`--print` 跑一轮并打纯文本事件，默认用 TUI 渲染；`--provider` / `--model` 选择真实 provider；没有位置参数时从 stdin 读提示词。
+- `args`：命令行解析，用 **`clap` derive** 定义参数表， **名称与短选项对齐 pi**：`-p/--print`、`-v/--version`、`-h/--help`、`--provider`、`--model`、`--api-key`、`--thinking <level>`、`-t/--tools`、`--exclude-tools`、`--no-tools`、`--no-builtin-tools`（pi 的多字母短选项 `-nt` / `-nbt` / `-xt` 在解析前展开成对应的长选项），以及本移植版特有的 `-C/--cwd`、`--list-tools`。帮助/版本/参数错误由 clap 生成（帮助模板改成中文），`--provider` / `--model` 的取值语义仍由 `provider` 模块校验以保留中文错误；`--api-key` 走
+  `build_with_api_key` 覆盖环境变量。
+- `provider`：把 `--provider` / `--model` 映射到 `ai` 的真实 provider 栈——`ProviderKind`（`anthropic` / `openai` / `openai-responses` / `google`）给出 `(provider, api)`、凭据环境变量与默认模型 id；`build` 读环境变量并用 `Models` 注册路由 + 模型目录，真实 provider 用 `RetryTransport → ReqwestTransport` 加 `TimeoutService`（建立请求超时）。缺凭据返回 `MissingApiKey`，未知 provider 返回 `Unknown`（都带可读文案）。没给 `--provider` 时 `default_kind_from_env` 按 `anthropic → openai → google` 挑第一个有凭据的，都没有就报错。
+- `session::Session`：持有 `agent::Agent` + 八个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它同时实现 `tui::CommandHost`，把会话能力交给斜杠命令。
+- `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、 **流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。以 `/` 开头的输入不进 agent，而是交给 `tui` 的斜杠命令层。
+- `faux`：确定性的离线 provider， **测试替身**——实现放在 `ai::provider::faux`（`test-util` feature，`cli` 以 dev-dependency 引入），`ProviderKind::Faux` 与 `--provider faux` 都只存在于测试构建里，发布的二进制不含它；不联网也能端到端跑通会话，按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
+- 二进制 `cli`： **不带参数且 stdin/stdout 都是终端时直接进 TUI**（提示词可选，TUI 里用 `/` 命令驱动）；`--print` 或任一路被重定向时走一次性纯文本模式（提示词来自位置参数或 stdin），`--list-tools` 打印八个工具后退屏；`--provider` / `--model` / `--thinking` / `-t` 系列选择 provider、模型与工具。这与 pi「终端交互默认进 TUI、重定向默认 print」一致。
+- TUI 斜杠命令：`tui::command` 的表逐条对齐 pi `BUILTIN_SLASH_COMMANDS`（24 条，名称与说明一致），编辑器里 `/` 打开菜单（前缀优先过滤、`Tab` 补全、`↑/↓` 选择、`Enter` 执行、`Esc` 关闭）。已实现 `/model`、`/thinking`、`/session`、`/hotkeys`、`/new`、`/quit`；其余命令（`/compact`、`/export`、`/login`…）依赖尚未移植的会话持久化/扩展/登录能力，执行时给出明确的“尚未移植”提示。
 - 尚未移植：扩展（extensions/MCP/compaction）。TUI 模式下输入区即 vim 编辑器，提交的文本经 `Session::submit` 进入 agent。
 - 不使用 tower：TUI 订阅事件流，不是"请求 → 响应"边界（第 4.1 节）。
 
@@ -316,9 +319,12 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
     3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `editor` / `backend`）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件， **`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。 **纯库、无二进制**（与 pi `packages/tui` 一致）；可运行的 TUI 入口在 `cli`。测试：25 个 lib 单元（含 12 个编辑器用例）+ 7 个 `TestBackend`
        端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
     4. `cli`：`cli` crate 的会话入口与扩展。
-        - 会话入口已完成： ~~`args` / `session` / `provider` / `faux` / 二进制入口~~ 落在 `crates/cli`（`args` / `session` / `provider` / `faux` + `main.rs`）。会话把 agent、八个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（`tui` 的 vim 编辑器 + 事件渲染），无位置参数时从 stdin 读提示词。
-        - 真实 provider 已接上： ~~`provider` 模块~~ 用 `--provider`（`faux` / `anthropic` / `openai` / `openai-responses` / `google`）+ `--model` 组装 `timeout → retry → provider` 栈，凭据来自 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`，并注册进 `Models` 路由与模型目录；缺凭据或未知 provider 都给出可读错误。默认仍是离线 `faux`。
+        - 会话入口已完成： ~~`args` / `session` / `provider` / `faux` / 二进制入口~~ 落在 `crates/cli`（`args` / `session` / `provider` + `main.rs`）。会话把 agent、八个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（`tui` 的 vim 编辑器 + 事件渲染），无位置参数时从 stdin 读提示词。
+        - 真实 provider 已接上： ~~`provider` 模块~~ 用 `--provider`（`anthropic` / `openai` / `openai-responses` / `google`）+ `--model` 组装 `timeout → retry → provider` 栈，凭据来自 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`，并注册进 `Models` 路由与模型目录；缺凭据或未知 provider 都给出可读错误。没给 `--provider` 时按 `anthropic → openai → google` 挑第一个有凭据的，一个都没有就报错。
         - 参数解析改用 `clap` derive：`args` 只声明参数表，帮助/版本/错误由 clap 生成（帮助模板中文化），`--provider` / `--model` 的语义仍由 `provider` 模块校验。`cli` 也是唯一的可执行入口（`tui` 已是纯库）。
-        - `cli` 收敛为 **二进制 crate**：crate 根是 `crates/cli/src/main.rs`，`args` / `session` / `provider` / `faux` 都是它下面的模块（不再有 `lib.rs`），因此 provider 组装与会话入口的测试改成模块内的 `#[cfg(test)] mod tests`，端到端测试仍然真正跑 `cli` 二进制。
-        - 测试：8 个 `args` 单元测试、3 个 `faux` 单元测试、11 个 `provider` 单元测试、3 个二进制单元测试、6 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路与纯文本渲染断言）、9 个 **真正运行 `cli` 二进制**的端到端测试（`--help` / `--version` / `--list-tools` / `--print` / stdin 提示词 / 错误参数 / `--provider` 选择 / 缺凭据 / 未知 provider）。
+        - CLI 参数与 TUI 斜杠命令对齐 pi：`-p/--print`、`-v/--version`、`--thinking`、`-t/--tools`、`--exclude-tools`、`-nt` / `-nbt`（展开成 `--no-tools` / `--no-builtin-tools`）；不带参数且终端交互时直接进 TUI，重定向时回落到 print 模式。TUI 里 `/` 打开与 pi 同名的 24 条内置命令菜单，已实现 `/model` `/thinking` `/session` `/hotkeys` `/new` `/quit`，其余明确标注“尚未移植”。
+        - `cli` 收敛为 **二进制 crate**：crate 根是 `crates/cli/src/main.rs`，`args` / `session` / `provider` 是它下面的模块（不再有 `lib.rs`，`faux` 也不在这里）；provider 组装与会话入口的测试改成模块内的 `#[cfg(test)] mod tests`。
+        - `faux` 不再编进二进制、也不再单独成 crate：实现落在 `ai::provider::faux`（`test-util` feature），`cli` 只在 `[dev-dependencies]` 里带 feature 引入；删掉 `--faux`，`--provider faux` 会报「未知 provider」。二进制层面的离线端到端测试因此改为在 `cfg(test)` 内做（会话 + `read` 工具的完整链路、纯文本渲染、`/new` `/model` `/thinking`），真正跑二进制的用例保留不需要模型的 CLI 面（帮助/版本/工具清单/参数与 provider 错误）。
+        - 测试：10 个 `args` 单元测试、3 个 `faux` 单元测试（在 `ai` 的 `test-util` 下）、11 个 `provider` 单元测试、3 个二进制单元测试、9 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路、`/new` 重置与 `/model` `/thinking` 的宿主行为、纯文本渲染断言）、9 个 **真正运行 `cli` 二进制**的端到端测试（`--help` / `--version`（含 `-v`）/ `--list-tools` / 错误参数 / `--provider` 选择 / 缺凭据 / 未知 provider / 无凭据时的默认 provider 提示 / `--api-key` 需要 `--provider` / `--faux` 与
+          `--provider faux` 都被拒绝）；TUI 侧另有斜杠菜单的编辑器、渲染与命令分派测试。
         - 待办：扩展（extensions/MCP/compaction）与更多 provider（bedrock / vertex / mistral / cloudflare / pi-messages）。
