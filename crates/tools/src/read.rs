@@ -132,7 +132,7 @@ impl ReadTool {
         let output_text = if truncation.first_line_exceeds_limit {
             let first_line_size = format_size(all_lines[start_line].len());
             format!(
-                "[Line {start_line_display} is {first_line_size}, exceeds {} limit. Use bash: \
+                "[Line {start_line_display} is {first_line_size}, exceeds {} limit. Use shell: \
                  sed -n '{start_line_display}p' {path} | head -c {DEFAULT_MAX_BYTES}]",
                 format_size(DEFAULT_MAX_BYTES)
             )

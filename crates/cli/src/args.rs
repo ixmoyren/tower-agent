@@ -259,8 +259,8 @@ mod tests {
         let args = parse_ok(&["--tools", "read, grep"]);
         assert_eq!(args.tools, vec!["read", "grep"]);
 
-        let args = parse_ok(&["-xt", "bash,write"]);
-        assert_eq!(args.exclude_tools, vec!["bash", "write"]);
+        let args = parse_ok(&["-xt", "shell,write"]);
+        assert_eq!(args.exclude_tools, vec!["shell", "write"]);
 
         let args = parse_ok(&["-nt"]);
         assert!(args.no_tools);

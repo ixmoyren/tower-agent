@@ -1,7 +1,7 @@
 //! 工具输出的截断规则（对应 pi `coding-agent` 的 `core/tools/truncate.ts`）。
 //!
 //! 截断由两个互相独立的限制决定，先命中者生效：行数（默认 2000）与字节数（默认 50KB）。
-//! 头截断（`read`）永不产出半行；尾截断（`bash`）在唯一一行就超过字节上限时保留该行尾部。
+//! 头截断（`read`）永不产出半行；尾截断（`shell`）在唯一一行就超过字节上限时保留该行尾部。
 
 /// 默认最大行数（pi `DEFAULT_MAX_LINES`）。
 pub const DEFAULT_MAX_LINES: usize = 2000;

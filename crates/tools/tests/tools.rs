@@ -58,23 +58,14 @@ fn first_text(result: &agent::AgentToolResult) -> String {
 }
 
 #[tokio::test]
-async fn default_tools_match_pi_tool_names() {
+async fn default_tools_expose_one_unified_shell_tool() {
     let dir = tempfile::tempdir().expect("temp dir");
     let tools = tools::default_tools(dir.path());
     let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
     assert_eq!(
         names,
-        vec![
-            "read",
-            "bash",
-            "powershell",
-            "edit",
-            "write",
-            "grep",
-            "find",
-            "ls"
-        ],
-        "pi allToolNames order"
+        vec!["read", "shell", "edit", "write", "grep", "find", "ls"],
+        "bash 与 powershell 合并成一个 shell 工具"
     );
     assert_eq!(tools::tool_names(), names);
 }
@@ -220,20 +211,16 @@ async fn grep_truncates_long_lines() {
 }
 
 #[tokio::test]
-async fn powershell_tool_is_registered_with_pi_metadata() {
+async fn shell_tool_is_registered_with_pi_metadata() {
     let dir = tempfile::tempdir().expect("temp dir");
     let tools = tools::default_tools(dir.path());
-    let powershell = tools
-        .iter()
-        .find(|tool| tool.name() == "powershell")
-        .unwrap();
-    assert_eq!(powershell.display_label(), "powershell");
-    assert!(
-        powershell
-            .tool_description()
-            .starts_with("Execute a PowerShell command")
-    );
-    assert!(powershell.declared_output_schema().is_some());
+    let shell = tools.iter().find(|tool| tool.name() == "shell").unwrap();
+    assert_eq!(shell.display_label(), "shell");
+    // 描述文案点明底层 shell：非 Windows 是 bash，Windows 是 PowerShell。
+    let description = shell.tool_description();
+    assert!(description.starts_with("Execute a "), "got: {description}");
+    assert!(description.contains("command"), "got: {description}");
+    assert!(shell.declared_output_schema().is_some());
 }
 
 #[tokio::test]
@@ -392,11 +379,15 @@ async fn edit_reports_a_not_found_error_without_touching_the_file() {
 }
 
 #[tokio::test]
-async fn bash_streams_output_and_reports_exit_codes() {
+async fn shell_streams_output_and_reports_exit_codes() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let bash = tools::create_bash_tool(dir.path());
+    let shell = tools::create_shell_tool(dir.path());
 
-    let results = run_tool(&bash, serde_json::json!({ "command": "printf 'hello\\n'" })).await;
+    let results = run_tool(
+        &shell,
+        serde_json::json!({ "command": "printf 'hello\\n'" }),
+    )
+    .await;
     assert!(
         results.len() >= 2,
         "expected an initial update plus the final result"
@@ -405,7 +396,7 @@ async fn bash_streams_output_and_reports_exit_codes() {
     assert!(!last.is_error);
     assert_eq!(first_text(last), "hello\n");
 
-    let results = run_tool(&bash, serde_json::json!({ "command": "exit 7" })).await;
+    let results = run_tool(&shell, serde_json::json!({ "command": "exit 7" })).await;
     let last = results.last().unwrap();
     assert!(last.is_error);
     assert!(
@@ -416,12 +407,12 @@ async fn bash_streams_output_and_reports_exit_codes() {
 }
 
 #[tokio::test]
-async fn bash_reports_a_timeout_as_an_error_result() {
+async fn shell_reports_a_timeout_as_an_error_result() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let bash = tools::create_bash_tool(dir.path());
+    let shell = tools::create_shell_tool(dir.path());
 
     let results = run_tool(
-        &bash,
+        &shell,
         serde_json::json!({ "command": "sleep 5", "timeout": 0.2 }),
     )
     .await;
@@ -437,17 +428,17 @@ async fn bash_reports_a_timeout_as_an_error_result() {
 /// 超时/取消时要杀掉**整个进程组**，而不只是直接子进程：
 /// 这里让子进程 fork 一个后台写文件的孙进程，只有进程组被杀掉它才会停。
 #[tokio::test]
-async fn bash_timeout_kills_the_whole_process_tree() {
+async fn shell_timeout_kills_the_whole_process_tree() {
     let dir = tempfile::tempdir().expect("temp dir");
     let ticker = dir.path().join("ticker.txt");
-    let bash = tools::create_bash_tool(dir.path());
+    let shell = tools::create_shell_tool(dir.path());
 
     let command = format!(
         "bash -c 'while true; do echo tick >> {}; sleep 0.05; done' & sleep 30",
         ticker.display()
     );
     let results = run_tool(
-        &bash,
+        &shell,
         serde_json::json!({ "command": command, "timeout": 0.5 }),
     )
     .await;
@@ -471,12 +462,12 @@ async fn bash_timeout_kills_the_whole_process_tree() {
 }
 
 #[tokio::test]
-async fn bash_truncates_large_output_and_reports_a_temp_file() {
+async fn shell_truncates_large_output_and_reports_a_temp_file() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let bash = tools::create_bash_tool(dir.path());
+    let shell = tools::create_shell_tool(dir.path());
 
     // 3000 lines exceeds the 2000-line display limit.
-    let results = run_tool(&bash, serde_json::json!({ "command": "seq 1 3000" })).await;
+    let results = run_tool(&shell, serde_json::json!({ "command": "seq 1 3000" })).await;
     let last = results.last().unwrap();
     let text = first_text(last);
     assert!(

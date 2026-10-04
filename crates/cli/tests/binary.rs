@@ -35,19 +35,10 @@ fn list_tools_prints_every_builtin_tool() {
     let output = cli().arg("--list-tools").output().expect("run cli");
     assert!(output.status.success());
     let text = stdout(&output);
-    for name in [
-        "read",
-        "bash",
-        "powershell",
-        "edit",
-        "write",
-        "grep",
-        "find",
-        "ls",
-    ] {
+    for name in ["read", "shell", "edit", "write", "grep", "find", "ls"] {
         assert!(text.contains(name), "missing `{name}` in:\n{text}");
     }
-    assert!(text.contains("内置工具（8 个）"), "got:\n{text}");
+    assert!(text.contains("内置工具（7 个）"), "got:\n{text}");
 }
 
 #[test]

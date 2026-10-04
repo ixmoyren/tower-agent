@@ -356,9 +356,9 @@ mod tests {
     use super::*;
 
     const OPTIONS: ProviderStackOptions = ProviderStackOptions {
-        timeout: Some(std::time::Duration::from_secs(600)),
+        timeout: Some(Duration::from_secs(600)),
         max_retries: 2,
-        max_retry_delay: std::time::Duration::from_secs(60),
+        max_retry_delay: Duration::from_secs(60),
     };
 
     #[test]

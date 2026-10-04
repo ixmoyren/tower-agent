@@ -14,8 +14,8 @@
 //!   （anthropic / openai / google）。测试用的离线 provider 在 `ai::provider::faux`
 //!   （`test-util` feature）里，不进这个二进制。
 //!
-//! pi 的八个内置工具（`read` / `bash` / `powershell` / `edit` / `write` / `grep` /
-//! `find` / `ls`）在独立的 `tools` crate 中。
+//! 七个内置工具（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）在独立的
+//! `tools` crate 中；`shell` 在 Windows 上是 PowerShell，其余系统是 bash。
 //!
 //! 扩展（`coding-agent` 的 extensions/MCP/compaction）尚未移植。
 
@@ -241,16 +241,7 @@ mod tests {
     fn tool_listing_covers_all_builtin_tools() {
         assert_eq!(
             tools::tool_names(),
-            vec![
-                "read",
-                "bash",
-                "powershell",
-                "edit",
-                "write",
-                "grep",
-                "find",
-                "ls"
-            ]
+            vec!["read", "shell", "edit", "write", "grep", "find", "ls"]
         );
     }
 
@@ -274,7 +265,7 @@ mod tests {
                 })),
             },
         )
-            .expect("write succeeds");
+        .expect("write succeeds");
         assert_eq!(String::from_utf8(out).expect("utf-8"), "[user] 你好\n");
     }
 }

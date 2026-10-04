@@ -221,15 +221,15 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 
 尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
-`cli` 已落地的内置工具（`crates/cli/src/tools`）：pi `allToolNames` 全集 `read` / `bash` / `powershell` / `edit` / `write` / `grep` / `find` / `ls`，以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
+`tools` crate 已落地的内置工具（`crates/tools`）：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`（`shell` 是 bash 与 PowerShell 合并后的统一工具：Windows 上用 PowerShell，其余系统用 bash，底层由 `cfg_select!` 选择），以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
 
 与 pi 的实现差异（都是"进程内实现替代外部二进制"或环境能力所限）：
 
 - `read` 不做图片自动缩放（离线缺图像处理能力），图片按 MIME 嗅探后原样作为附件。
-- `bash` 不注入 `PI_*` 会话环境变量（`ToolCallRequest` 不携带会话上下文）、进程组杀死只在类 Unix 平台启用、输出累加器是 pi 有界版本的简化版。
+- `shell`（非 Windows 下的 bash 后端）不注入 `PI_*` 会话环境变量（`ToolCallRequest` 不携带会话上下文）、进程组杀死只在类 Unix 平台启用、输出累加器是 pi 有界版本的简化版。
 - `find` 不调用外部 `fd`，改用 `ignore` + `globset` 在进程内实现相同语义（`*` 不跨分隔符、无 `/` 的模式按文件名匹配、`**/` 前缀规则、尊重 `.gitignore` 且含隐藏文件、非 git 仓库内也应用 `.gitignore`）。
 - `grep` 不调用外部 `rg`，改用 `regex` + `ignore` 实现相同输出形状与截断/提示文案，并跳过二进制文件。
-- `powershell` 与 pi 一样只在 Windows 上可用：找不到 `pwsh`/`powershell` 时每次调用返回错误结果。
+- `shell` 在 Windows 上用 PowerShell：找不到 `pwsh`/`powershell` 时每次调用返回错误结果。
 
 `tui` 已落地的内容（`crates/tui`，基于 `ratatui` 0.30）：
 
@@ -247,7 +247,7 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 - `args`：命令行解析，用 **`clap` derive** 定义参数表， **名称与短选项对齐 pi**：`-p/--print`、`-v/--version`、`-h/--help`、`--provider`、`--model`、`--api-key`、`--thinking <level>`、`-t/--tools`、`--exclude-tools`、`--no-tools`、`--no-builtin-tools`（pi 的多字母短选项 `-nt` / `-nbt` / `-xt` 在解析前展开成对应的长选项），以及本移植版特有的 `-C/--cwd`、`--list-tools`。帮助/版本/参数错误由 clap 生成（帮助模板改成中文），`--provider` / `--model` 的取值语义仍由 `provider` 模块校验以保留中文错误；`--api-key` 走
   `build_with_api_key` 覆盖环境变量。
 - `provider`：把 `--provider` / `--model` 映射到 `ai` 的真实 provider 栈——`ProviderKind`（`anthropic` / `openai` / `openai-responses` / `google`）给出 `(provider, api)`、凭据环境变量与默认模型 id；`build` 读环境变量并用 `Models` 注册路由 + 模型目录，真实 provider 用 `RetryTransport → ReqwestTransport` 加 `TimeoutService`（建立请求超时）。缺凭据返回 `MissingApiKey`，未知 provider 返回 `Unknown`（都带可读文案）。没给 `--provider` 时 `default_kind_from_env` 按 `anthropic → openai → google` 挑第一个有凭据的，都没有就报错。
-- `session::Session`：持有 `agent::Agent` + 八个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它同时实现 `tui::CommandHost`，把会话能力交给斜杠命令。
+- `session::Session`：持有 `agent::Agent` + 七个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它同时实现 `tui::CommandHost`，把会话能力交给斜杠命令。
 - `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、 **流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。以 `/` 开头的输入不进 agent，而是交给 `tui` 的斜杠命令层。
 - `faux`：确定性的离线 provider， **测试替身**——实现放在 `ai::provider::faux`（`test-util` feature，`cli` 以 dev-dependency 引入），`ProviderKind::Faux` 与 `--provider faux` 都只存在于测试构建里，发布的二进制不含它；不联网也能端到端跑通会话，按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
 - 二进制 `cli`： **不带参数且 stdin/stdout 都是终端时直接进 TUI**（提示词可选，TUI 里用 `/` 命令驱动）；`--print` 或任一路被重定向时走一次性纯文本模式（提示词来自位置参数或 stdin），`--list-tools` 打印八个工具后退屏；`--provider` / `--model` / `--thinking` / `-t` 系列选择 provider、模型与工具。这与 pi「终端交互默认进 TUI、重定向默认 print」一致。
@@ -315,11 +315,11 @@ cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对�
 3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/ai/tests/conformance.rs` + `crates/ai/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
 4. 再按 `agent` → `tools` → `tui` → `cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
     1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/agent`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
-    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/cli/src/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `bash` / `read` / `write` / `edit` / `ls` / `find` / `grep`，`powershell` 复用 shell 执行逻辑），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
+    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `shell` / `read` / `write` / `edit` / `ls` / `find` / `grep`；`shell` 用 `cfg_select!` 把 bash 与 PowerShell 合并成一个工具，Windows → powershell、其余 → bash），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
     3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `editor` / `backend`）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件， **`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。 **纯库、无二进制**（与 pi `packages/tui` 一致）；可运行的 TUI 入口在 `cli`。测试：25 个 lib 单元（含 12 个编辑器用例）+ 7 个 `TestBackend`
        端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
     4. `cli`：`cli` crate 的会话入口与扩展。
-        - 会话入口已完成： ~~`args` / `session` / `provider` / `faux` / 二进制入口~~ 落在 `crates/cli`（`args` / `session` / `provider` + `main.rs`）。会话把 agent、八个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（`tui` 的 vim 编辑器 + 事件渲染），无位置参数时从 stdin 读提示词。
+        - 会话入口已完成： ~~`args` / `session` / `provider` / `faux` / 二进制入口~~ 落在 `crates/cli`（`args` / `session` / `provider` + `main.rs`）。会话把 agent、七个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（`tui` 的 vim 编辑器 + 事件渲染），无位置参数时从 stdin 读提示词。
         - 真实 provider 已接上： ~~`provider` 模块~~ 用 `--provider`（`anthropic` / `openai` / `openai-responses` / `google`）+ `--model` 组装 `timeout → retry → provider` 栈，凭据来自 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`，并注册进 `Models` 路由与模型目录；缺凭据或未知 provider 都给出可读错误。没给 `--provider` 时按 `anthropic → openai → google` 挑第一个有凭据的，一个都没有就报错。
         - 参数解析改用 `clap` derive：`args` 只声明参数表，帮助/版本/错误由 clap 生成（帮助模板中文化），`--provider` / `--model` 的语义仍由 `provider` 模块校验。`cli` 也是唯一的可执行入口（`tui` 已是纯库）。
         - CLI 参数与 TUI 斜杠命令对齐 pi：`-p/--print`、`-v/--version`、`--thinking`、`-t/--tools`、`--exclude-tools`、`-nt` / `-nbt`（展开成 `--no-tools` / `--no-builtin-tools`）；不带参数且终端交互时直接进 TUI，重定向时回落到 print 模式。TUI 里 `/` 打开与 pi 同名的 24 条内置命令菜单，已实现 `/model` `/thinking` `/session` `/hotkeys` `/new` `/quit`，其余明确标注“尚未移植”。
