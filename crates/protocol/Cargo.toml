@@ -13,4 +13,4 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-ciborium = "0.2.2"
+cbor4ii = { version = "1.2.3", features = ["use_alloc"] }
