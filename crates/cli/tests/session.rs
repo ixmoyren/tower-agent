@@ -3,7 +3,6 @@
 use cli::{
     faux::{FauxProvider, model},
     session::Session,
-    tools,
 };
 use std::{
     sync::{

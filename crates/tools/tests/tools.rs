@@ -60,7 +60,7 @@ fn first_text(result: &agent::AgentToolResult) -> String {
 #[tokio::test]
 async fn default_tools_match_pi_tool_names() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let tools = cli::tools::default_tools(dir.path());
+    let tools = tools::default_tools(dir.path());
     let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
     assert_eq!(
         names,
@@ -76,7 +76,7 @@ async fn default_tools_match_pi_tool_names() {
         ],
         "pi allToolNames order"
     );
-    assert_eq!(cli::tools::tool_names(), names);
+    assert_eq!(tools::tool_names(), names);
 }
 
 #[tokio::test]
@@ -87,7 +87,7 @@ async fn ls_sorts_marks_directories_and_reports_limits() {
     std::fs::write(dir.path().join("beta.txt"), "x").unwrap();
     std::fs::write(dir.path().join(".hidden"), "x").unwrap();
     std::fs::create_dir(dir.path().join("empty")).unwrap();
-    let ls = cli::tools::create_ls_tool(dir.path());
+    let ls = tools::create_ls_tool(dir.path());
 
     let results = run_tool(&ls, serde_json::json!({})).await;
     let text = first_text(&results[0]);
@@ -127,7 +127,7 @@ async fn find_matches_globs_and_respects_gitignore() {
     std::fs::write(dir.path().join("kept.txt"), "x").unwrap();
     std::fs::write(dir.path().join("ignored.txt"), "x").unwrap();
     std::fs::write(dir.path().join("build/out.txt"), "x").unwrap();
-    let find = cli::tools::create_find_tool(dir.path());
+    let find = tools::create_find_tool(dir.path());
 
     let results = run_tool(&find, serde_json::json!({ "pattern": "*.txt" })).await;
     let text = first_text(&results[0]);
@@ -153,7 +153,7 @@ async fn grep_reports_matches_options_and_context() {
     let dir = tempfile::tempdir().expect("temp dir");
     std::fs::write(dir.path().join("a.txt"), "Hello\nthere\nHELLO again\n").unwrap();
     std::fs::write(dir.path().join("b.rs"), "hello from rust\n").unwrap();
-    let grep = cli::tools::create_grep_tool(dir.path());
+    let grep = tools::create_grep_tool(dir.path());
 
     let results = run_tool(&grep, serde_json::json!({ "pattern": "Hello" })).await;
     assert_eq!(first_text(&results[0]), "a.txt:1: Hello");
@@ -208,7 +208,7 @@ async fn grep_truncates_long_lines() {
     let dir = tempfile::tempdir().expect("temp dir");
     let long = "x".repeat(600);
     std::fs::write(dir.path().join("long.txt"), format!("{long}needle\n")).unwrap();
-    let grep = cli::tools::create_grep_tool(dir.path());
+    let grep = tools::create_grep_tool(dir.path());
 
     let results = run_tool(&grep, serde_json::json!({ "pattern": "needle" })).await;
     let text = first_text(&results[0]);
@@ -222,7 +222,7 @@ async fn grep_truncates_long_lines() {
 #[tokio::test]
 async fn powershell_tool_is_registered_with_pi_metadata() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let tools = cli::tools::default_tools(dir.path());
+    let tools = tools::default_tools(dir.path());
     let powershell = tools
         .iter()
         .find(|tool| tool.name() == "powershell")
@@ -239,7 +239,7 @@ async fn powershell_tool_is_registered_with_pi_metadata() {
 #[tokio::test]
 async fn write_then_read_round_trips_and_creates_parents() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let tools = cli::tools::default_tools(dir.path());
+    let tools = tools::default_tools(dir.path());
     let write = tools
         .iter()
         .find(|tool| tool.name() == "write")
@@ -282,7 +282,7 @@ async fn read_attaches_images_with_base64_data() {
     png.extend_from_slice(&[0u8; 13]);
     png.extend_from_slice(&[0u8; 4]);
     std::fs::write(dir.path().join("pixel.png"), &png).unwrap();
-    let read = cli::tools::create_read_tool(dir.path());
+    let read = tools::create_read_tool(dir.path());
 
     let results = run_tool(&read, serde_json::json!({ "path": "pixel.png" })).await;
     let result = &results[0];
@@ -315,7 +315,7 @@ async fn read_reports_continuation_for_partial_reads() {
         (1..=10).map(|i| format!("line {i}\n")).collect::<String>(),
     )
     .unwrap();
-    let read = cli::tools::create_read_tool(dir.path());
+    let read = tools::create_read_tool(dir.path());
 
     let results = run_tool(
         &read,
@@ -341,7 +341,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
         "fn main() {\n    let x = 1;\n}\n",
     )
     .unwrap();
-    let edit = cli::tools::create_edit_tool(dir.path());
+    let edit = tools::create_edit_tool(dir.path());
 
     let results = run_tool(
         &edit,
@@ -373,7 +373,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
 async fn edit_reports_a_not_found_error_without_touching_the_file() {
     let dir = tempfile::tempdir().expect("temp dir");
     std::fs::write(dir.path().join("code.rs"), "unchanged\n").unwrap();
-    let edit = cli::tools::create_edit_tool(dir.path());
+    let edit = tools::create_edit_tool(dir.path());
 
     let results = run_tool(
         &edit,
@@ -394,7 +394,7 @@ async fn edit_reports_a_not_found_error_without_touching_the_file() {
 #[tokio::test]
 async fn bash_streams_output_and_reports_exit_codes() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let bash = cli::tools::create_bash_tool(dir.path());
+    let bash = tools::create_bash_tool(dir.path());
 
     let results = run_tool(&bash, serde_json::json!({ "command": "printf 'hello\\n'" })).await;
     assert!(
@@ -418,7 +418,7 @@ async fn bash_streams_output_and_reports_exit_codes() {
 #[tokio::test]
 async fn bash_reports_a_timeout_as_an_error_result() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let bash = cli::tools::create_bash_tool(dir.path());
+    let bash = tools::create_bash_tool(dir.path());
 
     let results = run_tool(
         &bash,
@@ -440,7 +440,7 @@ async fn bash_reports_a_timeout_as_an_error_result() {
 async fn bash_timeout_kills_the_whole_process_tree() {
     let dir = tempfile::tempdir().expect("temp dir");
     let ticker = dir.path().join("ticker.txt");
-    let bash = cli::tools::create_bash_tool(dir.path());
+    let bash = tools::create_bash_tool(dir.path());
 
     let command = format!(
         "bash -c 'while true; do echo tick >> {}; sleep 0.05; done' & sleep 30",
@@ -473,7 +473,7 @@ async fn bash_timeout_kills_the_whole_process_tree() {
 #[tokio::test]
 async fn bash_truncates_large_output_and_reports_a_temp_file() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let bash = cli::tools::create_bash_tool(dir.path());
+    let bash = tools::create_bash_tool(dir.path());
 
     // 3000 lines exceeds the 2000-line display limit.
     let results = run_tool(&bash, serde_json::json!({ "command": "seq 1 3000" })).await;
@@ -642,7 +642,7 @@ async fn agent_loop_drives_the_write_tool() {
     ]);
     let mut options = AgentOptions::new(boxed_stream(service));
     options.initial.model = Some(model);
-    options.initial.tools = cli::tools::default_tools(dir.path());
+    options.initial.tools = tools::default_tools(dir.path());
     let agent = Agent::new(options);
 
     let mut subscription = agent.subscribe();

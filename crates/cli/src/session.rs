@@ -36,7 +36,7 @@ impl Session {
     pub fn with_model(cwd: impl Into<PathBuf>, stream: BoxStreamService, model: Model) -> Self {
         let cwd = cwd.into();
         let mut options = AgentOptions::new(stream);
-        options.initial.tools = crate::tools::default_tools(cwd.clone());
+        options.initial.tools = tools::default_tools(cwd.clone());
         options.initial.model = Some(model);
         options.initial.system_prompt = Some(system_prompt());
         Self {
@@ -111,9 +111,9 @@ fn default_model() -> Model {
 
 /// 会话的系统提示：告诉模型有哪些工具以及 `!` 前缀是给 faux provider 用的。
 fn system_prompt() -> String {
-    let tools = crate::tools::tool_names().join(", ");
+    let names = tools::tool_names().join(", ");
     format!(
-        "你是 tower-pi-agent（pi 的 Rust 移植版）的编码助手。可用工具：{tools}。\n\
+        "你是 tower-pi-agent（pi 的 Rust 移植版）的编码助手。可用工具：{names}。\n\
          使用工具而不是猜测文件内容；修改文件前先读一遍。\n\
          离线 faux provider 下，以 `!<工具名> <JSON 参数>` 开头的用户消息会被翻译成一次工具调用。"
     )

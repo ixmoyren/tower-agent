@@ -278,24 +278,14 @@ version = "0.1.0"
 dependencies = [
  "agent",
  "ai",
- "base64 0.23.1",
  "clap",
- "dirs",
- "futures-core",
  "futures-util",
- "globset",
- "ignore",
- "regex",
- "rustix",
  "serde_json",
- "similar",
  "tempfile",
- "thiserror",
  "tokio",
- "tokio-util",
+ "tools",
  "tower",
  "tui",
- "unicode-normalization",
 ]
 
 [[package]]
@@ -1947,6 +1937,28 @@ dependencies = [
  "libc",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "tools"
+version = "0.1.0"
+dependencies = [
+ "agent",
+ "ai",
+ "base64 0.23.1",
+ "dirs",
+ "futures-util",
+ "globset",
+ "ignore",
+ "regex",
+ "rustix",
+ "serde_json",
+ "similar",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "unicode-normalization",
 ]
 
 [[package]]

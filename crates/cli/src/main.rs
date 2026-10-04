@@ -10,7 +10,6 @@ use cli::{
     args::parse,
     provider::{self, ProviderKind, ProviderStackOptions},
     session::{Session, run_print, run_tui},
-    tools,
 };
 
 fn main() -> ExitCode {
@@ -175,7 +174,7 @@ mod tests {
                 })),
             },
         )
-        .expect("write succeeds");
+            .expect("write succeeds");
         assert_eq!(String::from_utf8(out).expect("utf-8"), "[user] 你好\n");
     }
 }
