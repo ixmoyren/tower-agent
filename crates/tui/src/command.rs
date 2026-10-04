@@ -165,11 +165,11 @@ pub fn menu(input: &str) -> Option<Vec<&'static SlashCommand>> {
 #[must_use]
 pub fn hotkeys() -> &'static [&'static str] {
     &[
-        "/        打开命令菜单（Tab 补全 · Enter 执行）",
-        "i / Esc  插入 / 普通模式（vim 键位）",
-        "Enter    普通模式下提交输入",
-        "PgUp/PgDn 滚动会话记录",
-        "Ctrl+C / q 退出",
+        "/         Open the command menu (Tab complete · Enter run)",
+        "i / Esc   insert / normal mode (vim keys)",
+        "Enter     submit input in normal mode",
+        "PgUp/PgDn scroll the transcript",
+        "Ctrl+C / q quit",
     ]
 }
 
@@ -249,7 +249,10 @@ mod tests {
     #[test]
     fn menu_needs_a_bare_slash_prefix() {
         assert!(menu("hello").is_none());
-        assert!(menu("/model gpt").is_none(), "进入参数后关闭菜单");
+        assert!(
+            menu("/model gpt").is_none(),
+            "menu closes once arguments start"
+        );
         assert_eq!(menu("/").map(|items| items.len()), Some(24));
         assert!(menu("/qui").is_some());
     }
@@ -258,8 +261,11 @@ mod tests {
     fn matching_prefers_prefix_hits() {
         let items = matching("m");
         let names: Vec<&str> = items.iter().map(|command| command.name).collect();
-        assert_eq!(names[0], "model", "前缀匹配优先：{names:?}");
-        assert!(names.contains(&"compact"), "子串匹配仍保留：{names:?}");
+        assert_eq!(names[0], "model", "prefix matches come first: {names:?}");
+        assert!(
+            names.contains(&"compact"),
+            "substring matches are kept: {names:?}"
+        );
         assert!(matching("nope").is_empty());
     }
 

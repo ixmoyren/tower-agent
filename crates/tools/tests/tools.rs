@@ -67,7 +67,7 @@ async fn default_tools_expose_one_unified_shell_tool() {
         vec!["read", "shell", "edit", "write", "grep", "find", "ls"],
         "bash 与 powershell 合并成一个 shell 工具"
     );
-    assert_eq!(tools::tool_names(), names);
+    assert_eq!(*tools::DEFAULT_TOOL_NAMES, names);
 }
 
 #[tokio::test]

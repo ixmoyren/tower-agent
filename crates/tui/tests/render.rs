@@ -230,7 +230,7 @@ fn editor_input_routes_through_the_tui_host() {
         tui.handle_input(&key(KeyCode::Char('i'))),
         EditorAction::None
     );
-    for ch in "帮我看看".chars() {
+    for ch in "look at this".chars() {
         assert_eq!(
             tui.handle_input(&key(KeyCode::Char(ch))),
             EditorAction::None
@@ -238,7 +238,7 @@ fn editor_input_routes_through_the_tui_host() {
     }
     tui.handle_input(&key(KeyCode::Escape));
     let action = tui.handle_input(&key(KeyCode::Enter));
-    assert_eq!(action, EditorAction::Submit("帮我看看".into()));
+    assert_eq!(action, EditorAction::Submit("look at this".into()));
 
     // 提交后清空并回到普通模式。
     assert_eq!(tui.editor().mode(), tui::Mode::Normal);

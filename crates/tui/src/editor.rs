@@ -20,6 +20,7 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 use ratatui_textarea::{CursorMove, DataCursor, Input, Key, TextArea};
+use std::borrow::Cow;
 
 /// 编辑器处理一次按键后的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,14 +50,14 @@ pub enum Mode {
 
 impl Mode {
     /// 边框标题里显示的模式名。
-    pub fn label(self) -> String {
+    pub fn label(self) -> Cow<'static, str> {
         match self {
             Self::Normal => "NORMAL".into(),
             Self::Insert => "INSERT".into(),
             Self::Visual => "VISUAL".into(),
             Self::Replace(true) => "REPLACE(once)".into(),
             Self::Replace(false) => "REPLACE".into(),
-            Self::Operator(op) => format!("OPERATOR({op})"),
+            Self::Operator(op) => format!("OPERATOR({op})").into(),
         }
     }
 
@@ -148,7 +149,7 @@ impl Editor {
         self.textarea
             .set_cursor_line_style(Style::default().add_modifier(Modifier::DIM));
         self.textarea
-            .set_placeholder_text("输入提示词：/ 命令 · i 插入 · Esc 普通 · Enter 提交");
+            .set_placeholder_text("Prompt: / commands · i insert · Esc normal · Enter submit");
         self.refresh_block();
     }
 
@@ -566,9 +567,9 @@ mod tests {
     #[test]
     fn enter_submits_and_clears_the_buffer() {
         let mut editor = Editor::new();
-        type_text(&mut editor, "帮我看看");
+        type_text(&mut editor, "look at this");
         let action = editor.handle(&key(KeyCode::Enter));
-        assert_eq!(action, EditorAction::Submit("帮我看看".into()));
+        assert_eq!(action, EditorAction::Submit("look at this".into()));
         assert_eq!(editor.text(), "");
         assert_eq!(editor.mode(), Mode::Normal);
     }
@@ -581,7 +582,11 @@ mod tests {
             editor.handle(&key(KeyCode::Char(ch)));
         }
         let action = editor.handle(&key(KeyCode::Enter));
-        assert_eq!(action, EditorAction::None, "Enter 在插入模式只换行");
+        assert_eq!(
+            action,
+            EditorAction::None,
+            "Enter only inserts a newline in insert mode"
+        );
         for ch in "two".chars() {
             editor.handle(&key(KeyCode::Char(ch)));
         }
@@ -818,7 +823,11 @@ mod tests {
         editor.handle(&key(KeyCode::Char('R')));
         assert_eq!(editor.mode(), Mode::Replace(false));
         editor.handle(&key(KeyCode::Char('X')));
-        assert_eq!(editor.text(), "Xbc", "覆盖输入期间停留在替换模式");
+        assert_eq!(
+            editor.text(),
+            "Xbc",
+            "stays in replace mode while overwriting"
+        );
         editor.handle(&key(KeyCode::Char('Y')));
         editor.handle(&key(KeyCode::Escape));
         assert_eq!(editor.mode(), Mode::Normal);
@@ -843,20 +852,20 @@ mod tests {
         editor.handle(&key(KeyCode::Char('G')));
         editor.handle(&key(KeyCode::Char('r')));
         editor.handle(&key(KeyCode::Char('Z')));
-        assert_eq!(editor.mode(), Mode::Normal, "r 只替换一次");
-        assert_eq!(editor.text(), "ab\n", "空行上没有字符可替换");
+        assert_eq!(editor.mode(), Mode::Normal, "r replaces only once");
+        assert_eq!(editor.text(), "ab\n", "nothing to replace on an empty line");
     }
 
     #[test]
     fn append_works_on_multibyte_lines() {
         let mut editor = Editor::new();
-        type_text(&mut editor, "你好");
+        type_text(&mut editor, "\u{4f60}\u{597d}");
         editor.handle(&key(KeyCode::Char('0')));
         editor.handle(&key(KeyCode::Char('a')));
         editor.handle(&key(KeyCode::Char('X')));
         editor.handle(&key(KeyCode::Escape));
         // 列是字符下标：a 之后应插在第一个字符之后，而不是跳到行尾。
-        assert_eq!(editor.text(), "你X好");
+        assert_eq!(editor.text(), "\u{4f60}X\u{597d}");
     }
 
     #[test]
@@ -899,8 +908,11 @@ mod tests {
         for ch in "mod".chars() {
             editor.handle(&key(KeyCode::Char(ch)));
         }
-        let items = editor.command_menu().expect("菜单仍然打开");
-        assert_eq!(items[0].name, "model", "前缀匹配排最前：{items:?}");
+        let items = editor.command_menu().expect("menu is still open");
+        assert_eq!(
+            items[0].name, "model",
+            "prefix match comes first: {items:?}"
+        );
 
         // 空格之后进入参数，菜单关闭。
         editor.handle(&key(KeyCode::Char(' ')));

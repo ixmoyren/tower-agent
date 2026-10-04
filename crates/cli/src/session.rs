@@ -37,10 +37,16 @@ impl Session {
     /// 用显式模型构造会话。
     pub fn with_model(cwd: impl Into<PathBuf>, stream: BoxStreamService, model: Model) -> Self {
         let cwd = cwd.into();
+        let system_prompt = format!(
+            "你是 tower-pi-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
+         使用工具而不是猜测文件内容；修改文件前先读一遍。\n\
+         离线 faux provider 下，以 `!<工具名> <JSON 参数>` 开头的用户消息会被翻译成一次工具调用。",
+            tools::DEFAULT_TOOL_NAMES.join(", ")
+        );
         let mut options = AgentOptions::new(stream);
         options.initial.tools = tools::default_tools(cwd.clone());
         options.initial.model = Some(model);
-        options.initial.system_prompt = Some(system_prompt());
+        options.initial.system_prompt = Some(system_prompt);
         Self {
             agent: Agent::new(options),
             cwd,
@@ -162,19 +168,19 @@ impl tui::CommandHost for Session {
     fn session_info(&self) -> Vec<String> {
         let state = self.state();
         vec![
-            format!("工作目录：{}", self.cwd().display()),
+            format!("cwd: {}", self.cwd().display()),
             format!(
-                "模型：{}（provider {} / api {}）",
+                "model: {} (provider {} / api {})",
                 state.model.id, state.model.provider, state.model.api
             ),
-            format!("思考级别：{}", thinking_level_name(state.thinking_level)),
+            format!("thinking: {}", thinking_level_name(state.thinking_level)),
             format!(
-                "消息：{} 条 · 工具：{} 个",
+                "messages: {} · tools: {}",
                 state.messages.len(),
                 state.tools.len()
             ),
             format!(
-                "状态：{}",
+                "state: {}",
                 if state.is_streaming {
                     "running"
                 } else {
@@ -188,7 +194,7 @@ impl tui::CommandHost for Session {
         let current = self.state().model;
         let Some(arg) = arg else {
             return Ok(format!(
-                "当前模型：{}（provider {} / api {}）\n用法：/model <provider>/<id> 或 /model <id>",
+                "current model: {} (provider {} / api {})\nusage: /model <provider>/<id> or /model <id>",
                 current.id, current.provider, current.api
             ));
         };
@@ -198,7 +204,7 @@ impl tui::CommandHost for Session {
             None => (None, arg.trim()),
         };
         if id.is_empty() {
-            return Err("模型 id 不能为空。用法：/model <provider>/<id>".into());
+            return Err("model id must not be empty. usage: /model <provider>/<id>".into());
         }
 
         // 没写 `provider/` 时：先看它是不是 provider 名（用它的默认模型），否则按当前
@@ -206,7 +212,7 @@ impl tui::CommandHost for Session {
         let kind = match requested {
             Some(provider) => crate::provider::ProviderKind::parse(provider).ok_or_else(|| {
                 format!(
-                    "未知 provider：{provider}（可用：{}）",
+                    "unknown provider: {provider} (available: {})",
                     available_providers()
                 )
             })?,
@@ -215,7 +221,12 @@ impl tui::CommandHost for Session {
                 None => crate::provider::ProviderKind::ALL
                     .into_iter()
                     .find(|kind| kind.api() == current.api)
-                    .ok_or_else(|| format!("当前 provider（{}）无法识别", current.provider))?,
+                    .ok_or_else(|| {
+                        format!(
+                            "cannot determine the current provider ({})",
+                            current.provider
+                        )
+                    })?,
             },
         };
         let model_id = match requested {
@@ -231,7 +242,8 @@ impl tui::CommandHost for Session {
 
         if kind.id() != current.provider {
             return Err(format!(
-                "本移植版的 provider 在启动时固定（当前 {}），换 provider 请用 `--provider` 重启。",
+                "this port fixes the provider at startup (currently {}); restart with \
+                 `--provider` to switch.",
                 current.provider
             ));
         }
@@ -239,7 +251,7 @@ impl tui::CommandHost for Session {
         let model = crate::provider::model_for(kind, model_id);
         self.set_model(model.clone());
         Ok(format!(
-            "模型已切换为：{}（provider {}）",
+            "model switched to: {} (provider {})",
             model.id, model.provider
         ))
     }
@@ -247,16 +259,21 @@ impl tui::CommandHost for Session {
     fn thinking(&self, arg: Option<&str>) -> Result<String, String> {
         match arg {
             None => Ok(format!(
-                "当前思考级别：{}\n用法：/thinking <{}>",
+                "current thinking level: {}\nusage: /thinking <{}>",
                 thinking_level_name(self.state().thinking_level),
                 THINKING_LEVELS
             )),
             Some(value) => match parse_thinking_level(value) {
                 Some(level) => {
                     self.set_thinking_level(level);
-                    Ok(format!("思考级别已设为：{}", thinking_level_name(level)))
+                    Ok(format!(
+                        "thinking level set to: {}",
+                        thinking_level_name(level)
+                    ))
                 }
-                None => Err(format!("未知思考级别：{value}（可用：{THINKING_LEVELS}）")),
+                None => Err(format!(
+                    "unknown thinking level: {value} (available: {THINKING_LEVELS})"
+                )),
             },
         }
     }
@@ -279,16 +296,6 @@ fn default_model() -> Model {
         provider: "unknown".into(),
         ..Model::default()
     }
-}
-
-/// 会话的系统提示：告诉模型有哪些工具以及 `!` 前缀是给 faux provider 用的。
-fn system_prompt() -> String {
-    let names = tools::tool_names().join(", ");
-    format!(
-        "你是 tower-pi-agent（pi 的 Rust 移植版）的编码助手。可用工具：{names}。\n\
-         使用工具而不是猜测文件内容；修改文件前先读一遍。\n\
-         离线 faux provider 下，以 `!<工具名> <JSON 参数>` 开头的用户消息会被翻译成一次工具调用。"
-    )
 }
 
 /// 把事件流打印成纯文本（`--print`）。
@@ -684,7 +691,7 @@ mod tests {
         let session = session(dir.path());
         let state = session.state();
         let names: Vec<&str> = state.tools.iter().map(|tool| tool.name()).collect();
-        assert_eq!(names, tools::tool_names());
+        assert_eq!(names, *tools::DEFAULT_TOOL_NAMES);
         assert!(state.system_prompt.contains("read"));
     }
 

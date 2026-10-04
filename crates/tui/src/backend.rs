@@ -209,7 +209,7 @@ pub async fn run_tui(
         &submissions,
         host.as_ref(),
     )
-    .await;
+        .await;
 
     let mut terminal = tui.into_terminal();
     let restored = restore_terminal(&mut terminal);
@@ -299,21 +299,23 @@ fn evaluate_command(host: &dyn CommandHost, input: &str) -> CommandOutcome {
     let arg = parts.next().map(str::trim).filter(|arg| !arg.is_empty());
 
     let Some(command) = command::lookup(name) else {
-        return CommandOutcome::Notice(format!("未知命令：/{name}（输入 `/` 查看可用命令）"));
+        return CommandOutcome::Notice(format!(
+            "unknown command: /{name} (type `/` for available commands)"
+        ));
     };
 
     match command.name {
         "quit" => CommandOutcome::Quit,
         "new" => match host.new_session() {
-            Ok(()) => CommandOutcome::Clear("已开始新会话。".into()),
-            Err(error) => CommandOutcome::Notice(format!("/new 失败：{error}")),
+            Ok(()) => CommandOutcome::Clear("Started a new session.".into()),
+            Err(error) => CommandOutcome::Notice(format!("/new failed: {error}")),
         },
         "session" => CommandOutcome::Notice(host.session_info().join("\n")),
         "model" => notice(host.model(arg)),
         "thinking" => notice(host.thinking(arg)),
         "hotkeys" => CommandOutcome::Notice(command::hotkeys().join("\n")),
         _ => CommandOutcome::Notice(format!(
-            "/{name} 尚未移植到 tower-pi-agent（pi 里的说明：{}）。",
+            "/{name} is not ported to tower-pi-agent yet (pi description: {}).",
             command.description
         )),
     }
@@ -322,7 +324,7 @@ fn evaluate_command(host: &dyn CommandHost, input: &str) -> CommandOutcome {
 fn notice(result: Result<String, String>) -> CommandOutcome {
     match result {
         Ok(text) => CommandOutcome::Notice(text),
-        Err(error) => CommandOutcome::Notice(format!("错误：{error}")),
+        Err(error) => CommandOutcome::Notice(format!("error: {error}")),
     }
 }
 
@@ -387,15 +389,15 @@ mod tests {
 
         fn model(&self, arg: Option<&str>) -> Result<String, String> {
             Ok(match arg {
-                Some(arg) => format!("模型已切换为：{arg}"),
-                None => "当前模型：faux".into(),
+                Some(arg) => format!("model switched to: {arg}"),
+                None => "current model: faux".into(),
             })
         }
 
         fn thinking(&self, arg: Option<&str>) -> Result<String, String> {
             Ok(match arg {
-                Some(arg) => format!("思考级别已设为：{arg}"),
-                None => "当前思考级别：off".into(),
+                Some(arg) => format!("thinking level set to: {arg}"),
+                None => "current thinking level: off".into(),
             })
         }
     }
@@ -415,14 +417,14 @@ mod tests {
     fn new_clears_the_transcript_or_reports_the_failure() {
         assert_eq!(
             evaluate_command(&fake_host(), "new"),
-            CommandOutcome::Clear("已开始新会话。".into())
+            CommandOutcome::Clear("Started a new session.".into())
         );
         let busy = FakeHost {
             new_session: Err("Agent is already processing".into()),
         };
         assert_eq!(
             evaluate_command(&busy, "new"),
-            CommandOutcome::Notice("/new 失败：Agent is already processing".into())
+            CommandOutcome::Notice("/new failed: Agent is already processing".into())
         );
     }
 
@@ -430,18 +432,20 @@ mod tests {
     fn implemented_commands_pass_arguments_to_the_host() {
         assert_eq!(
             evaluate_command(&fake_host(), "model anthropic/claude-x"),
-            CommandOutcome::Notice("模型已切换为：anthropic/claude-x".into())
+            CommandOutcome::Notice("model switched to: anthropic/claude-x".into())
         );
         assert_eq!(
             evaluate_command(&fake_host(), "thinking high"),
-            CommandOutcome::Notice("思考级别已设为：high".into())
+            CommandOutcome::Notice("thinking level set to: high".into())
         );
         assert_eq!(
             evaluate_command(&fake_host(), "session"),
             CommandOutcome::Notice("cwd: /tmp\nmodel: faux".into())
         );
         match evaluate_command(&fake_host(), "hotkeys") {
-            CommandOutcome::Notice(text) => assert!(text.contains("命令菜单"), "got: {text}"),
+            CommandOutcome::Notice(text) => {
+                assert!(text.contains("command menu"), "got: {text}");
+            }
             other => panic!("expected a notice, got {other:?}"),
         }
     }
@@ -449,11 +453,15 @@ mod tests {
     #[test]
     fn unported_and_unknown_commands_are_reported() {
         match evaluate_command(&fake_host(), "compact") {
-            CommandOutcome::Notice(text) => assert!(text.contains("尚未移植"), "got: {text}"),
+            CommandOutcome::Notice(text) => {
+                assert!(text.contains("not ported"), "got: {text}");
+            }
             other => panic!("expected a notice, got {other:?}"),
         }
         match evaluate_command(&fake_host(), "nope") {
-            CommandOutcome::Notice(text) => assert!(text.contains("未知命令"), "got: {text}"),
+            CommandOutcome::Notice(text) => {
+                assert!(text.contains("unknown command"), "got: {text}");
+            }
             other => panic!("expected a notice, got {other:?}"),
         }
     }

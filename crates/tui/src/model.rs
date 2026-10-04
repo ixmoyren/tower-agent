@@ -459,7 +459,7 @@ mod tests {
             content: ai::UserContent::Text("hi".into()),
             timestamp: 0,
         })));
-        state.push_notice("已开始新会话。");
+        state.push_notice("Started a new session.");
         assert_eq!(state.entries().len(), 2);
         assert_eq!(state.entries()[1].kind, EntryKind::Notice);
 

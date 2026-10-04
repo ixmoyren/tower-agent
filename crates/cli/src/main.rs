@@ -150,7 +150,7 @@ fn main() -> ExitCode {
 }
 
 fn print_tools() {
-    println!("内置工具（{} 个）：", tools::tool_names().len());
+    println!("内置工具（{} 个）：", tools::DEFAULT_TOOL_NAMES.len());
     for tool in tools::default_tools(PathBuf::from(".")) {
         println!(
             "  {:<12} {}",
@@ -186,10 +186,10 @@ fn select_tools(args: &CliArgs, cwd: &Path) -> Vec<AgentTool> {
 
 /// `--tools` / `--exclude-tools` 里写了不存在的工具名时给出提示（pi 会忽略它们）。
 fn warn_unknown_tool(name: &str) {
-    if !name.is_empty() && !tools::tool_names().contains(&name) {
+    if !name.is_empty() && !tools::DEFAULT_TOOL_NAMES.contains(&name) {
         eprintln!(
             "忽略未知工具：{name}（可用：{}）",
-            tools::tool_names().join(", ")
+            tools::DEFAULT_TOOL_NAMES.join(", ")
         );
     }
 }
@@ -236,14 +236,6 @@ fn single_thread_runtime() -> std::io::Result<tokio::runtime::Runtime> {
 mod tests {
     use super::*;
     use crate::session::write_event;
-
-    #[test]
-    fn tool_listing_covers_all_builtin_tools() {
-        assert_eq!(
-            tools::tool_names(),
-            vec!["read", "shell", "edit", "write", "grep", "find", "ls"]
-        );
-    }
 
     #[test]
     fn stdin_prompt_reader_is_available() {

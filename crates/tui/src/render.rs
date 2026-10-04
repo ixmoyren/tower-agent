@@ -33,7 +33,7 @@ pub fn render(frame: &mut Frame, state: &TuiState, editor: &Editor) {
         Constraint::Length(EDITOR_HEIGHT),
         Constraint::Length(1),
     ])
-    .split(area);
+        .split(area);
 
     render_header(frame, chunks[0], state);
     render_transcript(frame, chunks[1], state);
@@ -87,7 +87,7 @@ fn render_command_menu(frame: &mut Frame, area: Rect, editor: &Editor) {
             }
             if !command.ported {
                 spans.push(Span::styled(
-                    " · 尚未移植",
+                    " · not ported",
                     Style::default().fg(Color::DarkGray),
                 ));
             }
@@ -108,7 +108,7 @@ fn render_command_menu(frame: &mut Frame, area: Rect, editor: &Editor) {
     let menu = List::new(rows).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" 命令（Tab 补全 · Enter 执行） "),
+            .title(" Commands (Tab complete · Enter run) "),
     );
     frame.render_widget(Clear, rect);
     frame.render_widget(menu, rect);
@@ -148,7 +148,7 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let hints = "Enter 提交 · / 命令 · i 插入 · Esc 普通 · q 退出 · PgUp/PgDn 滚动记录";
+    let hints = "Enter submit · / commands · i insert · Esc normal · q quit · PgUp/PgDn scroll";
     let mut spans = vec![Span::styled(hints, Style::default().fg(Color::DarkGray))];
     if let Some(error) = state.error() {
         spans.push(Span::raw("  "));
@@ -316,8 +316,12 @@ mod tests {
 
     #[test]
     fn wrap_line_counts_wide_characters_as_two_columns() {
-        // "你好" is 4 columns wide, so only two characters fit in 4 columns.
-        assert_eq!(wrap_line("你好世界", 4), vec!["你好", "世界"]);
+        // Each CJK char is 2 columns wide, so only two of them fit in 4 columns.
+        let text = "\u{4f60}\u{597d}\u{4e16}\u{754c}";
+        assert_eq!(
+            wrap_line(text, 4),
+            vec!["\u{4f60}\u{597d}", "\u{4e16}\u{754c}"]
+        );
     }
 
     #[test]
@@ -363,14 +367,26 @@ mod tests {
             rendered.push('\n');
         }
 
-        assert!(rendered.contains("NORMAL"), "模式标题在输入区:\n{rendered}");
-        assert!(rendered.contains("1 hello"), "行号 + 第一行:\n{rendered}");
-        assert!(rendered.contains("2 world"), "行号 + 第二行:\n{rendered}");
-        assert!(rendered.contains("Enter"), "提示栏:\n{rendered}");
-        assert!(rendered.contains("Esc"), "提示栏含 Esc 提示:\n{rendered}");
+        assert!(
+            rendered.contains("NORMAL"),
+            "mode title in the input area:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("1 hello"),
+            "line number + first line:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("2 world"),
+            "line number + second line:\n{rendered}"
+        );
+        assert!(rendered.contains("Enter"), "footer hint bar:\n{rendered}");
+        assert!(
+            rendered.contains("Esc"),
+            "footer hint bar mentions Esc:\n{rendered}"
+        );
         assert!(
             rendered.contains("› hi"),
-            "transcript 仍在上面:\n{rendered}"
+            "transcript is still above:\n{rendered}"
         );
     }
 
@@ -420,19 +436,22 @@ mod tests {
         }
 
         // 宽字符在缓冲区里各占两列，断言只看 ASCII 的命令名。
-        assert!(rendered.contains("/settings"), "首条命令:\n{rendered}");
-        assert!(rendered.contains("/model"), "菜单包含 model:\n{rendered}");
+        assert!(rendered.contains("/settings"), "first command:\n{rendered}");
+        assert!(
+            rendered.contains("/model"),
+            "menu contains model:\n{rendered}"
+        );
     }
 
     #[test]
     fn notices_are_rendered_with_their_own_prefix() {
         let mut state = TuiState::new("t");
-        state.push_notice("已开始新会话。");
+        state.push_notice("Started a new session.");
         let rendered: String = transcript_lines(&state, 40)[0]
             .spans
             .iter()
             .map(|span| span.content.as_ref())
             .collect();
-        assert_eq!(rendered, "» 已开始新会话。");
+        assert_eq!(rendered, "» Started a new session.");
     }
 }

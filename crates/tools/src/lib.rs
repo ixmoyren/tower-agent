@@ -30,6 +30,7 @@ pub use ls::{LsTool, create_ls_tool};
 pub use queue::FileMutationQueue;
 pub use read::{ReadTool, create_read_tool};
 pub use shell::{ShellTool, ShellToolOptions, create_shell_tool};
+use std::sync::LazyLock;
 pub use truncate::{
     DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, TruncationResult,
     format_size, truncate_head, truncate_line, truncate_tail,
@@ -56,7 +57,7 @@ pub fn default_tools(cwd: impl Into<std::path::PathBuf> + Clone) -> Vec<AgentToo
 }
 
 /// 内置工具名，顺序与 [`default_tools`] 一致。
-pub fn tool_names() -> Vec<&'static str> {
+pub static DEFAULT_TOOL_NAMES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     vec![
         ReadTool::NAME,
         ShellTool::NAME,
@@ -66,4 +67,4 @@ pub fn tool_names() -> Vec<&'static str> {
         FindTool::NAME,
         LsTool::NAME,
     ]
-}
+});
