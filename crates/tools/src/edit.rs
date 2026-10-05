@@ -1,7 +1,8 @@
 //! `edit` 工具（对应 pi `coding-agent` 的 `core/tools/edit.ts`）。
 
 use std::{
-    path::PathBuf,
+    path::Path,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -30,20 +31,20 @@ pub struct EditToolOptions {
 /// 精确文本替换工具。
 #[derive(Clone)]
 pub struct EditTool {
-    cwd: PathBuf,
+    cwd: Arc<Path>,
     queue: FileMutationQueue,
 }
 
 impl EditTool {
     /// 用工作目录构造。
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
+    pub fn new(cwd: impl AsRef<Path>) -> Self {
         Self::with_options(cwd, EditToolOptions::default())
     }
 
     /// 用工作目录与选项构造。
-    pub fn with_options(cwd: impl Into<PathBuf>, options: EditToolOptions) -> Self {
+    pub fn with_options(cwd: impl AsRef<Path>, options: EditToolOptions) -> Self {
         Self {
-            cwd: cwd.into(),
+            cwd: Arc::from(cwd.as_ref()),
             queue: options.queue.unwrap_or_default(),
         }
     }
@@ -255,7 +256,7 @@ pub fn prepare_edit_arguments(mut args: JsonObject) -> JsonObject {
 }
 
 /// 构造 `edit` 工具。
-pub fn create_edit_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+pub fn create_edit_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     agent::AgentTool::new(EditTool::NAME, EditTool::new(cwd))
         .label(EditTool::NAME)
         .description(EditTool::DESCRIPTION)

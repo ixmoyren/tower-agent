@@ -168,7 +168,7 @@ fn select_tools(args: &CliArgs, cwd: &Path) -> Vec<AgentTool> {
     if args.no_tools || args.no_builtin_tools {
         return Vec::new();
     }
-    let mut selected = tools::default_tools(cwd.to_path_buf());
+    let mut selected = tools::default_tools(cwd);
     if !args.tools.is_empty() {
         for name in &args.tools {
             warn_unknown_tool(name);
@@ -257,7 +257,7 @@ mod tests {
                 })),
             },
         )
-        .expect("write succeeds");
+            .expect("write succeeds");
         assert_eq!(String::from_utf8(out).expect("utf-8"), "[user] 你好\n");
     }
 }

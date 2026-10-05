@@ -12,7 +12,7 @@
 //! - 不注入 `PI_*` 会话环境变量（`ToolCallRequest` 不携带会话上下文）。
 //! - 进程组杀死只在类 Unix 平台启用；其他平台退化为只杀直接子进程。
 
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
 
 use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
 use ai::JsonObject;
@@ -51,7 +51,7 @@ pub struct ShellToolOptions {
 /// 执行 shell 命令的工具。
 #[derive(Clone)]
 pub struct ShellTool {
-    cwd: PathBuf,
+    cwd: Arc<Path>,
     spec: ShellSpec,
     command_prefix: Option<String>,
 }
@@ -93,10 +93,10 @@ impl ShellSpec {
     }
 
     /// 按操作系统选择默认 shell：Windows 用 PowerShell，其余系统用 bash。
-    fn from_path(path: Option<String>) -> Self {
+    fn from_path(_path: Option<String>) -> Self {
         cfg_select! {
             windows => {
-                let path = find_on_path(&["pwsh", "pwsh.exe", "powershell.exe", "powershell"])
+                let shell = find_on_path(&["pwsh", "pwsh.exe", "powershell.exe", "powershell"])
                     .unwrap_or_else(|| "pwsh".into());
                 Self::new(
                     "PowerShell",
@@ -107,7 +107,7 @@ impl ShellSpec {
             }
             _ => Self::new(
                 "bash",
-                path.unwrap_or_else(|| "bash".into()),
+                _path.unwrap_or_else(|| "bash".into()),
                 "pi-bash",
                 None,
             ),
@@ -120,14 +120,14 @@ impl ShellTool {
     pub const NAME: &'static str = "shell";
 
     /// 用工作目录构造一个 `shell` 工具。
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
+    pub fn new(cwd: impl AsRef<Path>) -> Self {
         Self::with_options(cwd, ShellToolOptions::default())
     }
 
     /// 用工作目录与选项构造。底层 shell 按操作系统选择（Windows → PowerShell，其余 → bash）。
-    pub fn with_options(cwd: impl Into<PathBuf>, options: ShellToolOptions) -> Self {
+    pub fn with_options(cwd: impl AsRef<Path>, options: ShellToolOptions) -> Self {
         Self {
-            cwd: cwd.into(),
+            cwd: Arc::from(cwd.as_ref()),
             spec: ShellSpec::from_path(options.shell_path),
             command_prefix: options.command_prefix,
         }
@@ -394,12 +394,12 @@ fn parse_shell_args(args: &JsonObject) -> Result<(String, Option<f64>), String> 
     Ok((command, timeout))
 }
 
-fn kill_process_group(pgid: i32) {
+fn kill_process_group(_pgid: i32) {
     cfg_select! {
         unix => {
             use rustix::process::{Pid, Signal, kill_process_group};
             // `kill(-pgid, SIGKILL)`：杀掉整棵进程树，而不只是直接子进程。
-            if let Some(pid) = Pid::from_raw(pgid) {
+            if let Some(pid) = Pid::from_raw(_pgid) {
                 let _ = kill_process_group(pid, Signal::KILL);
             }
         }
@@ -776,7 +776,7 @@ fn decode_stream(pending: &mut Vec<u8>, data: &[u8], out: &mut String) {
 }
 
 /// 构造统一的 `shell` 工具（Windows 上是 PowerShell，其余系统是 bash）。
-pub fn create_shell_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+pub fn create_shell_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     let tool = ShellTool::new(cwd);
     agent::AgentTool::new(ShellTool::NAME, tool.clone())
         .label(ShellTool::NAME)

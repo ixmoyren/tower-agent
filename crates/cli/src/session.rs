@@ -30,13 +30,13 @@ impl Session {
     /// 用工作目录和一个 provider 流服务构造会话，并注册全部内置工具。
     ///
     /// 默认把 provider 报出来的模型记进 transcript；[`Session::with_model`] 可以覆盖。
-    pub fn new(cwd: impl Into<PathBuf>, stream: BoxStreamService) -> Self {
+    pub fn new(cwd: impl AsRef<Path>, stream: BoxStreamService) -> Self {
         Self::with_model(cwd, stream, default_model())
     }
 
     /// 用显式模型构造会话。
-    pub fn with_model(cwd: impl Into<PathBuf>, stream: BoxStreamService, model: Model) -> Self {
-        let cwd = cwd.into();
+    pub fn with_model(cwd: impl AsRef<Path>, stream: BoxStreamService, model: Model) -> Self {
+        let cwd = cwd.as_ref().to_path_buf();
         let system_prompt = format!(
             "你是 tower-pi-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
          使用工具而不是猜测文件内容；修改文件前先读一遍。\n\
@@ -44,7 +44,7 @@ impl Session {
             tools::DEFAULT_TOOL_NAMES.join(", ")
         );
         let mut options = AgentOptions::new(stream);
-        options.initial.tools = tools::default_tools(cwd.clone());
+        options.initial.tools = tools::default_tools(&cwd);
         options.initial.model = Some(model);
         options.initial.system_prompt = Some(system_prompt);
         Self {

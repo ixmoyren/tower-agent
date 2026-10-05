@@ -5,7 +5,8 @@
 //! 目录分隔符）、同样尊重 `.gitignore`（不在 git 仓库内时也生效）、同样包含隐藏文件。
 
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -28,13 +29,15 @@ const DEFAULT_LIMIT: u64 = 1000;
 /// 按 glob 查找文件的工具。
 #[derive(Clone)]
 pub struct FindTool {
-    cwd: PathBuf,
+    cwd: Arc<Path>,
 }
 
 impl FindTool {
     /// 用工作目录构造。
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self { cwd: cwd.into() }
+    pub fn new(cwd: impl AsRef<Path>) -> Self {
+        Self {
+            cwd: Arc::from(cwd.as_ref()),
+        }
     }
 
     /// 工具名。
@@ -249,7 +252,7 @@ fn inside_git_repo(search_path: &Path) -> bool {
 }
 
 /// 构造 `find` 工具。
-pub fn create_find_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+pub fn create_find_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     agent::AgentTool::new(FindTool::NAME, FindTool::new(cwd))
         .label(FindTool::NAME)
         .description(FindTool::description())

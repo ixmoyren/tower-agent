@@ -1,7 +1,8 @@
 //! `ls` 工具（对应 pi `coding-agent` 的 `core/tools/ls.ts`）。
 
 use std::{
-    path::PathBuf,
+    path::Path,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -22,13 +23,15 @@ const DEFAULT_LIMIT: u64 = 500;
 /// 列目录工具。
 #[derive(Clone)]
 pub struct LsTool {
-    cwd: PathBuf,
+    cwd: Arc<Path>,
 }
 
 impl LsTool {
     /// 用工作目录构造。
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self { cwd: cwd.into() }
+    pub fn new(cwd: impl AsRef<Path>) -> Self {
+        Self {
+            cwd: Arc::from(cwd.as_ref()),
+        }
     }
 
     /// 工具名。
@@ -184,7 +187,7 @@ fn cancelled(signal: &Option<CancellationToken>) -> bool {
 }
 
 /// 构造 `ls` 工具。
-pub fn create_ls_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+pub fn create_ls_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     agent::AgentTool::new(LsTool::NAME, LsTool::new(cwd))
         .label(LsTool::NAME)
         .description(LsTool::description())

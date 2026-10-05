@@ -7,6 +7,7 @@
 
 use std::{
     path::{Path, PathBuf},
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -33,13 +34,15 @@ const DEFAULT_LIMIT: u64 = 100;
 /// 在文件内容里搜索的工具。
 #[derive(Clone)]
 pub struct GrepTool {
-    cwd: PathBuf,
+    cwd: Arc<Path>,
 }
 
 impl GrepTool {
     /// 用工作目录构造。
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self { cwd: cwd.into() }
+    pub fn new(cwd: impl AsRef<Path>) -> Self {
+        Self {
+            cwd: Arc::from(cwd.as_ref()),
+        }
     }
 
     /// 工具名。
@@ -382,7 +385,7 @@ fn format_block(
 }
 
 /// 构造 `grep` 工具。
-pub fn create_grep_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+pub fn create_grep_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     agent::AgentTool::new(GrepTool::NAME, GrepTool::new(cwd))
         .label(GrepTool::NAME)
         .description(GrepTool::description())

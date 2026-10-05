@@ -44,14 +44,15 @@ use agent::AgentTool;
 /// 顺序沿用 pi `allToolNames`（把拆分出来的第二个 shell 合并掉）：`read` / `shell` /
 /// `edit` / `write` / `grep` / `find` / `ls`。`shell` 在 Windows 上是 PowerShell，其余系统
 /// 上是 bash。
-pub fn default_tools(cwd: impl Into<std::path::PathBuf> + Clone) -> Vec<AgentTool> {
+pub fn default_tools(cwd: impl AsRef<std::path::Path>) -> Vec<AgentTool> {
+    let cwd = cwd.as_ref();
     vec![
-        create_read_tool(cwd.clone()),
-        create_shell_tool(cwd.clone()),
-        create_edit_tool(cwd.clone()),
-        create_write_tool(cwd.clone()),
-        create_grep_tool(cwd.clone()),
-        create_find_tool(cwd.clone()),
+        create_read_tool(cwd),
+        create_shell_tool(cwd),
+        create_edit_tool(cwd),
+        create_write_tool(cwd),
+        create_grep_tool(cwd),
+        create_find_tool(cwd),
         create_ls_tool(cwd),
     ]
 }

@@ -1,7 +1,8 @@
 //! `write` 工具（对应 pi `coding-agent` 的 `core/tools/write.ts`）。
 
 use std::{
-    path::PathBuf,
+    path::Path,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -26,20 +27,20 @@ pub struct WriteToolOptions {
 /// 创建/覆盖文件的工具。
 #[derive(Clone)]
 pub struct WriteTool {
-    cwd: PathBuf,
+    cwd: Arc<Path>,
     queue: FileMutationQueue,
 }
 
 impl WriteTool {
     /// 用工作目录构造。
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
+    pub fn new(cwd: impl AsRef<Path>) -> Self {
         Self::with_options(cwd, WriteToolOptions::default())
     }
 
     /// 用工作目录与选项构造。
-    pub fn with_options(cwd: impl Into<PathBuf>, options: WriteToolOptions) -> Self {
+    pub fn with_options(cwd: impl AsRef<Path>, options: WriteToolOptions) -> Self {
         Self {
-            cwd: cwd.into(),
+            cwd: Arc::from(cwd.as_ref()),
             queue: options.queue.unwrap_or_default(),
         }
     }
@@ -126,7 +127,7 @@ fn cancelled(signal: &Option<CancellationToken>) -> bool {
 }
 
 /// 供测试与内部使用：直接构造一个 `write` 服务。
-pub fn create_write_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+pub fn create_write_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     agent::AgentTool::new(WriteTool::NAME, WriteTool::new(cwd))
         .label(WriteTool::NAME)
         .description(WriteTool::DESCRIPTION)

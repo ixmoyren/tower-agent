@@ -5,7 +5,8 @@
 //! 因此超出 provider 限制的图片不会被压缩（见 design.md 第 9 节第 4.ii 步说明）。
 
 use std::{
-    path::PathBuf,
+    path::Path,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -27,13 +28,15 @@ const IMAGE_TYPE_SNIFF_BYTES: usize = 4100;
 /// `read` 工具。
 #[derive(Clone)]
 pub struct ReadTool {
-    cwd: PathBuf,
+    cwd: Arc<Path>,
 }
 
 impl ReadTool {
     /// 用工作目录构造。
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self { cwd: cwd.into() }
+    pub fn new(cwd: impl AsRef<Path>) -> Self {
+        Self {
+            cwd: Arc::from(cwd.as_ref()),
+        }
     }
 
     /// 工具名。
@@ -305,7 +308,7 @@ fn is_bmp(buffer: &[u8]) -> bool {
 }
 
 /// 构造 `read` 工具。
-pub fn create_read_tool(cwd: impl Into<PathBuf>) -> agent::AgentTool {
+pub fn create_read_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     agent::AgentTool::new(ReadTool::NAME, ReadTool::new(cwd))
         .label(ReadTool::NAME)
         .description(ReadTool::description())
