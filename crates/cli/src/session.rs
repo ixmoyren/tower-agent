@@ -39,8 +39,7 @@ impl Session {
         let cwd = cwd.as_ref().to_path_buf();
         let system_prompt = format!(
             "你是 tower-pi-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
-         使用工具而不是猜测文件内容；修改文件前先读一遍。\n\
-         离线 faux provider 下，以 `!<工具名> <JSON 参数>` 开头的用户消息会被翻译成一次工具调用。",
+         使用工具而不是猜测文件内容；修改文件前先读一遍。",
             tools::DEFAULT_TOOL_NAMES.join(", ")
         );
         let mut options = AgentOptions::new(stream);
@@ -220,7 +219,14 @@ impl tui::CommandHost for Session {
                 Some(kind) => kind,
                 None => crate::provider::ProviderKind::ALL
                     .into_iter()
-                    .find(|kind| kind.api() == current.api)
+                    // 先按 (provider, api) 精确匹配（openai 与 deepseek 共用
+                    // `openai-completions`）；再退回只按 provider 标识匹配。
+                    .find(|kind| kind.id() == current.provider && kind.api() == current.api)
+                    .or_else(|| {
+                        crate::provider::ProviderKind::ALL
+                            .into_iter()
+                            .find(|kind| kind.id() == current.provider)
+                    })
                     .ok_or_else(|| {
                         format!(
                             "cannot determine the current provider ({})",
@@ -824,6 +830,14 @@ mod tests {
             "got: {}",
             session.state().model.id
         );
+
+        // deepseek 复用 OpenAI 兼容实现，但 provider/api 标识独立。
+        session
+            .login(Some("deepseek sk-test"))
+            .expect("login deepseek");
+        assert_eq!(session.state().model.provider, "deepseek");
+        assert_eq!(session.state().model.api, "openai-completions");
+        assert_eq!(session.state().model.id, "deepseek-chat");
 
         // 无参数给用法；未知 provider / 缺 key 明确报错。
         assert!(

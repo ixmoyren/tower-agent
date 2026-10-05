@@ -33,7 +33,7 @@ pub fn render(frame: &mut Frame, state: &TuiState, editor: &Editor) {
         Constraint::Length(EDITOR_HEIGHT),
         Constraint::Length(1),
     ])
-        .split(area);
+    .split(area);
 
     render_header(frame, chunks[0], state);
     render_transcript(frame, chunks[1], state);
@@ -108,7 +108,7 @@ fn render_command_menu(frame: &mut Frame, area: Rect, editor: &Editor) {
     let menu = List::new(rows).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Commands (Tab complete · Enter run) "),
+            .title(" Commands (Tab complete · Enter select) "),
     );
     frame.render_widget(Clear, rect);
     frame.render_widget(menu, rect);

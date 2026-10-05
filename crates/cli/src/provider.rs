@@ -11,9 +11,10 @@
 //! - [`TimeoutService`] 只覆盖「建立请求」阶段（连接 + 响应头），响应流本身由上层处理；
 //! - [`Models`] 注册 `(provider, api) → 服务` 的路由，并把本次模型写进目录，方便检查与刷新。
 //!
-//! 四种真实 provider（anthropic messages / openai chat completions / openai responses /
-//! google generative ai）凭据来自各家的环境变量。`faux` 只是**测试 provider**：它在
-//! `ai::provider::faux`（`test-util` feature）里，不会被编进二进制。
+//! 五种真实 provider（anthropic messages / openai chat completions / openai responses /
+//! google generative ai / deepseek，其中 deepseek 复用 openai chat completions 的实现）
+//! 凭据来自各家的环境变量。`faux` 只是**测试 provider**：它在 `ai::provider::faux`
+//! （`test-util` feature）里，不会被编进二进制。
 
 use std::time::Duration;
 
@@ -25,6 +26,9 @@ use ai::{
 };
 use futures_util::future::BoxFuture;
 use tower::Service;
+
+/// DeepSeek 的 OpenAI 兼容端点（`/chat/completions`）。
+const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
 
 /// CLI 可选的 provider。
 ///
@@ -42,24 +46,28 @@ pub enum ProviderKind {
     OpenAiResponses,
     /// Google Generative AI（`generativelanguage.googleapis.com`）。
     Google,
+    /// DeepSeek（OpenAI 兼容的 `/chat/completions`）。
+    DeepSeek,
 }
 
 impl ProviderKind {
     /// 全部可选 provider（用于帮助文案与校验）。
-    pub const ALL: [ProviderKind; 4] = [
+    pub const ALL: [ProviderKind; 5] = [
         ProviderKind::Anthropic,
         ProviderKind::OpenAi,
         ProviderKind::OpenAiResponses,
         ProviderKind::Google,
+        ProviderKind::DeepSeek,
     ];
 
     /// 没显式给 `--provider` 时，按 pi `defaultModelPerProvider` 的顺序挑默认 provider。
     ///
     /// `openai` 与 `openai-responses` 是同一家的两条 API，默认只保留前者。
-    pub const DEFAULT_ORDER: [ProviderKind; 3] = [
+    pub const DEFAULT_ORDER: [ProviderKind; 4] = [
         ProviderKind::Anthropic,
         ProviderKind::OpenAi,
         ProviderKind::Google,
+        ProviderKind::DeepSeek,
     ];
 
     /// 解析 `--provider` 的取值（大小写不敏感）。`faux` 不是可选项，返回 `None`。
@@ -70,6 +78,7 @@ impl ProviderKind {
             "openai" | "openai-completions" => Some(Self::OpenAi),
             "openai-responses" => Some(Self::OpenAiResponses),
             "google" | "gemini" => Some(Self::Google),
+            "deepseek" => Some(Self::DeepSeek),
             _ => None,
         }
     }
@@ -83,6 +92,7 @@ impl ProviderKind {
             Self::Anthropic => "anthropic",
             Self::OpenAi | Self::OpenAiResponses => "openai",
             Self::Google => "google",
+            Self::DeepSeek => "deepseek",
         }
     }
 
@@ -99,6 +109,7 @@ impl ProviderKind {
             Self::OpenAi => "openai",
             Self::OpenAiResponses => "openai-responses",
             Self::Google => "google",
+            Self::DeepSeek => "deepseek",
         }
     }
 
@@ -109,7 +120,7 @@ impl ProviderKind {
             #[cfg(test)]
             Self::Faux => "faux",
             Self::Anthropic => ANTHROPIC_MESSAGES_API,
-            Self::OpenAi => OPENAI_COMPLETIONS_API,
+            Self::OpenAi | Self::DeepSeek => OPENAI_COMPLETIONS_API,
             Self::OpenAiResponses => OPENAI_RESPONSES_API,
             Self::Google => GOOGLE_GENERATIVE_AI_API,
         }
@@ -124,6 +135,7 @@ impl ProviderKind {
             Self::Anthropic => Some("ANTHROPIC_API_KEY"),
             Self::OpenAi | Self::OpenAiResponses => Some("OPENAI_API_KEY"),
             Self::Google => Some("GEMINI_API_KEY"),
+            Self::DeepSeek => Some("DEEPSEEK_API_KEY"),
         }
     }
 
@@ -136,6 +148,7 @@ impl ProviderKind {
             Self::Anthropic => "claude-opus-4-8",
             Self::OpenAi | Self::OpenAiResponses => "gpt-5.5",
             Self::Google => "gemini-3.1-pro-preview",
+            Self::DeepSeek => "deepseek-chat",
         }
     }
 
@@ -357,6 +370,10 @@ pub fn build_with_api_key(
                 ProviderKind::Google => GoogleProvider::new(transport)
                     .with_api_key(api_key)
                     .boxed_provider(),
+                ProviderKind::DeepSeek => OpenAiProvider::new(transport)
+                    .with_api_key(api_key)
+                    .with_base_url(DEEPSEEK_BASE_URL)
+                    .boxed_provider(),
                 #[cfg(test)]
                 ProviderKind::Faux => unreachable!("faux 在上一层已处理"),
             };
@@ -421,6 +438,10 @@ mod tests {
             ProviderKind::parse("openai-responses"),
             Some(ProviderKind::OpenAiResponses)
         );
+        assert_eq!(
+            ProviderKind::parse("deepseek"),
+            Some(ProviderKind::DeepSeek)
+        );
         assert_eq!(ProviderKind::parse("nope"), None);
         // `faux` 只是测试替身，不是用户可选的 provider。
         assert_eq!(ProviderKind::parse("faux"), None);
@@ -428,14 +449,15 @@ mod tests {
 
     #[test]
     fn all_and_default_order_only_list_real_providers() {
-        assert_eq!(ProviderKind::ALL.len(), 4);
+        assert_eq!(ProviderKind::ALL.len(), 5);
         assert!(!ProviderKind::ALL.contains(&ProviderKind::Faux));
         assert_eq!(
             ProviderKind::DEFAULT_ORDER,
             [
                 ProviderKind::Anthropic,
                 ProviderKind::OpenAi,
-                ProviderKind::Google
+                ProviderKind::Google,
+                ProviderKind::DeepSeek
             ]
         );
     }
@@ -512,7 +534,7 @@ mod tests {
         let message = ProviderError::Unknown("mistral".into()).to_string();
         assert!(message.contains("未知 provider：mistral"), "got: {message}");
         // 错误里的可用列表只列真实 provider（不含测试用的 faux）。
-        for name in ["anthropic", "openai", "google"] {
+        for name in ["anthropic", "openai", "google", "deepseek"] {
             assert!(message.contains(name), "缺少 `{name}`：{message}");
         }
         assert!(
@@ -528,6 +550,7 @@ mod tests {
             (ProviderKind::OpenAi, "openai", "OPENAI_API_KEY"),
             (ProviderKind::OpenAiResponses, "openai", "OPENAI_API_KEY"),
             (ProviderKind::Google, "google", "GEMINI_API_KEY"),
+            (ProviderKind::DeepSeek, "deepseek", "DEEPSEEK_API_KEY"),
         ];
         for (kind, provider, env) in cases {
             let result = build_with_api_key(kind, None, OPTIONS, None);
@@ -549,6 +572,7 @@ mod tests {
             (ProviderKind::OpenAi, "openai", "openai-completions"),
             (ProviderKind::OpenAiResponses, "openai", "openai-responses"),
             (ProviderKind::Google, "google", "google-generative-ai"),
+            (ProviderKind::DeepSeek, "deepseek", "openai-completions"),
         ];
         for (kind, provider, api) in cases {
             let setup = build_with_api_key(kind, Some("my-model"), OPTIONS, Some("test-key"))

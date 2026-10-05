@@ -110,11 +110,12 @@ fn faux_is_not_a_selectable_provider() {
 
 #[test]
 fn default_provider_comes_from_the_environment() {
-    // 三个环境变量都没有时给出明确提示，而不是默默退回 faux。
+    // 所有 provider 的环境变量都没有时给出明确提示，而不是默默退回 faux。
     let output = cli()
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("OPENAI_API_KEY")
         .env_remove("GEMINI_API_KEY")
+        .env_remove("DEEPSEEK_API_KEY")
         .args(["--print", "hi"])
         .output()
         .expect("run cli");

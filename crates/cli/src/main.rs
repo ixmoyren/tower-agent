@@ -1,8 +1,8 @@
 //! `cli` — tower-pi-agent 的命令行入口（对应 pi `packages/coding-agent`）。
 //!
 //! 组装一次会话：内置工具 + agent 编排循环 + （TUI 或纯文本）事件渲染。
-//! provider 由 `--provider` / `--model` 选择，可接真实的 anthropic / openai / google
-//! provider（凭据来自环境变量）；没显式指定时按环境里的凭据挑一个。
+//! provider 由 `--provider` / `--model` 选择，可接真实的 anthropic / openai / google /
+//! deepseek provider（凭据来自环境变量）；没显式指定时按环境里的凭据挑一个。
 //!
 //! 本 crate 负责会话入口与命令行解析，也是 workspace 里**唯一**的可执行入口
 //! （`src/main.rs`）：
@@ -11,7 +11,7 @@
 //!   （TUI 或纯文本）拼起来。
 //! - [`args`]：命令行参数解析（`clap` derive，帮助/版本/错误由 clap 生成）；[`provider`] 把
 //!   `--provider` / `--model` 映射到 `ai` crate 的真实 provider 栈
-//!   （anthropic / openai / google）。测试用的离线 provider 在 `ai::provider::faux`
+//!   （anthropic / openai / deepseek / google）。测试用的离线 provider 在 `ai::provider::faux`
 //!   （`test-util` feature）里，不进这个二进制。
 //!
 //! 七个内置工具（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）在独立的
@@ -124,7 +124,7 @@ fn main() -> ExitCode {
         None if print_mode => {
             eprintln!(
                 "没有可用的 provider：请设置 ANTHROPIC_API_KEY / OPENAI_API_KEY / \
-                 GEMINI_API_KEY，或用 `--provider` + `--api-key` 指定。"
+                 GEMINI_API_KEY / DEEPSEEK_API_KEY，或用 `--provider` + `--api-key` 指定。"
             );
             return ExitCode::FAILURE;
         }

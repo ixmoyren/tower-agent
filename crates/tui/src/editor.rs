@@ -189,6 +189,12 @@ impl Editor {
                 }
                 (Key::Enter, false) => {
                     let command = items[menu_index(self.menu_selection, len, 0)];
+                    if command.argument_hint.is_some() {
+                        // 带参数的命令：Enter 先补全到输入框（保持 Insert 模式），
+                        // 让用户接着输入参数，而不是直接执行。
+                        self.complete_command(command);
+                        return EditorAction::None;
+                    }
                     let text = format!("/{}", command.name);
                     self.clear();
                     return EditorAction::Submit(text);
@@ -204,6 +210,11 @@ impl Editor {
     /// Tab 补全：把选中的命令写进输入框（带参数的补一个空格）。
     fn complete_menu_selection(&mut self, items: &[&'static crate::command::SlashCommand]) {
         let command = items[menu_index(self.menu_selection, items.len(), 0)];
+        self.complete_command(command);
+    }
+
+    /// 把一条命令补全到输入框（带参数的命令补一个空格），保持当前 Insert 模式。
+    fn complete_command(&mut self, command: &crate::command::SlashCommand) {
         let mut completed = format!("/{}", command.name);
         if command.argument_hint.is_some() {
             completed.push(' ');
@@ -929,15 +940,37 @@ mod tests {
         editor.handle(&key(KeyCode::Tab));
         assert_eq!(editor.text(), "/model ");
 
-        // Enter 直接执行选中的命令。
+        // Enter 执行不带参数的命令。
         let mut editor = Editor::new();
         editor.handle(&key(KeyCode::Char('/')));
-        editor.handle(&key(KeyCode::Down));
+        for ch in "quit".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
         assert_eq!(
             editor.handle(&key(KeyCode::Enter)),
-            EditorAction::Submit("/model".into())
+            EditorAction::Submit("/quit".into())
         );
         assert_eq!(editor.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn enter_on_a_command_with_arguments_keeps_insert_mode() {
+        let mut editor = Editor::new();
+        editor.handle(&key(KeyCode::Char('/')));
+        editor.handle(&key(KeyCode::Down)); // `model`
+        assert_eq!(editor.mode(), Mode::Insert);
+
+        // Enter 只补全、不执行：留在 Insert 模式并留出参数位置。
+        assert_eq!(editor.handle(&key(KeyCode::Enter)), EditorAction::None);
+        assert_eq!(editor.text(), "/model ");
+        assert_eq!(editor.mode(), Mode::Insert);
+
+        // 接着直接输入参数即可（首字符不会被当成 vim 普通模式键位）。
+        for ch in "anthropic/claude".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.text(), "/model anthropic/claude");
+        assert_eq!(editor.mode(), Mode::Insert);
     }
 
     #[test]

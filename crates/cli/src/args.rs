@@ -52,7 +52,7 @@ pub struct CliArgs {
         long,
         value_name = "provider",
         value_parser = NonEmptyStringValueParser::new(),
-        help = "Provider to use: anthropic / openai / openai-responses / google \
+        help = "Provider to use: anthropic / openai / openai-responses / google / deepseek \
                 (defaults to the first one with credentials in the environment)."
     )]
     pub provider: Option<String>,
