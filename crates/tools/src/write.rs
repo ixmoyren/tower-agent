@@ -9,9 +9,10 @@ use std::{
 use agent::{AgentError, ToolCallRequest, ToolResultStream};
 use ai::Arguments;
 use tokio_util::sync::CancellationToken;
-use tower::Service;
+use tower::{Layer, Service};
 
 use super::{
+    layer::ToolNotFound,
     path_utils::resolve_to_cwd,
     queue::FileMutationQueue,
     support::{ToolFuture, error_result, once, text_result},
@@ -128,7 +129,8 @@ fn cancelled(signal: &Option<CancellationToken>) -> bool {
 
 /// 供测试与内部使用：直接构造一个 `write` 服务。
 pub fn create_write_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
-    agent::AgentTool::new(WriteTool::NAME, WriteTool::new(cwd))
+    let tool = WriteTool::new(cwd);
+    agent::AgentTool::new(WriteTool::NAME, tool.layer(ToolNotFound))
         .label(WriteTool::NAME)
         .description(WriteTool::DESCRIPTION)
         .parameters(WriteTool::parameters())

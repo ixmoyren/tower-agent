@@ -33,6 +33,26 @@ fn request(name: &str, args: JsonValue) -> ToolCallRequest {
     })
 }
 
+/// 内置工具集合，顺序与 `plugins` 的内置工具插件（`DEFAULT_TOOL_NAMES`）一致。
+///
+/// 注册与选择已迁移到插件体系，`tools` crate 只导出单个工具的实现；
+/// 这里保留一份本地清单，专门测试这些实现本身。
+fn default_tools(cwd: impl AsRef<std::path::Path>) -> Vec<AgentTool> {
+    let cwd = cwd.as_ref();
+    vec![
+        tools::create_read_tool(cwd),
+        tools::create_shell_tool(cwd),
+        tools::create_edit_tool(cwd),
+        tools::create_write_tool(cwd),
+        tools::create_grep_tool(cwd),
+        tools::create_find_tool(cwd),
+        tools::create_ls_tool(cwd),
+    ]
+}
+
+/// 内置工具名，顺序与 [`default_tools`] 一致。
+const DEFAULT_TOOL_NAMES: [&str; 7] = ["read", "shell", "edit", "write", "grep", "find", "ls"];
+
 /// 像 agent 循环那样调用一次工具，收集完整的部分结果 + 终态结果。
 async fn run_tool(tool: &AgentTool, args: JsonValue) -> Vec<agent::AgentToolResult> {
     let mut stream = tool
@@ -60,14 +80,14 @@ fn first_text(result: &agent::AgentToolResult) -> String {
 #[tokio::test]
 async fn default_tools_expose_one_unified_shell_tool() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let tools = tools::default_tools(dir.path());
+    let tools = default_tools(dir.path());
     let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
     assert_eq!(
         names,
         vec!["read", "shell", "edit", "write", "grep", "find", "ls"],
         "bash 与 powershell 合并成一个 shell 工具"
     );
-    assert_eq!(*tools::DEFAULT_TOOL_NAMES, names);
+    assert_eq!(names.as_slice(), DEFAULT_TOOL_NAMES.as_slice());
 }
 
 #[tokio::test]
@@ -153,7 +173,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "hello", "ignoreCase": true }),
     )
-        .await;
+    .await;
     let text = first_text(&results[0]);
     assert!(text.contains("a.txt:1: Hello"), "got: {text}");
     assert!(text.contains("a.txt:3: HELLO again"), "got: {text}");
@@ -163,7 +183,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "hello", "glob": "*.rs" }),
     )
-        .await;
+    .await;
     assert_eq!(first_text(&results[0]), "b.rs:1: hello from rust");
 
     // 上下文行用 `-` 分隔，命中行用 `:` 分隔。
@@ -171,7 +191,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "there", "context": 1 }),
     )
-        .await;
+    .await;
     assert_eq!(
         first_text(&results[0]),
         "a.txt-1- Hello\na.txt:2: there\na.txt-3- HELLO again"
@@ -183,7 +203,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "a.b", "literal": true }),
     )
-        .await;
+    .await;
     assert_eq!(first_text(&results[0]), "lit.txt:1: a.b");
 
     let results = run_tool(&grep, serde_json::json!({ "pattern": "zzz-not-here" })).await;
@@ -213,7 +233,7 @@ async fn grep_truncates_long_lines() {
 #[tokio::test]
 async fn shell_tool_is_registered_with_pi_metadata() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let tools = tools::default_tools(dir.path());
+    let tools = default_tools(dir.path());
     let shell = tools.iter().find(|tool| tool.name() == "shell").unwrap();
     assert_eq!(shell.display_label(), "shell");
     // 描述文案点明底层 shell：非 Windows 是 bash，Windows 是 PowerShell。
@@ -226,7 +246,7 @@ async fn shell_tool_is_registered_with_pi_metadata() {
 #[tokio::test]
 async fn write_then_read_round_trips_and_creates_parents() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let tools = tools::default_tools(dir.path());
+    let tools = default_tools(dir.path());
     let write = tools
         .iter()
         .find(|tool| tool.name() == "write")
@@ -242,7 +262,7 @@ async fn write_then_read_round_trips_and_creates_parents() {
         &write,
         serde_json::json!({ "path": "nested/hello.txt", "content": "hello\nworld\n" }),
     )
-        .await;
+    .await;
     assert_eq!(results.len(), 1);
     assert_eq!(
         first_text(&results[0]),
@@ -301,14 +321,14 @@ async fn read_reports_continuation_for_partial_reads() {
         dir.path().join("big.txt"),
         (1..=10).map(|i| format!("line {i}\n")).collect::<String>(),
     )
-        .unwrap();
+    .unwrap();
     let read = tools::create_read_tool(dir.path());
 
     let results = run_tool(
         &read,
         serde_json::json!({ "path": "big.txt", "offset": 2, "limit": 3 }),
     )
-        .await;
+    .await;
     let text = first_text(&results[0]);
     assert!(text.starts_with("line 2\nline 3\nline 4"), "got: {text}");
     assert!(
@@ -327,7 +347,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
         dir.path().join("code.rs"),
         "fn main() {\n    let x = 1;\n}\n",
     )
-        .unwrap();
+    .unwrap();
     let edit = tools::create_edit_tool(dir.path());
 
     let results = run_tool(
@@ -337,7 +357,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
             "edits": [{ "oldText": "let x = 1;", "newText": "let x = 42;" }]
         }),
     )
-        .await;
+    .await;
     assert!(
         !results[0].is_error,
         "edit failed: {}",
@@ -369,7 +389,7 @@ async fn edit_reports_a_not_found_error_without_touching_the_file() {
             "edits": [{ "oldText": "nope", "newText": "yep" }]
         }),
     )
-        .await;
+    .await;
     assert!(results[0].is_error);
     assert!(first_text(&results[0]).contains("Could not find the exact text in code.rs"));
     assert_eq!(
@@ -387,7 +407,7 @@ async fn shell_streams_output_and_reports_exit_codes() {
         &shell,
         serde_json::json!({ "command": "printf 'hello\\n'" }),
     )
-        .await;
+    .await;
     assert!(
         results.len() >= 2,
         "expected an initial update plus the final result"
@@ -415,7 +435,7 @@ async fn shell_reports_a_timeout_as_an_error_result() {
         &shell,
         serde_json::json!({ "command": "sleep 5", "timeout": 0.2 }),
     )
-        .await;
+    .await;
     let last = results.last().unwrap();
     assert!(last.is_error);
     assert!(
@@ -441,7 +461,7 @@ async fn shell_timeout_kills_the_whole_process_tree() {
         &shell,
         serde_json::json!({ "command": command, "timeout": 0.5 }),
     )
-        .await;
+    .await;
     let last = results.last().expect("terminal result");
     assert!(last.is_error, "timeout is an error result");
     assert!(first_text(last).contains("Command timed out"));
@@ -535,9 +555,9 @@ impl Service<StreamRequest> for ScriptedStreamService {
 fn boxed_stream<S>(service: S) -> BoxStreamService
 where
     S: Service<StreamRequest, Response = AssistantEventStream, Error = PiError>
-    + Clone
-    + Send
-    + 'static,
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     BoxCloneService::new(service)
@@ -633,7 +653,7 @@ async fn agent_loop_drives_the_write_tool() {
     ]);
     let mut options = AgentOptions::new(boxed_stream(service));
     options.initial.model = Some(model);
-    options.initial.tools = tools::default_tools(dir.path());
+    options.initial.tools = default_tools(dir.path());
     let agent = Agent::new(options);
 
     let mut subscription = agent.subscribe();

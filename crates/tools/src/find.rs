@@ -15,9 +15,10 @@ use ai::Arguments;
 use globset::{GlobBuilder, GlobMatcher};
 use ignore::WalkBuilder;
 use tokio_util::sync::CancellationToken;
-use tower::Service;
+use tower::{Layer, Service};
 
 use super::{
+    layer::ToolNotFound,
     path_utils::resolve_to_cwd,
     support::{ToolFuture, error_result, once, text_result},
     truncate::{DEFAULT_MAX_BYTES, TruncationOptions, format_size, truncate_head},
@@ -253,7 +254,8 @@ fn inside_git_repo(search_path: &Path) -> bool {
 
 /// 构造 `find` 工具。
 pub fn create_find_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
-    agent::AgentTool::new(FindTool::NAME, FindTool::new(cwd))
+    let tool = FindTool::new(cwd);
+    agent::AgentTool::new(FindTool::NAME, tool.layer(ToolNotFound))
         .label(FindTool::NAME)
         .description(FindTool::description())
         .parameters(FindTool::parameters())

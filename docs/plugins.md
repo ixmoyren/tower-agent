@@ -1,6 +1,6 @@
 # 插件 / 扩展体系（子设计）
 
-> 状态：设计稿（尚未实现）。
+> 状态：设计稿 v0.2（关键决策已确认，尚未实现）。
 > 关联：[`design.md`](./design.md)（总体设计、第 4.3 节 provider 分层、第 4.i~4.iv 移植路线）。
 > 本文只描述插件体系本身的结构与规则，不改变 `agents` / `ai` / `tools` / `tui` / `cli` 的既有契约。
 
@@ -63,9 +63,8 @@
 
 - 每个静态插件实现 `StaticPlugin`，在 `install()` 里向宿主注册：
     - 若干 **能力**（`provides`）；
-    - 若干 **`tower::Layer`**（中间件：超时、重试、鉴权、观测、限流……）；
-    - 若干 **工具**（`AgentTool`）。
-- 静态插件之间通过 `Layer` 顺序 + 能力注册组合； **内置 tool（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）迁移为 `core-tools` 静态插件**（第 9 节）。
+    - 若干 **工具**（`AgentTool`）；每个内置工具本身就是一个 `tower::Layer`（第 9 节）。
+- 静态插件之间通过 `Layer` 顺序 + 能力注册组合； **内置 tool（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）各自是一个独立的静态插件**，拆出来的每个 tool 都是 tower 中的 layer（第 9 节）。
 - 静态插件 **不能**依赖动态或 JIT 插件（第 6.5 节）：它是进程内的编译期单元，必须自洽。
 
 ### 4.2 动态插件（stabby）
@@ -136,16 +135,20 @@ pub struct PluginManifest {
 
 ## 6. 注册表与解析
 
-### 6.1 名字覆盖与优先级
+### 6.1 覆盖与优先级
 
-- 同名插件（`PluginId.name` 相同）允许共存，但只有 **最高形态**的一份处于激活态：
+覆盖分两级，解析时从高到低：
+
+1. **能力级覆盖（显式）**：`CapabilityOverride` 把某个 `CapabilityId` 直接绑定到指定实现（插件名 + 版本 / 形态）。用于「插件整体排在后面，但它的某一项能力要胜出」这种细粒度场景。
+2. **插件级覆盖（默认）**：同名插件（`PluginId.name` 相同）按形态优先级裁决：
 
 ```text
 静态(0)  <  动态(1)  <  JIT(2)
 ```
 
-- 覆盖是 **整体替换**：激活实现提供的 `provides` 集合生效，被遮蔽的实现进入 shadow 列表（供 `/plugins` 诊断），不参与解析。
-- 能力名冲突（不同插件提供同名能力）默认同样按形态优先级裁决；如需并存，使用显式 alias 或不同 `major` 的多版本槽位（6.4）。
+- 插件级覆盖是 **整体替换**：激活实现提供的 `provides` 集合生效，被遮蔽的实现进入 shadow 列表（供 `/plugins` 诊断），不参与解析。
+- 能力级覆盖只改被点名的能力，其余能力仍走插件级优先级与版本规则。
+- 解析顺序： **能力级覆盖 → 插件级优先级 → 版本规则（6.4）**。
 
 ### 6.2 依赖图与拓扑排序
 
@@ -162,14 +165,20 @@ pub struct PluginManifest {
 
 ### 6.4 菱形依赖与版本机制
 
-菱形：`A→B`、`A→C`、`B→D`、`C→D`。由于依赖落在能力上，D 的实现选择遵循：
+菱形：`A→B`、`A→C`、`B→D`、`C→D`。依赖落在能力上，D 的实例化策略按形态区分：
 
-1. 取所有消费者 `VersionReq` 的 **交集**；
-2. 有交集 → 选满足交集的 **最高版本**（单实例，语义等价于 Cargo 的 semver 收敛）；
-3. 无交集但 **不跨 major** → 报 `VersionConflict`（不静默降级）；
-4. 无交集且 **跨 major** → 允许 **多版本槽位并存**：按 `major` 各加载一份，消费者绑定各自的 `major`（动态/JIT 可加载多份；静态插件按编译期唯一实例处理，跨 major 只能声明兼容）。
+**动态 / JIT：按 major 多版本并存**
 
-> 默认策略： **同 major 收敛到最高版本，跨 major 允许并存**。宿主 ABI（`sdk_abi`）独立校验，不参与此收敛。
+1. 版本匹配一律用 `^`（semver 兼容）；若某消费者要求的主版本与候选实现 **major 不兼容**，直接 `VersionConflict`， **不静默降级**。
+2. 同一 `major` 内：取满足所有消费者 `^req` 的最高版本，收敛为 **单实例**。
+3. 不同 `major`：允许多版本槽位 **并存**（动态/JIT 各加载一份），消费者绑定各自 `major`。
+
+**静态：单实例，不支持多版本**
+
+- 静态插件编译进宿主，一个名字只有一份实例。
+- 它的版本必须满足所有消费者的 `^req`；否则解析失败（`VersionConflict`），由使用者调整依赖，或把该能力下沉到动态/JIT。
+
+> 宿主 ABI（`sdk_abi`）独立校验：一律 `^` 兼容， **major 不兼容即拒绝加载**，不参与上述能力版本收敛。
 
 ### 6.5 形态约束
 
@@ -197,6 +206,7 @@ Discover ─▶ Load ─▶ Validate(manifest/ABI/权限) ─▶ Resolve(图/版
 - **静态插件**：`Init/Start` 在进程启动阶段完成；无 `Stop/Unload`。
 - **动态插件**：`Unload` 前必须 `Stop`，且引用计数归零；否则 `UnloadBusy`。
 - **JIT 插件**：`Reload` = 编译新版本 → 校验 → 原子替换槽位 → 旧模块等待 in-flight 归零后释放；失败回滚到旧版本。
+- **调用在发起时绑定版本**：in-flight 调用继续在旧版本上完成，`Reload` 之后发起的新调用使用新版本；一次调用不会跨版本。
 - 任何阶段失败都回滚到上一个稳定状态，并保持其余插件不受影响（隔离失败）。
 
 ## 8. 宿主 API / SDK
@@ -223,26 +233,28 @@ stabby::export! {
 }
 ```
 
-- **跨形态调用不直连**：无论动态还是 JIT，都通过 `HostApi` 调 `host.call(capability, args)`；宿主完成实现查找、版本绑定与 in-flight 记账。这既统一了两者的互调，也让卸载/热更可以安全等待。
+- **跨形态调用不直连**：无论动态还是 JIT，都通过 `HostApi` 调 `host.call(capability, args)`；宿主完成实现查找、 **调用发起时的版本绑定**与 in-flight 记账。这既统一了两者的互调，也让卸载/热更可以安全等待。
 
 ## 9. 内置工具迁移到静态插件
 
-1. 新增 `core-tools` 静态插件，`provides`：`tool.read` / `tool.shell` / `tool.edit` / `tool.write` / `tool.grep` / `tool.find` / `tool.ls`（版本从 `1.0.0` 起）。
-2. `tools::default_tools()` 改为「构造插件清单 + 注册表解析」；`cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在解析结果上做过滤。
-3. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为 `core-tools` 的实现细节，不对外暴露成能力。
-4. 迁移完成后，`tools` crate 只负责「内置工具的实现」，注册与选择全部由 `plugins` 承担。
+1. **每个内置工具本身是一个静态插件**：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls` 各自注册为独立插件，分别提供 `tool.read` / `tool.shell` / … / `tool.ls`（版本从 `1.0.0` 起），不再由一个 `core-tools` 插件整体打包。
+2. **每个 tool 都是 tower 中的 layer**：`tools` crate 里每个工具除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上，得到发给 agent 的可执行服务。
+3. `plugins` 宿主把这些工具逐个注册为静态插件，并通过 `default_registry` / `resolve_default` / `default_tools` 提供内置集合；`cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在解析结果上做过滤。
+4. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为工具的实现细节，不对外暴露成能力。
+5. 不再有独立的 `plugins-builtin` crate：内置工具插件由 `plugins` 宿主直接装配，`plugins → tools` 依赖单向。
+6. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `cli::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
 
 ## 10. crate 划分
 
 ```text
 crates/
   plugins/        宿主核心：模型、注册表、解析（图/版本/覆盖）、生命周期、静态插件
+                  内置工具静态插件（每个工具一个插件，装配 tools 里的 tower Layer）
   plugins-sdk/    插件作者 SDK：stabby 封装、宏、HostApi（dynamic/jit 共用）
   plugins-jit/    Roto + cranelift 宿主集成（feature = jit）
-  plugins-builtin/ 内置静态插件（core-tools、provider 中间件层等）
 ```
 
-- 依赖方向：`plugins-builtin → plugins`、`plugins-jit → plugins`、`plugins-sdk → plugins`（仅共享类型）；`plugins` **不**依赖具体插件 crate，避免循环。
+- 依赖方向：`plugins-jit → plugins`、`plugins-sdk → plugins`（仅共享类型）；`plugins → tools`（宿主装配内置工具插件），`tools` 是工具实现所在 crate。
 - `agent` / `ai` / `tools` 不反向依赖 `plugins`；`plugins` 依赖它们以包装 `AgentTool`、`BoxStreamService` 等。
 
 ## 11. Feature / 构建
@@ -260,7 +272,8 @@ jit = ["dep:roto", "dep:cranelift"]
 
 ## 12. 安全与隔离
 
-- 清单声明 `permissions`（如 `net`、`fs.write`、`process.spawn`）；宿主加载时校验并授予能力句柄，未授予的调用直接失败。
+- 清单声明 `permissions`（如 `net`、`fs.write`、`process.spawn`）； **授权在运行时按需提示**：某能力首次被调用且需要权限时，宿主在界面上询问用户（允许一次 / 本次会话允许 / 拒绝），决定按会话缓存；无人值守模式（`--print`）默认拒绝并在错误里说明。
+- 宿主只把已授予的能力句柄交给调用方，未授予的调用直接 `PermissionDenied`。
 - 沙箱作为 **动态插件**提供 `sandbox.exec`，把不可信执行隔到子进程/受限运行时。
 - 热更/卸载的边界：只允许在引用计数归零后释放；JIT 换绑是原子操作。
 
@@ -284,26 +297,29 @@ pub enum PluginError {
 
 ## 14. 测试策略
 
-- **单元**：覆盖优先级、shadow 记录、环检测、菱形收敛、跨 major 并存、静态→动态拒绝。
-- **静态插件**：内置工具经注册表解析后与 `tools::default_tools()` 等价（迁移前后行为不变）。
+- **单元**：插件级覆盖优先级、 **能力级覆盖**、shadow 记录、环检测、同 major 收敛、跨 major 并存、静态单实例、静态→动态拒绝。
+- **静态插件**：每个内置工具都是一个独立静态插件，经注册表解析后工具集合与迁移前等价。
+- **权限**：首次调用触发运行时提示、决定按会话缓存、无人值守模式拒绝。
 - **动态**：`dynamic` feature 下编译一个测试 `cdylib`，验证加载、调用、`UnloadBusy`、卸载。
 - **JIT**：`jit` feature 下编译脚本、调用宿主能力、热更失败回滚。
 - **失败注入**：加载失败不污染既有插件；in-flight 时卸载被拒。
 
 ## 15. 里程碑
 
-| 里程碑 | 内容                                                                              |
-|--------|-----------------------------------------------------------------------------------|
-| M1     | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具迁移 |
-| M2     | `plugins-sdk` + 动态加载器（stabby）：加载/调用/卸载 + 示例插件                   |
-| M3     | `plugins-jit`（Roto + cranelift）：编译、宿主能力调用、热加载与回滚               |
-| M4     | 大型动态插件：沙箱 / 记忆 / 持久化 / codemode；cc `mods` 模式接入                 |
+| 里程碑 | 内容                                                                                                                        |
+|--------|-----------------------------------------------------------------------------------------------------------------------------|
+| M1     | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移 |
+| M2     | `plugins-sdk` + 动态加载器（stabby）：加载/调用/卸载 + 示例插件                                                             |
+| M3     | `plugins-jit`（Roto + cranelift）：编译、宿主能力调用、热加载与回滚                                                         |
+| M4     | 大型动态插件：沙箱 / 记忆 / 持久化 / codemode；cc `mods` 模式接入                                                           |
 
-## 16. 未决问题
+## 16. 已确认决策
 
-1. **多版本并存的粒度**：按 `major` 并存是否足够，还是需要按 `minor`？静态插件跨 major 只能选一份。
-2. **工具名 vs 插件名的覆盖关系**：`tool.read` 的覆盖是跟随插件名优先级，还是允许对单个能力单独覆盖？
-3. **权限模型细节**：`permissions` 的粒度（按能力 / 按资源 / 运行时提示）。
-4. **JIT 热更的一致性**：热更瞬间正在构造的请求绑定哪个版本（建议绑定调用发起时版本）。
-5. **stabby ABI 版本策略**：`sdk_abi` 的兼容窗口（建议 `^` 且 major 不兼容即拒绝）。
-6. **与 provider 层的关系**：provider 中间件（retry/timeout/observe）是否也全部静态插件化，还是保留在 `cli::provider`。
+1. **多版本**：静态插件 **不支持多版本**（单一实例，版本必须满足所有消费者的 `^` 要求）；动态与 JIT 按 **major 多版本并存**。
+2. **覆盖粒度**：既支持插件名整体覆盖（形态优先级 `静态 < 动态 < JIT`），也允许 **对单个能力显式覆盖**（`CapabilityOverride`）。
+3. **权限**：采用 **运行时提示**（首次调用需要权限的能力时询问用户，按会话缓存；无人值守默认拒绝）。
+4. **热更一致性**：调用在 **发起时绑定版本**；in-flight 调用在旧版本上完成，之后的新调用用新版本。
+5. **版本 / ABI 兼容**：一律 `^`（semver 兼容）； **major 不兼容即拒绝**，不静默降级。
+6. **内置工具与 provider 中间件**：内置 tool（`read` / `shell` / …） **各自是一个静态插件，且每个都是 tower Layer**；provider 中间件（`retry` / `timeout` / `observe`） **不插件化**，由 `cli::provider` 直接编排。
+
+仍待实现的细节（不阻塞立项）：权限提示的 UI 形态、`CapabilityOverride` 的配置来源（配置文件 / CLI / 运行时命令）。

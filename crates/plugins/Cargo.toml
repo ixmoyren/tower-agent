@@ -1,0 +1,15 @@
+[package]
+name = "plugins"
+description = "tower-pi-agent plugin/extension host: kinds, capability registry, dependency/version resolution."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+agent = { path = "../agent" }
+semver = { workspace = true }
+tools = { path = "../tools" }
+tower.workspace = true

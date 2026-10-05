@@ -172,8 +172,8 @@ fn main() -> ExitCode {
 }
 
 fn print_tools() {
-    println!("内置工具（{} 个）：", tools::DEFAULT_TOOL_NAMES.len());
-    for tool in tools::default_tools(PathBuf::from(".")) {
+    println!("内置工具（{} 个）：", plugins::DEFAULT_TOOL_NAMES.len());
+    for tool in plugins::default_tools(PathBuf::from(".")) {
         println!(
             "  {:<12} {}",
             tool.name(),
@@ -190,7 +190,7 @@ fn select_tools(args: &CliArgs, cwd: &Path) -> Vec<AgentTool> {
     if args.no_tools || args.no_builtin_tools {
         return Vec::new();
     }
-    let mut selected = tools::default_tools(cwd);
+    let mut selected = plugins::default_tools(cwd);
     if !args.tools.is_empty() {
         for name in &args.tools {
             warn_unknown_tool(name);
@@ -208,10 +208,10 @@ fn select_tools(args: &CliArgs, cwd: &Path) -> Vec<AgentTool> {
 
 /// `--tools` / `--exclude-tools` 里写了不存在的工具名时给出提示（pi 会忽略它们）。
 fn warn_unknown_tool(name: &str) {
-    if !name.is_empty() && !tools::DEFAULT_TOOL_NAMES.contains(&name) {
+    if !name.is_empty() && !plugins::DEFAULT_TOOL_NAMES.contains(&name) {
         eprintln!(
             "忽略未知工具：{name}（可用：{}）",
-            tools::DEFAULT_TOOL_NAMES.join(", ")
+            plugins::DEFAULT_TOOL_NAMES.join(", ")
         );
     }
 }
@@ -280,7 +280,7 @@ mod tests {
                 })),
             },
         )
-        .expect("write succeeds");
+            .expect("write succeeds");
         assert_eq!(String::from_utf8(out).expect("utf-8"), "[user] 你好\n");
     }
 }

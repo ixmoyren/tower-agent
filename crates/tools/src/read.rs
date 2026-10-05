@@ -14,9 +14,10 @@ use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
 use ai::{Arguments, ContentBlock, ImageContent};
 use base64::Engine as _;
 use tokio_util::sync::CancellationToken;
-use tower::Service;
+use tower::{Layer, Service};
 
 use super::{
+    layer::ToolNotFound,
     path_utils::resolve_read_path,
     support::{ToolFuture, error_result, once, text_content, text_result},
     truncate::{DEFAULT_MAX_BYTES, format_size, truncate_head},
@@ -309,7 +310,8 @@ fn is_bmp(buffer: &[u8]) -> bool {
 
 /// 构造 `read` 工具。
 pub fn create_read_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
-    agent::AgentTool::new(ReadTool::NAME, ReadTool::new(cwd))
+    let tool = ReadTool::new(cwd);
+    agent::AgentTool::new(ReadTool::NAME, tool.layer(ToolNotFound))
         .label(ReadTool::NAME)
         .description(ReadTool::description())
         .parameters(ReadTool::parameters())

@@ -8,13 +8,14 @@ use std::{
     task::{Context, Poll},
 };
 use tokio_util::sync::CancellationToken;
-use tower::Service;
+use tower::{Layer, Service};
 
 use super::{
     edit_diff::{
         Edit, apply_edits_to_normalized_content, detect_line_ending, generate_diff_string,
         generate_unified_patch, normalize_to_lf, restore_line_endings, split_bom,
     },
+    layer::ToolNotFound,
     path_utils::resolve_to_cwd,
     queue::FileMutationQueue,
     support::{ToolFuture, error_result, once, text_result},
@@ -256,7 +257,8 @@ pub fn prepare_edit_arguments(mut args: JsonObject) -> JsonObject {
 
 /// 构造 `edit` 工具。
 pub fn create_edit_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
-    agent::AgentTool::new(EditTool::NAME, EditTool::new(cwd))
+    let tool = EditTool::new(cwd);
+    agent::AgentTool::new(EditTool::NAME, tool.layer(ToolNotFound))
         .label(EditTool::NAME)
         .description(EditTool::DESCRIPTION)
         .parameters(EditTool::parameters())

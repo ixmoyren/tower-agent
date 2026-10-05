@@ -17,9 +17,10 @@ use globset::{GlobBuilder, GlobMatcher};
 use ignore::WalkBuilder;
 use regex::RegexBuilder;
 use tokio_util::sync::CancellationToken;
-use tower::Service;
+use tower::{Layer, Service};
 
 use super::{
+    layer::ToolNotFound,
     path_utils::resolve_to_cwd,
     support::{ToolFuture, error_result, once, text_result},
     truncate::{
@@ -102,8 +103,8 @@ impl GrepTool {
             Ok(limit) => limit.unwrap_or(DEFAULT_LIMIT),
             Err(message) => return error_result(message),
         }
-            // pi: `Math.max(1, limit ?? DEFAULT_LIMIT)`
-            .max(1);
+        // pi: `Math.max(1, limit ?? DEFAULT_LIMIT)`
+        .max(1);
 
         if cancelled(signal) {
             return error_result("Operation aborted");
@@ -386,7 +387,8 @@ fn format_block(
 
 /// 构造 `grep` 工具。
 pub fn create_grep_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
-    agent::AgentTool::new(GrepTool::NAME, GrepTool::new(cwd))
+    let tool = GrepTool::new(cwd);
+    agent::AgentTool::new(GrepTool::NAME, tool.layer(ToolNotFound))
         .label(GrepTool::NAME)
         .description(GrepTool::description())
         .parameters(GrepTool::parameters())

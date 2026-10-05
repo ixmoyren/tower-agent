@@ -40,10 +40,10 @@ impl Session {
         let system_prompt = format!(
             "你是 tower-pi-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
          使用工具而不是猜测文件内容；修改文件前先读一遍。",
-            tools::DEFAULT_TOOL_NAMES.join(", ")
+            plugins::DEFAULT_TOOL_NAMES.join(", ")
         );
         let mut options = AgentOptions::new(stream);
-        options.initial.tools = tools::default_tools(&cwd);
+        options.initial.tools = plugins::default_tools(&cwd);
         options.initial.model = Some(model);
         options.initial.system_prompt = Some(system_prompt);
         Self {
@@ -309,7 +309,7 @@ impl tui::CommandHost for Session {
             }
             None => crate::provider::build(kind, None, options),
         }
-        .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?;
 
         self.agent.set_stream(setup.stream_fn());
         self.agent.set_model(setup.model.clone());
@@ -440,7 +440,7 @@ pub async fn run_tui(
         title.to_string(),
         notice,
     )
-    .await;
+        .await;
 
     // 用户退出：取消进行中的一轮，并等驱动任务自然收尾（避免直接 abort 丢掉取消语义）。
     session.abort();
@@ -676,7 +676,7 @@ mod tests {
             tui::render_message(&agent::AgentMessage::Message(ai::Message::ToolResult(
                 result
             )))
-            .contains("Tool nope not found")
+                .contains("Tool nope not found")
         );
     }
 
@@ -741,7 +741,7 @@ mod tests {
         let session = session(dir.path());
         let state = session.state();
         let names: Vec<&str> = state.tools.iter().map(|tool| tool.name()).collect();
-        assert_eq!(names, *tools::DEFAULT_TOOL_NAMES);
+        assert_eq!(names.as_slice(), plugins::DEFAULT_TOOL_NAMES.as_slice());
         assert!(state.system_prompt.contains("read"));
     }
 
@@ -789,7 +789,7 @@ mod tests {
             crate::provider::ProviderStackOptions::default(),
             Some("test-key"),
         )
-        .expect("provider setup");
+            .expect("provider setup");
         let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone());
 
         let info = session.session_info().join("\n");

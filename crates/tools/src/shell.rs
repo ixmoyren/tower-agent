@@ -18,9 +18,10 @@ use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
 use ai::Arguments;
 use tokio::{io::AsyncReadExt as _, process::Command, sync::mpsc, time::Instant};
 use tokio_util::sync::CancellationToken;
-use tower::Service;
+use tower::{Layer, Service};
 
 use super::{
+    layer::ToolNotFound,
     support::{ToolFuture, error_result, text_content, text_result},
     truncate::{
         DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size,
@@ -778,7 +779,7 @@ fn decode_stream(pending: &mut Vec<u8>, data: &[u8], out: &mut String) {
 /// 构造统一的 `shell` 工具（Windows 上是 PowerShell，其余系统是 bash）。
 pub fn create_shell_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
     let tool = ShellTool::new(cwd);
-    agent::AgentTool::new(ShellTool::NAME, tool.clone())
+    agent::AgentTool::new(ShellTool::NAME, tool.layer(ToolNotFound))
         .label(ShellTool::NAME)
         .description(tool.description())
         .parameters(ShellTool::parameters())

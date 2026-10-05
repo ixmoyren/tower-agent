@@ -9,9 +9,10 @@ use std::{
 use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
 use ai::Arguments;
 use tokio_util::sync::CancellationToken;
-use tower::Service;
+use tower::{Layer, Service};
 
 use super::{
+    layer::ToolNotFound,
     path_utils::resolve_to_cwd,
     support::{ToolFuture, error_result, once, text_result},
     truncate::{DEFAULT_MAX_BYTES, TruncationOptions, format_size, truncate_head},
@@ -188,7 +189,8 @@ fn cancelled(signal: &Option<CancellationToken>) -> bool {
 
 /// 构造 `ls` 工具。
 pub fn create_ls_tool(cwd: impl AsRef<Path>) -> agent::AgentTool {
-    agent::AgentTool::new(LsTool::NAME, LsTool::new(cwd))
+    let tool = LsTool::new(cwd);
+    agent::AgentTool::new(LsTool::NAME, tool.layer(ToolNotFound))
         .label(LsTool::NAME)
         .description(LsTool::description())
         .parameters(LsTool::parameters())
