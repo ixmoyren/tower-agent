@@ -453,7 +453,7 @@ impl StreamState {
                 if let Ok(JsonValue::Object(parsed)) =
                     serde_json::from_str::<JsonValue>(partial_json)
                 {
-                    call.arguments = parsed;
+                    call.arguments = parsed.into();
                 }
             }
             self.sync_content();
@@ -641,7 +641,8 @@ fn convert_messages(system: &str, messages: &[Message]) -> Result<Vec<JsonValue>
                             "type": "function",
                             "function": {
                                 "name": call.name,
-                                "arguments": JsonValue::Object(call.arguments.clone()).to_string(),
+                                "arguments": JsonValue::Object(call.arguments.as_object().clone())
+                                    .to_string(),
                             },
                         })),
                         _ => None,

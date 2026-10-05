@@ -401,7 +401,8 @@ impl StreamState {
                         .get("input")
                         .and_then(JsonValue::as_object)
                         .cloned()
-                        .unwrap_or_default(),
+                        .unwrap_or_default()
+                        .into(),
                     thought_signature: None,
                     namespace: None,
                 },
@@ -489,7 +490,7 @@ impl StreamState {
                 if let Ok(JsonValue::Object(parsed)) =
                     serde_json::from_str::<JsonValue>(partial_json)
                 {
-                    call.arguments = parsed;
+                    call.arguments = parsed.into();
                 }
                 self.sync_content();
                 self.queue.push_back(AssistantMessageEvent::ToolCallDelta {
@@ -779,7 +780,7 @@ fn convert_blocks(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>, PiError> {
                 "type": "tool_use",
                 "id": call.id,
                 "name": call.name,
-                "input": JsonValue::Object(call.arguments.clone()),
+                "input": JsonValue::Object(call.arguments.as_object().clone()),
             })),
         }
     }

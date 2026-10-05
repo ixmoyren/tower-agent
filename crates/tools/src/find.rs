@@ -11,7 +11,7 @@ use std::{
 };
 
 use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
-use ai::JsonObject;
+use ai::Arguments;
 use globset::{GlobBuilder, GlobMatcher};
 use ignore::WalkBuilder;
 use tokio_util::sync::CancellationToken;
@@ -19,7 +19,7 @@ use tower::Service;
 
 use super::{
     path_utils::resolve_to_cwd,
-    support::{ToolFuture, arg_str, error_result, once, opt_str, opt_u64, text_result},
+    support::{ToolFuture, error_result, once, text_result},
     truncate::{DEFAULT_MAX_BYTES, TruncationOptions, format_size, truncate_head},
 };
 
@@ -71,18 +71,18 @@ impl FindTool {
 
     async fn execute(
         &self,
-        args: &JsonObject,
+        args: &Arguments,
         signal: &Option<CancellationToken>,
     ) -> AgentToolResult {
-        let pattern = match arg_str(args, "pattern") {
+        let pattern = match args.arg_str("pattern") {
             Ok(pattern) => pattern,
             Err(message) => return error_result(message),
         };
-        let search_dir = match opt_str(args, "path") {
+        let search_dir = match args.opt_str("path") {
             Ok(dir) => dir.unwrap_or_else(|| ".".into()),
             Err(message) => return error_result(message),
         };
-        let limit = match opt_u64(args, "limit") {
+        let limit = match args.opt_u64("limit") {
             Ok(limit) => limit.unwrap_or(DEFAULT_LIMIT),
             Err(message) => return error_result(message),
         };

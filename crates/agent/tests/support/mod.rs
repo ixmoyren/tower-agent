@@ -75,7 +75,7 @@ pub fn tool_call(id: &str, name: &str, arguments: JsonObject) -> ContentBlock {
     ContentBlock::ToolCall(ToolCall {
         id: id.into(),
         name: name.into(),
-        arguments,
+        arguments: arguments.into(),
         thought_signature: None,
         namespace: None,
     })
@@ -361,9 +361,9 @@ pub fn args(value: JsonValue) -> JsonObject {
 pub fn boxed_stream<S>(service: S) -> BoxStreamService
 where
     S: Service<StreamRequest, Response = AssistantEventStream, Error = PiError>
-        + Clone
-        + Send
-        + 'static,
+    + Clone
+    + Send
+    + 'static,
     S::Future: Send + 'static,
 {
     use tower::util::BoxCloneService;

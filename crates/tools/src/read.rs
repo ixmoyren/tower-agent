@@ -11,14 +11,14 @@ use std::{
 };
 
 use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
-use ai::{ContentBlock, ImageContent, JsonObject};
+use ai::{Arguments, ContentBlock, ImageContent};
 use base64::Engine as _;
 use tokio_util::sync::CancellationToken;
 use tower::Service;
 
 use super::{
     path_utils::resolve_read_path,
-    support::{ToolFuture, arg_str, error_result, once, opt_u64, text_content, text_result},
+    support::{ToolFuture, error_result, once, text_content, text_result},
     truncate::{DEFAULT_MAX_BYTES, format_size, truncate_head},
 };
 
@@ -69,18 +69,18 @@ impl ReadTool {
 
     async fn execute(
         &self,
-        args: &JsonObject,
+        args: &Arguments,
         signal: &Option<CancellationToken>,
     ) -> AgentToolResult {
-        let path = match arg_str(args, "path") {
+        let path = match args.arg_str("path") {
             Ok(path) => path,
             Err(message) => return error_result(message),
         };
-        let offset = match opt_u64(args, "offset") {
+        let offset = match args.opt_u64("offset") {
             Ok(offset) => offset,
             Err(message) => return error_result(message),
         };
-        let limit = match opt_u64(args, "limit") {
+        let limit = match args.opt_u64("limit") {
             Ok(limit) => limit,
             Err(message) => return error_result(message),
         };

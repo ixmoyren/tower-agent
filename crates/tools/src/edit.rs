@@ -1,13 +1,12 @@
 //! `edit` 工具（对应 pi `coding-agent` 的 `core/tools/edit.ts`）。
 
+use agent::{AgentError, ToolCallRequest, ToolResultStream};
+use ai::{Arguments, JsonObject, JsonValue};
 use std::{
     path::Path,
     sync::Arc,
     task::{Context, Poll},
 };
-
-use agent::{AgentError, ToolCallRequest, ToolResultStream};
-use ai::{JsonObject, JsonValue};
 use tokio_util::sync::CancellationToken;
 use tower::Service;
 
@@ -18,7 +17,7 @@ use super::{
     },
     path_utils::resolve_to_cwd,
     queue::FileMutationQueue,
-    support::{ToolFuture, arg_str, error_result, once, text_result},
+    support::{ToolFuture, error_result, once, text_result},
 };
 
 /// `edit` 工具的选项。
@@ -86,10 +85,10 @@ impl EditTool {
 
     async fn execute(
         &self,
-        args: &JsonObject,
+        args: &Arguments,
         signal: &Option<CancellationToken>,
     ) -> agent::AgentToolResult {
-        let path = match arg_str(args, "path") {
+        let path = match args.arg_str("path") {
             Ok(path) => path,
             Err(message) => return error_result(message),
         };

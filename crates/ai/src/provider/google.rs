@@ -455,13 +455,13 @@ impl StreamState {
         // Google 可能不给 id，也可能重复：两种情况都自己生成一个唯一 id（pi 同样处理）。
         let id = match provided_id {
             Some(id)
-                if !id.is_empty()
-                    && !self.output.content.iter().any(
-                        |block| matches!(block, ContentBlock::ToolCall(call) if call.id == id),
-                    ) =>
-            {
-                id
-            }
+            if !id.is_empty()
+                && !self.output.content.iter().any(
+                |block| matches!(block, ContentBlock::ToolCall(call) if call.id == id),
+            ) =>
+                {
+                    id
+                }
             _ => {
                 self.tool_call_counter += 1;
                 format!(
@@ -478,7 +478,8 @@ impl StreamState {
                 .get("args")
                 .and_then(JsonValue::as_object)
                 .cloned()
-                .unwrap_or_default(),
+                .unwrap_or_default()
+                .into(),
             thought_signature: call
                 .get("thoughtSignature")
                 .and_then(JsonValue::as_str)
@@ -496,7 +497,7 @@ impl StreamState {
         });
         self.queue.push_back(AssistantMessageEvent::ToolCallDelta {
             content_index: position,
-            delta: JsonValue::Object(tool_call.arguments.clone()).to_string(),
+            delta: JsonValue::Object(tool_call.arguments.as_object().clone()).to_string(),
             partial: partial.clone(),
         });
         self.queue.push_back(AssistantMessageEvent::ToolCallEnd {
@@ -666,7 +667,7 @@ fn convert_contents(messages: &[Message]) -> Vec<JsonValue> {
                         ContentBlock::ToolCall(call) => Some(json!({
                             "functionCall": {
                                 "name": call.name,
-                                "args": JsonValue::Object(call.arguments.clone()),
+                                "args": JsonValue::Object(call.arguments.as_object().clone()),
                             },
                         })),
                         ContentBlock::Image(_) => None,
@@ -694,12 +695,12 @@ fn convert_contents(messages: &[Message]) -> Vec<JsonValue> {
 fn push_content(contents: &mut Vec<JsonValue>, role: &str, parts: Vec<JsonValue>) {
     match contents.last_mut() {
         Some(JsonValue::Object(last))
-            if last.get("role").and_then(JsonValue::as_str) == Some(role) =>
-        {
-            if let Some(JsonValue::Array(existing)) = last.get_mut("parts") {
-                existing.extend(parts);
+        if last.get("role").and_then(JsonValue::as_str) == Some(role) =>
+            {
+                if let Some(JsonValue::Array(existing)) = last.get_mut("parts") {
+                    existing.extend(parts);
+                }
             }
-        }
         _ => contents.push(json!({ "role": role, "parts": parts })),
     }
 }

@@ -227,7 +227,7 @@ fn tool_call_stream_ends_with_tool_use() {
     let original = ToolCall {
         id: "call-1".to_owned(),
         name: "lookup".to_owned(),
-        arguments,
+        arguments: arguments.into(),
         thought_signature: None,
         namespace: None,
     };

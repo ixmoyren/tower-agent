@@ -1,11 +1,10 @@
 //! 会话消息与内容块（pi `Message` 及其成员类型）。
 
-use std::collections::BTreeMap;
-
 use crate::{
     json::{JsonObject, JsonValue},
     request::{DeferredHandle, ModelThinkingLevel},
 };
+use std::{collections::BTreeMap, ops::Deref};
 
 /// transcript 中某个时间点的工具声明（pi `Tool` 的子集）。
 #[derive(Debug, Clone, PartialEq)]
@@ -64,11 +63,86 @@ pub struct ToolCall {
     /// 被调用的工具名。
     pub name: String,
     /// 调用参数（JSON 对象）。
-    pub arguments: JsonObject,
+    pub arguments: Arguments,
     /// Google 特定：复用思考上下文用的不透明签名。
     pub thought_signature: Option<String>,
     /// OpenAI Responses 命名空间。
     pub namespace: Option<String>,
+}
+
+/// 工具调用参数：JSON 对象的薄包装，附带类型化读取助手。
+///
+/// 通过 [`Deref`] 可以直接当 `JsonObject` 用；需要按类型取值时用
+/// [`Arguments::arg_str`] / [`Arguments::opt_str`] / [`Arguments::opt_u64`] /
+/// [`Arguments::opt_f64`]。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Arguments(JsonObject);
+
+impl Arguments {
+    /// 借用底层 JSON 对象。
+    pub fn as_object(&self) -> &JsonObject {
+        &self.0
+    }
+
+    /// 取出底层 JSON 对象。
+    pub fn into_inner(self) -> JsonObject {
+        self.0
+    }
+
+    /// 取出必填字符串参数。
+    pub fn arg_str(&self, key: &str) -> Result<String, String> {
+        match self.get(key) {
+            Some(JsonValue::String(value)) => Ok(value.clone()),
+            Some(_) => Err(format!("Invalid argument `{key}`: expected a string")),
+            None => Err(format!("Missing required argument `{key}`")),
+        }
+    }
+
+    /// 取出可选字符串参数。
+    pub fn opt_str(&self, key: &str) -> Result<Option<String>, String> {
+        match self.get(key) {
+            None | Some(JsonValue::Null) => Ok(None),
+            Some(JsonValue::String(value)) => Ok(Some(value.clone())),
+            Some(_) => Err(format!("Invalid argument `{key}`: expected a string")),
+        }
+    }
+
+    /// 取出可选正整数参数。
+    pub fn opt_u64(&self, key: &str) -> Result<Option<u64>, String> {
+        match self.get(key) {
+            None | Some(JsonValue::Null) => Ok(None),
+            Some(JsonValue::Number(value)) => value.as_u64().map(Some).ok_or_else(|| {
+                format!("Invalid argument `{key}`: expected a non-negative integer")
+            }),
+            Some(_) => Err(format!("Invalid argument `{key}`: expected a number")),
+        }
+    }
+
+    /// 取出可选浮点参数。
+    pub fn opt_f64(&self, key: &str) -> Result<Option<f64>, String> {
+        match self.get(key) {
+            None | Some(JsonValue::Null) => Ok(None),
+            Some(JsonValue::Number(value)) => value
+                .as_f64()
+                .map(Some)
+                .ok_or_else(|| format!("Invalid argument `{key}`: expected a number")),
+            Some(_) => Err(format!("Invalid argument `{key}`: expected a number")),
+        }
+    }
+}
+
+impl Deref for Arguments {
+    type Target = JsonObject;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<JsonObject> for Arguments {
+    fn from(value: JsonObject) -> Self {
+        Self(value)
+    }
 }
 
 /// 内容块联合类型，对应 pi 的
@@ -251,4 +325,29 @@ pub enum Message {
     Assistant(Box<AssistantMessage>),
     /// 工具结果消息。
     ToolResult(ToolResultMessage),
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{JsonObject, JsonValue, message::Arguments};
+    use serde_json::json;
+
+    fn object(value: JsonValue) -> JsonObject {
+        match value {
+            JsonValue::Object(map) => map,
+            _ => panic!("expected object"),
+        }
+    }
+
+    #[test]
+    fn argument_readers_validate_types() {
+        let args = object(json!({ "path": "a.txt", "offset": 3, "flag": null }));
+        let args = Arguments::from(args);
+        assert_eq!(args.arg_str("path").unwrap(), "a.txt");
+        assert_eq!(args.opt_u64("offset").unwrap(), Some(3));
+        assert_eq!(args.opt_str("flag").unwrap(), None);
+        assert!(args.arg_str("missing").is_err());
+        assert!(args.opt_u64("path").is_err());
+        assert!(args.arg_str("offset").is_err());
+    }
 }

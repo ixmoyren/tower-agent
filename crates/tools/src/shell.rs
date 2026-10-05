@@ -15,13 +15,13 @@
 use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
 
 use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
-use ai::JsonObject;
+use ai::Arguments;
 use tokio::{io::AsyncReadExt as _, process::Command, sync::mpsc, time::Instant};
 use tokio_util::sync::CancellationToken;
 use tower::Service;
 
 use super::{
-    support::{ToolFuture, arg_str, error_result, opt_f64, text_content, text_result},
+    support::{ToolFuture, error_result, text_content, text_result},
     truncate::{
         DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size,
         truncate_tail,
@@ -158,7 +158,7 @@ impl ShellTool {
     /// 运行一次命令，把部分结果与终态结果推入 `updates`。
     async fn run(
         &self,
-        args: &JsonObject,
+        args: &Arguments,
         signal: Option<CancellationToken>,
         updates: mpsc::Sender<AgentToolResult>,
     ) {
@@ -378,9 +378,9 @@ async fn wait_for_cancel(signal: &Option<CancellationToken>) {
     }
 }
 
-fn parse_shell_args(args: &JsonObject) -> Result<(String, Option<f64>), String> {
-    let command = arg_str(args, "command")?;
-    let timeout = opt_f64(args, "timeout")?;
+fn parse_shell_args(args: &Arguments) -> Result<(String, Option<f64>), String> {
+    let command = args.arg_str("command")?;
+    let timeout = args.opt_f64("timeout")?;
     if let Some(timeout) = timeout {
         if !timeout.is_finite() || timeout <= 0.0 {
             return Err("Invalid timeout: must be a finite number of seconds".into());
@@ -817,9 +817,9 @@ fn find_on_path(names: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn object(value: ai::JsonValue) -> JsonObject {
+    fn object(value: ai::JsonValue) -> Arguments {
         match value {
-            ai::JsonValue::Object(map) => map,
+            ai::JsonValue::Object(map) => map.into(),
             _ => panic!("expected object"),
         }
     }

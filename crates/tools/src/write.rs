@@ -7,14 +7,14 @@ use std::{
 };
 
 use agent::{AgentError, ToolCallRequest, ToolResultStream};
-use ai::JsonObject;
+use ai::Arguments;
 use tokio_util::sync::CancellationToken;
 use tower::Service;
 
 use super::{
     path_utils::resolve_to_cwd,
     queue::FileMutationQueue,
-    support::{ToolFuture, arg_str, error_result, once, text_result},
+    support::{ToolFuture, error_result, once, text_result},
 };
 
 /// `write` 工具的选项。
@@ -118,8 +118,8 @@ impl Service<ToolCallRequest> for WriteTool {
     }
 }
 
-fn parse_write_args(args: &JsonObject) -> Result<(String, String), String> {
-    Ok((arg_str(args, "path")?, arg_str(args, "content")?))
+fn parse_write_args(args: &Arguments) -> Result<(String, String), String> {
+    Ok((args.arg_str("path")?, args.arg_str("content")?))
 }
 
 fn cancelled(signal: &Option<CancellationToken>) -> bool {

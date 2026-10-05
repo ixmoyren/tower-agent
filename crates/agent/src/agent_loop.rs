@@ -843,7 +843,7 @@ async fn prepare_tool_call(
         };
     }
 
-    let args = tool.prepare(tool_call.arguments.clone());
+    let args = tool.prepare(tool_call.arguments.as_object().clone());
 
     if let Some(before) = &config.before_tool_call {
         let result = before(BeforeToolCallContext {
@@ -1032,7 +1032,7 @@ async fn emit_tool_execution_start<S: EventSink>(tool_call: &ToolCall, sink: &S)
     sink.emit(AgentEvent::ToolExecutionStart {
         tool_call_id: tool_call.id.clone(),
         tool_name: tool_call.name.clone(),
-        args: JsonValue::Object(tool_call.arguments.clone()),
+        args: JsonValue::Object(tool_call.arguments.as_object().clone()),
     })
     .await;
 }
@@ -1065,7 +1065,7 @@ fn update_emitter<S: EventSink>(
         sink.emit(AgentEvent::ToolExecutionUpdate {
             tool_call_id: tool_call.id.clone(),
             tool_name: tool_call.name.clone(),
-            args: JsonValue::Object(tool_call.arguments.clone()),
+            args: JsonValue::Object(tool_call.arguments.as_object().clone()),
             partial_result,
         })
     }

@@ -208,7 +208,7 @@ fn tool_call_stream(
     let call = ToolCall {
         id: format!("faux-call-{name}"),
         name,
-        arguments,
+        arguments: arguments.into(),
         thought_signature: None,
         namespace: None,
     };

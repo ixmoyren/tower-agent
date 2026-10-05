@@ -13,8 +13,8 @@ use std::{
 };
 
 use ai::{
-    AssistantEventStream, AssistantMessage, AssistantMessageEvent, ContentBlock, DoneReason,
-    ErrorReason, JsonObject, Message, Model, PiError, SimpleStreamOptions, StopReason,
+    Arguments, AssistantEventStream, AssistantMessage, AssistantMessageEvent, ContentBlock,
+    DoneReason, ErrorReason, JsonObject, Message, Model, PiError, SimpleStreamOptions, StopReason,
     StreamRequest, TextContent, ThinkingContent, ToolCall, TranscriptContext, Usage, UserContent,
     UserMessage,
 };
@@ -192,7 +192,7 @@ fn script_message(
                 partial.content.push(ContentBlock::ToolCall(ToolCall {
                     id: block.id.clone(),
                     name: block.name.clone(),
-                    arguments: JsonObject::new(),
+                    arguments: JsonObject::new().into(),
                     thought_signature: None,
                     namespace: None,
                 }));
@@ -200,7 +200,8 @@ fn script_message(
                     content_index: index,
                     partial: partial.clone(),
                 });
-                let encoded = serde_json::Value::Object(block.arguments.clone()).to_string();
+                let encoded =
+                    serde_json::Value::Object(block.arguments.as_object().clone()).to_string();
                 for chunk in chunks(&encoded) {
                     // pi 在 delta 期间保持 `partial.arguments` 为空，
                     // 只在 `toolcall_end` 时装入解析后的参数。
@@ -331,7 +332,7 @@ pub(crate) fn thinking_block(thinking: &str) -> ContentBlock {
 }
 
 /// 工具调用内容块。
-pub(crate) fn tool_call_block(id: &str, name: &str, arguments: JsonObject) -> ContentBlock {
+pub(crate) fn tool_call_block(id: &str, name: &str, arguments: Arguments) -> ContentBlock {
     ContentBlock::ToolCall(ToolCall {
         id: id.to_owned(),
         name: name.to_owned(),

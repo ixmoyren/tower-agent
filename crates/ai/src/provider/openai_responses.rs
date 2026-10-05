@@ -558,7 +558,7 @@ impl StreamState {
         if let Some(BlockState::Tool { call, partial_json }) = self.blocks.get_mut(position) {
             partial_json.push_str(delta);
             if let Ok(JsonValue::Object(parsed)) = serde_json::from_str::<JsonValue>(partial_json) {
-                call.arguments = parsed;
+                call.arguments = parsed.into();
             }
         }
         self.sync_content();
@@ -664,7 +664,7 @@ impl StreamState {
                     if let Ok(JsonValue::Object(parsed)) =
                         serde_json::from_str::<JsonValue>(arguments)
                     {
-                        call.arguments = parsed;
+                        call.arguments = parsed.into();
                     }
                 }
                 let call = match &self.blocks[slot.content_index] {
@@ -878,7 +878,8 @@ fn convert_input(system: &str, messages: &[Message]) -> Result<Vec<JsonValue>, P
                             "type": "function_call",
                             "call_id": call.id,
                             "name": call.name,
-                            "arguments": JsonValue::Object(call.arguments.clone()).to_string(),
+                            "arguments": JsonValue::Object(call.arguments.as_object().clone())
+                                .to_string(),
                         }));
                     }
                 }

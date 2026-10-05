@@ -12,7 +12,7 @@ use std::{
 };
 
 use agent::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
-use ai::JsonObject;
+use ai::Arguments;
 use globset::{GlobBuilder, GlobMatcher};
 use ignore::WalkBuilder;
 use regex::RegexBuilder;
@@ -21,7 +21,7 @@ use tower::Service;
 
 use super::{
     path_utils::resolve_to_cwd,
-    support::{ToolFuture, arg_str, error_result, once, opt_str, opt_u64, text_result},
+    support::{ToolFuture, error_result, once, text_result},
     truncate::{
         DEFAULT_MAX_BYTES, GREP_MAX_LINE_LENGTH, TruncationOptions, format_size, truncate_head,
         truncate_line,
@@ -77,33 +77,33 @@ impl GrepTool {
 
     async fn execute(
         &self,
-        args: &JsonObject,
+        args: &Arguments,
         signal: &Option<CancellationToken>,
     ) -> AgentToolResult {
-        let pattern = match arg_str(args, "pattern") {
+        let pattern = match args.arg_str("pattern") {
             Ok(pattern) => pattern,
             Err(message) => return error_result(message),
         };
-        let search_dir = match opt_str(args, "path") {
+        let search_dir = match args.opt_str("path") {
             Ok(dir) => dir.unwrap_or_else(|| ".".into()),
             Err(message) => return error_result(message),
         };
-        let glob = match opt_str(args, "glob") {
+        let glob = match args.opt_str("glob") {
             Ok(glob) => glob,
             Err(message) => return error_result(message),
         };
         let ignore_case = matches!(args.get("ignoreCase"), Some(ai::JsonValue::Bool(true)));
         let literal = matches!(args.get("literal"), Some(ai::JsonValue::Bool(true)));
-        let context = match opt_u64(args, "context") {
+        let context = match args.opt_u64("context") {
             Ok(context) => context.unwrap_or(0),
             Err(message) => return error_result(message),
         };
-        let limit = match opt_u64(args, "limit") {
+        let limit = match args.opt_u64("limit") {
             Ok(limit) => limit.unwrap_or(DEFAULT_LIMIT),
             Err(message) => return error_result(message),
         }
-        // pi: `Math.max(1, limit ?? DEFAULT_LIMIT)`
-        .max(1);
+            // pi: `Math.max(1, limit ?? DEFAULT_LIMIT)`
+            .max(1);
 
         if cancelled(signal) {
             return error_result("Operation aborted");

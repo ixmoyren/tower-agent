@@ -26,9 +26,9 @@ pub use error::{BoxError, PiError};
 pub use event::{AssistantMessageEvent, DoneReason, ErrorReason};
 pub use json::{JsonObject, JsonValue};
 pub use message::{
-    AssistantMessage, ContentBlock, ImageContent, Message, StopReason, SystemMessage, TextContent,
-    ThinkingContent, Tool, ToolCall, ToolReference, ToolResultMessage, Usage, UsageCost,
-    UserContent, UserMessage,
+    Arguments, AssistantMessage, ContentBlock, ImageContent, Message, StopReason, SystemMessage,
+    TextContent, ThinkingContent, Tool, ToolCall, ToolReference, ToolResultMessage, Usage,
+    UsageCost, UserContent, UserMessage,
 };
 pub use model::{InputModality, Model, ModelCost, ModelCostRates, ModelCostTier};
 pub use models::{ModelSource, Models, ProviderRefresh, RefreshOptions, RefreshReport};

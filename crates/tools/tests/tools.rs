@@ -27,7 +27,7 @@ fn request(name: &str, args: JsonValue) -> ToolCallRequest {
     ToolCallRequest::new(ToolCall {
         id: "call-1".into(),
         name: name.into(),
-        arguments: object(args),
+        arguments: object(args).into(),
         thought_signature: None,
         namespace: None,
     })
@@ -153,7 +153,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "hello", "ignoreCase": true }),
     )
-    .await;
+        .await;
     let text = first_text(&results[0]);
     assert!(text.contains("a.txt:1: Hello"), "got: {text}");
     assert!(text.contains("a.txt:3: HELLO again"), "got: {text}");
@@ -163,7 +163,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "hello", "glob": "*.rs" }),
     )
-    .await;
+        .await;
     assert_eq!(first_text(&results[0]), "b.rs:1: hello from rust");
 
     // 上下文行用 `-` 分隔，命中行用 `:` 分隔。
@@ -171,7 +171,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "there", "context": 1 }),
     )
-    .await;
+        .await;
     assert_eq!(
         first_text(&results[0]),
         "a.txt-1- Hello\na.txt:2: there\na.txt-3- HELLO again"
@@ -183,7 +183,7 @@ async fn grep_reports_matches_options_and_context() {
         &grep,
         serde_json::json!({ "pattern": "a.b", "literal": true }),
     )
-    .await;
+        .await;
     assert_eq!(first_text(&results[0]), "lit.txt:1: a.b");
 
     let results = run_tool(&grep, serde_json::json!({ "pattern": "zzz-not-here" })).await;
@@ -242,7 +242,7 @@ async fn write_then_read_round_trips_and_creates_parents() {
         &write,
         serde_json::json!({ "path": "nested/hello.txt", "content": "hello\nworld\n" }),
     )
-    .await;
+        .await;
     assert_eq!(results.len(), 1);
     assert_eq!(
         first_text(&results[0]),
@@ -301,14 +301,14 @@ async fn read_reports_continuation_for_partial_reads() {
         dir.path().join("big.txt"),
         (1..=10).map(|i| format!("line {i}\n")).collect::<String>(),
     )
-    .unwrap();
+        .unwrap();
     let read = tools::create_read_tool(dir.path());
 
     let results = run_tool(
         &read,
         serde_json::json!({ "path": "big.txt", "offset": 2, "limit": 3 }),
     )
-    .await;
+        .await;
     let text = first_text(&results[0]);
     assert!(text.starts_with("line 2\nline 3\nline 4"), "got: {text}");
     assert!(
@@ -327,7 +327,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
         dir.path().join("code.rs"),
         "fn main() {\n    let x = 1;\n}\n",
     )
-    .unwrap();
+        .unwrap();
     let edit = tools::create_edit_tool(dir.path());
 
     let results = run_tool(
@@ -337,7 +337,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
             "edits": [{ "oldText": "let x = 1;", "newText": "let x = 42;" }]
         }),
     )
-    .await;
+        .await;
     assert!(
         !results[0].is_error,
         "edit failed: {}",
@@ -369,7 +369,7 @@ async fn edit_reports_a_not_found_error_without_touching_the_file() {
             "edits": [{ "oldText": "nope", "newText": "yep" }]
         }),
     )
-    .await;
+        .await;
     assert!(results[0].is_error);
     assert!(first_text(&results[0]).contains("Could not find the exact text in code.rs"));
     assert_eq!(
@@ -387,7 +387,7 @@ async fn shell_streams_output_and_reports_exit_codes() {
         &shell,
         serde_json::json!({ "command": "printf 'hello\\n'" }),
     )
-    .await;
+        .await;
     assert!(
         results.len() >= 2,
         "expected an initial update plus the final result"
@@ -415,7 +415,7 @@ async fn shell_reports_a_timeout_as_an_error_result() {
         &shell,
         serde_json::json!({ "command": "sleep 5", "timeout": 0.2 }),
     )
-    .await;
+        .await;
     let last = results.last().unwrap();
     assert!(last.is_error);
     assert!(
@@ -441,7 +441,7 @@ async fn shell_timeout_kills_the_whole_process_tree() {
         &shell,
         serde_json::json!({ "command": command, "timeout": 0.5 }),
     )
-    .await;
+        .await;
     let last = results.last().expect("terminal result");
     assert!(last.is_error, "timeout is an error result");
     assert!(first_text(last).contains("Command timed out"));
@@ -535,9 +535,9 @@ impl Service<StreamRequest> for ScriptedStreamService {
 fn boxed_stream<S>(service: S) -> BoxStreamService
 where
     S: Service<StreamRequest, Response = AssistantEventStream, Error = PiError>
-        + Clone
-        + Send
-        + 'static,
+    + Clone
+    + Send
+    + 'static,
     S::Future: Send + 'static,
 {
     BoxCloneService::new(service)
@@ -585,7 +585,7 @@ fn tool_call_script(
     let call = ContentBlock::ToolCall(ToolCall {
         id: "call-1".into(),
         name: name.into(),
-        arguments,
+        arguments: arguments.into(),
         thought_signature: None,
         namespace: None,
     });

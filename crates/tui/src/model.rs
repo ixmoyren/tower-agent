@@ -294,7 +294,7 @@ fn render_blocks(blocks: &[ContentBlock]) -> String {
             ContentBlock::ToolCall(call) => parts.push(format!(
                 "[tool {}({})]",
                 call.name,
-                summarize_json(&JsonValue::Object(call.arguments.clone()))
+                summarize_json(&JsonValue::Object(call.arguments.as_object().clone()))
             )),
         }
     }
