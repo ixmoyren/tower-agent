@@ -12,19 +12,33 @@
 //! - 事件是 push 的、多订阅者的，不进通用 tower 中间件。
 //! - 一次 [`agent_loop::run_agent_loop`] = 一次完整 agent run；并行工具执行时
 //!   `tool_execution_end` 按完成顺序发出，工具结果消息按 assistant 源顺序发出。
+//! - [`Agent`] 自身实现 `Service<AgentRequest, Response = AgentResponse>`（[`BoxAgentService`]），
+//!   因此可以像 `tower-mcp` 那样与 axum 等 tower 生态组合。
+//! - [`layer`] 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`（`tool_call` / `tool_result`
+//!   钩子），[`ToolRegistration`] 提供 schemars 的 typed 工具注册。
 
 mod agent;
 pub mod agent_loop;
 mod error;
 mod event;
 mod event_bus;
+pub mod layer;
+mod registration;
 mod router;
 mod tool;
 
-pub use agent::{Agent, AgentInitialState, AgentOptions, AgentState, QueueMode};
+pub use agent::{
+    Agent, AgentInitialState, AgentOptions, AgentRequest, AgentResponse, AgentServiceExt,
+    AgentState, BoxAgentService, QueueMode,
+};
 pub use error::{AgentError, BoxError};
 pub use event::{AgentEvent, AgentMessage};
 pub use event_bus::{EventBus, Subscription};
+pub use layer::{
+    AfterToolResultLayer, AfterToolResultService, BeforeToolCallLayer, BeforeToolCallService,
+    ToolCallDecision,
+};
+pub use registration::ToolRegistration;
 pub use router::{ToolRouter, ToolRouterFuture};
 pub use tool::{
     AgentTool, AgentToolResult, AgentToolService, AgentToolServiceExt, BoxToolService,

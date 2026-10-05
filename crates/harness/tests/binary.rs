@@ -3,7 +3,7 @@
 use std::process::Command;
 
 fn cli() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_cli"))
+    Command::new(env!("CARGO_BIN_EXE_harness"))
 }
 
 fn stdout(output: &std::process::Output) -> String {
@@ -22,12 +22,12 @@ fn help_and_version_exit_successfully() {
 
     let output = cli().arg("--version").output().expect("run cli");
     assert!(output.status.success());
-    assert!(stdout(&output).starts_with("cli "));
+    assert!(stdout(&output).starts_with("harness "));
 
     // pi 的版本短选项是 `-v`。
     let output = cli().arg("-v").output().expect("run cli");
     assert!(output.status.success());
-    assert!(stdout(&output).starts_with("cli "));
+    assert!(stdout(&output).starts_with("harness "));
 }
 
 #[test]

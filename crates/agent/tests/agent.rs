@@ -247,3 +247,24 @@ async fn state_snapshot_tracks_pending_tool_calls() {
     assert!(state.pending_tool_calls.is_empty());
     let _ = AgentEvent::AgentStart;
 }
+
+#[tokio::test]
+async fn agent_serves_requests_as_a_tower_service() {
+    use agent::{AgentRequest, AgentServiceExt as _};
+    use tower::ServiceExt as _;
+
+    let model = test_model();
+    let service = ScriptedStreamService::new(vec![text_script(&model, "hello")]);
+    let response = agent_with(service)
+        .boxed_agent()
+        .oneshot(AgentRequest {
+            messages: vec![user("hi")],
+            ..AgentRequest::default()
+        })
+        .await
+        .expect("agent service call succeeds");
+
+    assert_eq!(response.text, "hello");
+    assert_eq!(response.messages.len(), 1, "one assistant reply");
+    assert_eq!(response.stop_reason, Some(ai::StopReason::Stop));
+}

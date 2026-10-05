@@ -9,6 +9,7 @@ use ratatui::{Terminal, backend::Backend, termina::event::Event};
 use crate::{
     editor::{Editor, EditorAction},
     model::TuiState,
+    plugin::UiPlugin,
     render,
 };
 
@@ -17,6 +18,7 @@ pub struct Tui<B: Backend> {
     terminal: Terminal<B>,
     state: TuiState,
     editor: Editor,
+    plugins: Vec<Box<dyn UiPlugin>>,
 }
 
 impl<B: Backend> Tui<B> {
@@ -26,7 +28,32 @@ impl<B: Backend> Tui<B> {
             terminal,
             state,
             editor: Editor::new(),
+            plugins: Vec::new(),
         }
+    }
+
+    /// 用一个已初始化的终端与一组 UI 插件构造。
+    pub fn with_plugins(
+        terminal: Terminal<B>,
+        state: TuiState,
+        plugins: Vec<Box<dyn UiPlugin>>,
+    ) -> Self {
+        Self {
+            terminal,
+            state,
+            editor: Editor::new(),
+            plugins,
+        }
+    }
+
+    /// 追加一个 UI 插件。
+    pub fn add_ui_plugin(&mut self, plugin: Box<dyn UiPlugin>) {
+        self.plugins.push(plugin);
+    }
+
+    /// 当前已注册的 UI 插件。
+    pub fn ui_plugins(&self) -> &[Box<dyn UiPlugin>] {
+        &self.plugins
     }
 
     /// 当前视图状态。
@@ -62,7 +89,7 @@ impl<B: Backend> Tui<B> {
         let state = self.state.clone();
         let editor = &self.editor;
         self.terminal
-            .draw(|frame| render::render(frame, &state, editor))?;
+            .draw(|frame| render::render_with_plugins(frame, &state, editor, &self.plugins))?;
         Ok(())
     }
 

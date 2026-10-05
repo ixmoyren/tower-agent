@@ -23,6 +23,7 @@ pub mod backend;
 pub mod command;
 pub mod editor;
 pub mod model;
+pub mod plugin;
 pub mod render;
 
 pub use app::Tui;
@@ -31,5 +32,6 @@ pub use backend::{
 };
 pub use command::{BUILTIN_SLASH_COMMANDS, CommandHost, SlashCommand};
 pub use editor::{Editor, EditorAction, Mode};
-pub use model::{Entry, EntryKind, TuiState, render_message};
-pub use render::{EDITOR_HEIGHT, render, transcript_lines};
+pub use model::{Entry, EntryKind, ToolEntry, ToolResultView, TuiState, render_message};
+pub use plugin::UiPlugin;
+pub use render::{EDITOR_HEIGHT, render, render_with_plugins, transcript_lines};

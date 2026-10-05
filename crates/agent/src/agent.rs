@@ -7,14 +7,17 @@
 use std::{
     collections::BTreeSet,
     sync::{Arc, Mutex, MutexGuard},
+    task::{Context, Poll},
 };
 
 use ai::{
     BoxStreamService, ContentBlock, Message, Model, ModelThinkingLevel, SimpleStreamOptions,
     StopReason, TextContent, Usage, UserContent, UserMessage,
 };
+use futures_util::future::BoxFuture;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
+use tower::{Service, util::BoxCloneService};
 
 use crate::{
     AgentError, AgentEvent, AgentMessage, AgentTool, ToolExecutionMode,
@@ -273,9 +276,66 @@ fn reduce(core: &Arc<Mutex<Core>>, event: &AgentEvent) {
 }
 
 /// 有状态 agent 运行时。
+#[derive(Clone)]
 pub struct Agent {
     core: Arc<Mutex<Core>>,
     bus: EventBus,
+}
+
+/// 通过 tower [`Service`] 发起一次 agent run 的请求（对应 pi `Agent.prompt`）。
+///
+/// `messages` 会被当作一次新的 prompt 追加到当前 transcript；空表示从当前 transcript
+/// 继续（等价于 [`Agent::continue_run`]）。`model` / `tools` / `system_prompt` 非空时
+/// 覆盖 agent 的对应配置。注意：Service 与 [`Agent`] 一样**有状态**（会话记录保存在
+/// agent 内），要无状态地服务多轮请求请在请求间调用 [`Agent::reset`]。
+#[derive(Debug, Clone, Default)]
+pub struct AgentRequest {
+    /// 追加到会话的消息；为空表示继续当前会话。
+    pub messages: Vec<AgentMessage>,
+    /// 可选的模型覆盖。
+    pub model: Option<Model>,
+    /// 可选的工具集覆盖。
+    pub tools: Option<Vec<AgentTool>>,
+    /// 可选的 system prompt 覆盖。
+    pub system_prompt: Option<String>,
+}
+
+/// 一次 agent run 的结果。
+#[derive(Debug, Clone)]
+pub struct AgentResponse {
+    /// 本次 run 新增的消息（assistant / toolResult）。
+    pub messages: Vec<AgentMessage>,
+    /// 最后一条 assistant 消息的纯文本。
+    pub text: String,
+    /// 本次 run 的 usage 合计。
+    pub usage: Usage,
+    /// 最后一条 assistant 消息的 stop reason（没有 assistant 消息时为 `None`）。
+    pub stop_reason: Option<StopReason>,
+}
+
+/// 类型擦除后的 agent 服务，便于像 tower-mcp 那样叠中间件或用 axum 暴露。
+pub type BoxAgentService = BoxCloneService<AgentRequest, AgentResponse, AgentError>;
+
+/// 把具体 agent 服务装箱成 [`BoxAgentService`]。
+pub trait AgentServiceExt:
+    Service<AgentRequest, Response = AgentResponse, Error = AgentError> + Clone + Sized + Send + 'static
+{
+    /// 装箱为类型擦除的 agent 服务。
+    fn boxed_agent(self) -> BoxAgentService
+    where
+        <Self as Service<AgentRequest>>::Future: Send + 'static,
+    {
+        BoxCloneService::new(self)
+    }
+}
+
+impl<T> AgentServiceExt for T where
+    T: Service<AgentRequest, Response = AgentResponse, Error = AgentError>
+        + Clone
+        + Sized
+        + Send
+        + 'static
+{
 }
 
 impl Agent {
@@ -662,6 +722,116 @@ impl Agent {
             messages: vec![agent_message],
         })
         .await;
+    }
+
+    /// 设置/替换 system prompt（`None` 表示移除）。
+    pub fn set_system_prompt(&self, prompt: Option<&str>) {
+        let mut core = lock(&self.core);
+        let system = agent_loop::create_initial_system_message(prompt, &core.tools);
+        if matches!(
+            core.messages.first(),
+            Some(AgentMessage::Message(Message::System(_)))
+        ) {
+            core.messages.remove(0);
+        }
+        if let Some(system) = system {
+            core.messages
+                .insert(0, AgentMessage::Message(Message::System(system)));
+        }
+    }
+
+    /// 执行一次 [`AgentRequest`]，返回本次 run 的新增消息与汇总。
+    async fn run_request(&self, request: AgentRequest) -> Result<AgentResponse, AgentError> {
+        if let Some(model) = request.model.clone() {
+            self.set_model(model);
+        }
+        if let Some(tools) = request.tools.clone() {
+            self.set_tools(tools);
+        }
+        if let Some(system_prompt) = request.system_prompt.clone() {
+            self.set_system_prompt(Some(&system_prompt));
+        }
+
+        let before = lock(&self.core).messages.len();
+        let prompt_len = request.messages.len();
+        if request.messages.is_empty() {
+            self.continue_run().await?;
+        } else {
+            self.prompt_messages(request.messages).await?;
+        }
+        let messages = lock(&self.core).messages.clone();
+        let start = (before + prompt_len).min(messages.len());
+        let new_messages = messages[start..].to_vec();
+        let (text, usage, stop_reason) = summarize(&new_messages);
+        Ok(AgentResponse {
+            messages: new_messages,
+            text,
+            usage,
+            stop_reason,
+        })
+    }
+}
+
+impl Service<AgentRequest> for Agent {
+    type Response = AgentResponse;
+    type Error = AgentError;
+    type Future = BoxFuture<'static, Result<AgentResponse, AgentError>>;
+
+    // agent 是有状态单写者：并发请求由 `run` 的 `run_active` 检查拒绝（返回
+    // `AgentError::Loop`），因此这里无需真的阻塞。
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: AgentRequest) -> Self::Future {
+        let agent = self.clone();
+        Box::pin(async move { agent.run_request(request).await })
+    }
+}
+
+/// 汇总本次 run 新增的消息：最后一条 assistant 文本、usage 合计与 stop reason。
+fn summarize(messages: &[AgentMessage]) -> (String, Usage, Option<StopReason>) {
+    let mut usage = Usage::default();
+    let mut text = String::new();
+    let mut stop_reason = None;
+    for message in messages {
+        if let AgentMessage::Message(Message::Assistant(assistant)) = message {
+            merge_usage(&mut usage, &assistant.usage);
+            text = assistant
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    ContentBlock::Text(text) => Some(text.text.clone()),
+                    _ => None,
+                })
+                .collect();
+            stop_reason = Some(assistant.stop_reason);
+        }
+    }
+    (text, usage, stop_reason)
+}
+
+/// 累加 usage（`ai::Usage` 没有内建的合并方法）。
+fn merge_usage(total: &mut Usage, other: &Usage) {
+    total.input += other.input;
+    total.output += other.output;
+    total.cache_read += other.cache_read;
+    total.cache_write += other.cache_write;
+    total.total_tokens += other.total_tokens;
+    total.cache_write_1h = add_optional(total.cache_write_1h, other.cache_write_1h);
+    total.reasoning = add_optional(total.reasoning, other.reasoning);
+    total.cost.input += other.cost.input;
+    total.cost.output += other.cost.output;
+    total.cost.cache_read += other.cost.cache_read;
+    total.cost.cache_write += other.cost.cache_write;
+    total.cost.total += other.cost.total;
+}
+
+fn add_optional(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    match (left, right) {
+        (None, None) => None,
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (Some(left), Some(right)) => Some(left + right),
     }
 }
 

@@ -11,9 +11,9 @@ use clap::{Parser, builder::NonEmptyStringValueParser};
 /// 解析后的命令行参数。
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 #[command(
-    name = "cli",
+    name = "harness",
     version,
-    about = "tower-pi-agent: a Rust port of the pi (TypeScript agent framework) CLI",
+    about = "tower-pi-agent: a Rust port of the pi (TypeScript agent framework) harness",
     disable_help_flag = true,
     disable_version_flag = true,
     help_template = "{about-with-newline}\nUsage: {usage}\n\nArguments:\n{positionals}\n\nOptions:\n{options}"
@@ -150,7 +150,7 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let mut argv: Vec<OsString> = vec![OsString::from("cli")];
+    let mut argv: Vec<OsString> = vec![OsString::from("harness")];
     argv.extend(args.into_iter().map(Into::into).map(expand_pi_shorthand));
     CliArgs::try_parse_from(argv)
 }
@@ -268,7 +268,10 @@ mod tests {
         // pi 的版本短选项是 `-v`（clap 默认的 `-V` 已关闭）。
         let version = parse(["-v"]).expect_err("-v 由 clap 处理");
         assert_eq!(version.kind(), ErrorKind::DisplayVersion);
-        assert!(version.to_string().starts_with("cli "), "got: {version}");
+        assert!(
+            version.to_string().starts_with("harness "),
+            "got: {version}"
+        );
     }
 
     #[test]

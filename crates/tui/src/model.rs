@@ -31,6 +31,34 @@ pub struct Entry {
     pub kind: EntryKind,
     /// 单行或多行文本（已按 `\n` 拆好）。
     pub text: String,
+    /// 工具条目的结构化信息（仅 [`EntryKind::Tool`]）；供 UI 插件定制渲染。
+    pub tool: Option<ToolEntry>,
+}
+
+/// 工具结果的渲染视图（供 UI 插件使用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolResultView {
+    /// 一行摘要。
+    pub summary: String,
+    /// 完整结果文本（展开时用）。
+    pub details: Option<String>,
+    /// 是否错误结果。
+    pub is_error: bool,
+}
+
+/// 工具条目的结构化信息。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolEntry {
+    /// 工具名。
+    pub name: String,
+    /// 入参摘要。
+    pub args: String,
+    /// 结果（仍在执行时为 `None`）。
+    pub result: Option<ToolResultView>,
+    /// 是否错误结果。
+    pub is_error: bool,
+    /// 是否仍在执行。
+    pub running: bool,
 }
 
 /// TUI 的完整视图状态。
@@ -147,6 +175,7 @@ impl TuiState {
         self.entries.push(Entry {
             kind,
             text: render_message(message),
+            tool: None,
         });
     }
 
@@ -155,6 +184,7 @@ impl TuiState {
         self.entries.push(Entry {
             kind: EntryKind::Notice,
             text: text.into(),
+            tool: None,
         });
     }
 
@@ -203,6 +233,7 @@ impl TuiState {
                     self.entries.push(Entry {
                         kind: EntryKind::Assistant,
                         text: render_message(message),
+                        tool: None,
                     });
                     self.streaming = None;
                 } else {
@@ -217,9 +248,17 @@ impl TuiState {
                 self.pending_tools.insert(tool_call_id.clone());
                 self.tool_entries
                     .insert(tool_call_id.clone(), self.entries.len());
+                let args_summary = summarize_json(args);
                 self.entries.push(Entry {
                     kind: EntryKind::Tool,
-                    text: format!("… {tool_name} {}", summarize_json(args)),
+                    text: format!("… {tool_name} {args_summary}"),
+                    tool: Some(ToolEntry {
+                        name: tool_name.clone(),
+                        args: args_summary,
+                        result: None,
+                        is_error: false,
+                        running: true,
+                    }),
                 });
             }
             AgentEvent::ToolExecutionUpdate {
@@ -228,13 +267,28 @@ impl TuiState {
                 ..
             } => {
                 if let Some(index) = self.tool_entries.get(tool_call_id).copied() {
-                    let name = self
+                    let rendered = render_tool_result(partial_result);
+                    let summary = preview(&rendered);
+                    let (name, args) = self
                         .entries
                         .get(index)
-                        .map(|entry| tool_name_of(&entry.text))
-                        .unwrap_or_default();
-                    self.entries[index].text =
-                        format!("… {name} {}", preview(&render_tool_result(partial_result)));
+                        .and_then(|entry| entry.tool.as_ref())
+                        .map(|tool| (tool.name.clone(), tool.args.clone()))
+                        .unwrap_or_else(|| {
+                            (tool_name_of(&self.entries[index].text), String::new())
+                        });
+                    self.entries[index].text = format!("… {name} {summary}");
+                    self.entries[index].tool = Some(ToolEntry {
+                        name,
+                        args,
+                        result: Some(ToolResultView {
+                            summary,
+                            details: Some(rendered),
+                            is_error: partial_result.is_error,
+                        }),
+                        is_error: partial_result.is_error,
+                        running: true,
+                    });
                 }
             }
             AgentEvent::ToolExecutionEnd {
@@ -245,15 +299,40 @@ impl TuiState {
             } => {
                 self.pending_tools.remove(tool_call_id);
                 let marker = if *is_error { "✖" } else { "✔" };
-                let text = format!(
-                    "{marker} {tool_name} {}",
-                    preview(&render_tool_result(result))
-                );
+                let rendered = render_tool_result(result);
+                let summary = preview(&rendered);
+                let text = format!("{marker} {tool_name} {summary}");
+                let view = ToolResultView {
+                    summary,
+                    details: Some(rendered),
+                    is_error: *is_error,
+                };
                 match self.tool_entries.get(tool_call_id).copied() {
-                    Some(index) if index < self.entries.len() => self.entries[index].text = text,
+                    Some(index) if index < self.entries.len() => {
+                        let args = self.entries[index]
+                            .tool
+                            .as_ref()
+                            .map(|tool| tool.args.clone())
+                            .unwrap_or_default();
+                        self.entries[index].text = text;
+                        self.entries[index].tool = Some(ToolEntry {
+                            name: tool_name.clone(),
+                            args,
+                            result: Some(view),
+                            is_error: *is_error,
+                            running: false,
+                        });
+                    }
                     _ => self.entries.push(Entry {
                         kind: EntryKind::Tool,
                         text,
+                        tool: Some(ToolEntry {
+                            name: tool_name.clone(),
+                            args: String::new(),
+                            result: Some(view),
+                            is_error: *is_error,
+                            running: false,
+                        }),
                     }),
                 }
             }

@@ -2,7 +2,7 @@
 
 > 状态：设计稿 v0.2（关键决策已确认，尚未实现）。
 > 关联：[`design.md`](./design.md)（总体设计、第 4.3 节 provider 分层、第 4.i~4.iv 移植路线）。
-> 本文只描述插件体系本身的结构与规则，不改变 `agents` / `ai` / `tools` / `tui` / `cli` 的既有契约。
+> 本文只描述插件体系本身的结构与规则，不改变 `agents` / `ai` / `tools` / `tui` / `harness` 的既有契约。
 
 ## 1. 目标
 
@@ -238,11 +238,13 @@ stabby::export! {
 ## 9. 内置工具迁移到静态插件
 
 1. **每个内置工具本身是一个静态插件**：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls` 各自注册为独立插件，分别提供 `tool.read` / `tool.shell` / … / `tool.ls`（版本从 `1.0.0` 起），不再由一个 `core-tools` 插件整体打包。
-2. **每个 tool 都是 tower 中的 layer**：`tools` crate 里每个工具除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上，得到发给 agent 的可执行服务。
-3. `plugins` 宿主把这些工具逐个注册为静态插件，并通过 `default_registry` / `resolve_default` / `default_tools` 提供内置集合；`cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在解析结果上做过滤。
-4. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为工具的实现细节，不对外暴露成能力。
-5. 不再有独立的 `plugins-builtin` crate：内置工具插件由 `plugins` 宿主直接装配，`plugins → tools` 依赖单向。
-6. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `cli::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
+2. **每个 tool 都是 tower 中的 layer**：`tools` crate 里每个工具除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上，得到发给 agent 的可执行服务。工具层可以与 tower 生态的其它 layer（`timeout` / `limit` / `buffer` ……）自由组合。
+3. **工具钩子也是 layer**：`agent::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`，分别对应 pi 的 `tool_call`（可放行/改写/拦截）与 `tool_result`（逐条改写结果）钩子。
+4. **typed 工具注册**：`agent::ToolRegistration::new::<P, _, _>(...)` 用 schemars 生成参数 schema、用 serde 反序列化入参，校验失败编码为 `is_error` 工具结果。
+5. `plugins` 宿主把这些工具逐个注册为静态插件，并通过 `default_registry` / `resolve_default` / `default_tools` 提供内置集合；`harness` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在解析结果上做过滤。
+6. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为工具的实现细节，不对外暴露成能力。
+7. 不再有独立的 `plugins-builtin` crate：内置工具插件由 `plugins` 宿主直接装配，`plugins → tools` 依赖单向。
+8. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `harness::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
 
 ## 10. crate 划分
 
@@ -320,6 +322,6 @@ pub enum PluginError {
 3. **权限**：采用 **运行时提示**（首次调用需要权限的能力时询问用户，按会话缓存；无人值守默认拒绝）。
 4. **热更一致性**：调用在 **发起时绑定版本**；in-flight 调用在旧版本上完成，之后的新调用用新版本。
 5. **版本 / ABI 兼容**：一律 `^`（semver 兼容）； **major 不兼容即拒绝**，不静默降级。
-6. **内置工具与 provider 中间件**：内置 tool（`read` / `shell` / …） **各自是一个静态插件，且每个都是 tower Layer**；provider 中间件（`retry` / `timeout` / `observe`） **不插件化**，由 `cli::provider` 直接编排。
+6. **内置工具与 provider 中间件**：内置 tool（`read` / `shell` / …） **各自是一个静态插件，且每个都是 tower Layer**；provider 中间件（`retry` / `timeout` / `observe`） **不插件化**，由 `harness::provider` 直接编排。
 
 仍待实现的细节（不阻塞立项）：权限提示的 UI 形态、`CapabilityOverride` 的配置来源（配置文件 / CLI / 运行时命令）。

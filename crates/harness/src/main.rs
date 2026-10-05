@@ -1,4 +1,4 @@
-//! `cli` — tower-pi-agent 的命令行入口（对应 pi `packages/coding-agent`）。
+//! `harness` — tower-pi-agent 的命令行入口（对应 pi `packages/coding-agent`）。
 //!
 //! 组装一次会话：内置工具 + agent 编排循环 + （TUI 或纯文本）事件渲染。
 //! provider 由 `--provider` / `--model` 选择，可接真实的 anthropic / openai / google /
@@ -73,7 +73,7 @@ fn main() -> ExitCode {
         args.prompt_text()
     };
     if print_mode && prompt.is_none() {
-        eprintln!("没有提示词。传入提示词，或通过 stdin 提供；运行 `cli --help` 查看用法。");
+        eprintln!("没有提示词。传入提示词，或通过 stdin 提供；运行 `harness --help` 查看用法。");
         return ExitCode::FAILURE;
     }
 
@@ -280,7 +280,7 @@ mod tests {
                 })),
             },
         )
-            .expect("write succeeds");
+        .expect("write succeeds");
         assert_eq!(String::from_utf8(out).expect("utf-8"), "[user] 你好\n");
     }
 }

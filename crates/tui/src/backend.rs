@@ -38,6 +38,7 @@ use crate::{
     command::{self, CommandHost},
     editor::EditorAction,
     model::TuiState,
+    plugin::UiPlugin,
 };
 
 /// 本 crate 使用的终端类型（termina 后端 + 平台终端）。
@@ -178,6 +179,7 @@ pub async fn run_agent_tui(
     host: Arc<dyn CommandHost>,
     title: impl Into<String>,
     notice: Option<String>,
+    plugins: Vec<Box<dyn UiPlugin>>,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::unbounded_channel();
     let pump = tokio::spawn(async move {
@@ -187,7 +189,7 @@ pub async fn run_agent_tui(
             }
         }
     });
-    let result = run_tui(rx, submissions, host, title, notice).await;
+    let result = run_tui(rx, submissions, host, title, notice, plugins).await;
     pump.abort();
     result
 }
@@ -199,13 +201,14 @@ pub async fn run_tui(
     host: Arc<dyn CommandHost>,
     title: impl Into<String>,
     notice: Option<String>,
+    plugins: Vec<Box<dyn UiPlugin>>,
 ) -> io::Result<()> {
     let (terminal, reader) = init_terminal()?;
     let mut state = TuiState::new(title);
     if let Some(notice) = notice {
         state.push_notice(notice);
     }
-    let mut tui = Tui::new(terminal, state);
+    let mut tui = Tui::with_plugins(terminal, state, plugins);
     let mut input = spawn_input_reader(reader);
 
     let result = run_loop(
@@ -215,7 +218,7 @@ pub async fn run_tui(
         &submissions,
         host.as_ref(),
     )
-    .await;
+        .await;
 
     let mut terminal = tui.into_terminal();
     let restored = restore_terminal(&mut terminal);

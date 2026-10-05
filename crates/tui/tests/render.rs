@@ -3,8 +3,15 @@
 
 use agent::{AgentEvent, AgentMessage, AgentToolResult};
 use ai::{ContentBlock, Message, StopReason, TextContent, Usage, UserContent, UserMessage};
-use ratatui::{Terminal, backend::TestBackend};
-use tui::{EntryKind, Tui, TuiState};
+use ratatui::{
+    Terminal,
+    backend::TestBackend,
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Style},
+    text::{Line, Span},
+};
+use tui::{EntryKind, ToolResultView, Tui, TuiState, UiPlugin};
 
 fn assistant(text: &str) -> AgentMessage {
     AgentMessage::Message(Message::Assistant(Box::new(ai::AssistantMessage {
@@ -255,6 +262,63 @@ fn entry_kinds_are_tracked_in_the_view_model() {
     state.push_message(&assistant("hello"));
     assert_eq!(state.entries()[0].kind, EntryKind::User);
     assert_eq!(state.entries()[1].kind, EntryKind::Assistant);
+}
+
+/// 一个同时贡献状态栏片段、工具结果渲染与浮层的 UI 插件。
+struct DemoUiPlugin;
+
+impl UiPlugin for DemoUiPlugin {
+    fn name(&self) -> &str {
+        "demo"
+    }
+
+    fn status_segment(&self) -> Option<Line<'static>> {
+        Some(Line::from(Span::styled(
+            "BETA",
+            Style::default().fg(Color::Magenta),
+        )))
+    }
+
+    fn render_tool_result(
+        &self,
+        tool: &str,
+        result: &ToolResultView,
+        _width: usize,
+    ) -> Option<Vec<Line<'static>>> {
+        (tool == "read").then(|| vec![Line::from(format!("CUSTOM {}", result.summary))])
+    }
+
+    fn render_overlay(&self, area: Rect, buf: &mut Buffer) -> bool {
+        buf.set_string(area.x, area.y, "OVL", Style::default().fg(Color::Yellow));
+        true
+    }
+}
+
+#[test]
+fn ui_plugins_contribute_status_tool_and_overlay_rendering() {
+    let terminal = Terminal::new(TestBackend::new(60, 14)).expect("test terminal");
+    let mut tui = Tui::with_plugins(
+        terminal,
+        TuiState::new("test-agent"),
+        vec![Box::new(DemoUiPlugin)],
+    );
+    tui.handle(&AgentEvent::ToolExecutionStart {
+        tool_call_id: "t1".into(),
+        tool_name: "read".into(),
+        args: serde_json::json!({ "path": "a.txt" }),
+    });
+    tui.handle(&AgentEvent::ToolExecutionEnd {
+        tool_call_id: "t1".into(),
+        tool_name: "read".into(),
+        result: AgentToolResult::text("file body"),
+        is_error: false,
+    });
+    tui.draw().expect("draw");
+
+    let rendered = render_to_string(tui.terminal());
+    assert!(rendered.contains("BETA"), "{rendered}");
+    assert!(rendered.contains("CUSTOM file body"), "{rendered}");
+    assert!(rendered.contains("OVL"), "{rendered}");
 }
 
 /// 读取 `TestBackend` 缓冲区内容。

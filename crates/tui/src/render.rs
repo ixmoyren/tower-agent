@@ -16,6 +16,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     editor::Editor,
     model::{EntryKind, TuiState},
+    plugin::UiPlugin,
 };
 
 /// 输入区高度（3 行文本 + 上下边框）。
@@ -26,6 +27,16 @@ const MENU_MAX_ITEMS: usize = 5;
 
 /// 把当前状态渲染到 `frame`。
 pub fn render(frame: &mut Frame, state: &TuiState, editor: &Editor) {
+    render_with_plugins(frame, state, editor, &[]);
+}
+
+/// 带 UI 插件的渲染：插件可追加状态栏片段、覆盖工具结果渲染并绘制浮层。
+pub fn render_with_plugins(
+    frame: &mut Frame,
+    state: &TuiState,
+    editor: &Editor,
+    plugins: &[Box<dyn UiPlugin>],
+) {
     let area = frame.area();
     let chunks = Layout::vertical([
         Constraint::Length(1),
@@ -35,11 +46,15 @@ pub fn render(frame: &mut Frame, state: &TuiState, editor: &Editor) {
     ])
     .split(area);
 
-    render_header(frame, chunks[0], state);
-    render_transcript(frame, chunks[1], state);
+    render_header(frame, chunks[0], state, plugins);
+    render_transcript(frame, chunks[1], state, plugins);
     render_editor(frame, chunks[2], editor);
     render_command_menu(frame, chunks[2], editor);
     render_footer(frame, chunks[3], state);
+
+    for plugin in plugins {
+        plugin.render_overlay(area, frame.buffer_mut());
+    }
 }
 
 /// 输入区：`ratatui-textarea` 自带边框标题（模式）与行号样式。
@@ -114,8 +129,8 @@ fn render_command_menu(frame: &mut Frame, area: Rect, editor: &Editor) {
     frame.render_widget(menu, rect);
 }
 
-fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let line = Line::from(vec![
+fn render_header(frame: &mut Frame, area: Rect, state: &TuiState, plugins: &[Box<dyn UiPlugin>]) {
+    let mut spans = vec![
         Span::styled(
             state.title().to_string(),
             Style::default().add_modifier(Modifier::BOLD),
@@ -129,13 +144,24 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
                 Color::DarkGray
             }),
         ),
-    ]);
-    frame.render_widget(Paragraph::new(line), area);
+    ];
+    for plugin in plugins {
+        if let Some(segment) = plugin.status_segment() {
+            spans.push(Span::raw("  "));
+            spans.extend(segment.spans);
+        }
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// transcript 区域：按宽度折行后，从底部对齐并应用滚动偏移。
-fn render_transcript(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let lines = transcript_lines(state, area.width as usize);
+fn render_transcript(
+    frame: &mut Frame,
+    area: Rect,
+    state: &TuiState,
+    plugins: &[Box<dyn UiPlugin>],
+) {
+    let lines = transcript_lines_with_plugins(state, area.width as usize, plugins);
     let height = area.height as usize;
     let max_scroll = lines.len().saturating_sub(height);
     // `scroll` 以"距离底部"计，Paragraph 的偏移以"距离顶部"计。
@@ -162,10 +188,29 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
 
 /// 把状态折成按宽度折行后的渲染行。
 pub fn transcript_lines(state: &TuiState, width: usize) -> Vec<Line<'static>> {
+    transcript_lines_with_plugins(state, width, &[])
+}
+
+/// 带 UI 插件的 [`transcript_lines`]：工具结果先问插件，再退回内置渲染。
+pub fn transcript_lines_with_plugins(
+    state: &TuiState,
+    width: usize,
+    plugins: &[Box<dyn UiPlugin>],
+) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     for entry in state.entries() {
         if !lines.is_empty() {
             lines.push(Line::default());
+        }
+        if entry.kind == EntryKind::Tool
+            && let Some(tool) = &entry.tool
+            && let Some(result) = &tool.result
+            && let Some(custom) = plugins
+                .iter()
+                .find_map(|plugin| plugin.render_tool_result(&tool.name, result, width))
+        {
+            lines.extend(custom);
+            continue;
         }
         lines.extend(entry_lines(entry.kind, &entry.text, width));
     }

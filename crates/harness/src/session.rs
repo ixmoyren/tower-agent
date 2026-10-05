@@ -309,7 +309,7 @@ impl tui::CommandHost for Session {
             }
             None => crate::provider::build(kind, None, options),
         }
-            .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())?;
 
         self.agent.set_stream(setup.stream_fn());
         self.agent.set_model(setup.model.clone());
@@ -439,8 +439,9 @@ pub async fn run_tui(
         host,
         title.to_string(),
         notice,
+        Vec::new(),
     )
-        .await;
+    .await;
 
     // 用户退出：取消进行中的一轮，并等驱动任务自然收尾（避免直接 abort 丢掉取消语义）。
     session.abort();
@@ -676,7 +677,7 @@ mod tests {
             tui::render_message(&agent::AgentMessage::Message(ai::Message::ToolResult(
                 result
             )))
-                .contains("Tool nope not found")
+            .contains("Tool nope not found")
         );
     }
 
@@ -789,7 +790,7 @@ mod tests {
             crate::provider::ProviderStackOptions::default(),
             Some("test-key"),
         )
-            .expect("provider setup");
+        .expect("provider setup");
         let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone());
 
         let info = session.session_info().join("\n");
