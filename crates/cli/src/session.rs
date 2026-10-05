@@ -277,6 +277,42 @@ impl tui::CommandHost for Session {
             },
         }
     }
+
+    fn login(&self, arg: Option<&str>) -> Result<String, String> {
+        let Some(arg) = arg else {
+            return Ok(format!(
+                "usage: /login <provider> <api-key>\navailable providers: {}",
+                available_providers()
+            ));
+        };
+        let mut parts = arg.splitn(2, char::is_whitespace);
+        let provider = parts.next().unwrap_or_default().trim();
+        let api_key = parts.next().map(str::trim).filter(|key| !key.is_empty());
+        let kind = crate::provider::ProviderKind::parse(provider).ok_or_else(|| {
+            format!(
+                "unknown provider: {provider} (available: {})",
+                available_providers()
+            )
+        })?;
+
+        // 没带 key 时退回环境变量；两条路都缺凭据就报错。
+        let options = crate::provider::ProviderStackOptions::default();
+        let setup = match api_key {
+            Some(api_key) => {
+                crate::provider::build_with_api_key(kind, None, options, Some(api_key))
+            }
+            None => crate::provider::build(kind, None, options),
+        }
+        .map_err(|error| error.to_string())?;
+
+        self.agent.set_stream(setup.stream_fn());
+        self.agent.set_model(setup.model.clone());
+        Ok(format!(
+            "provider configured: {} (model {})",
+            kind.canonical_name(),
+            setup.model.id
+        ))
+    }
 }
 
 /// 构造一条用户消息。
@@ -368,6 +404,7 @@ pub async fn run_tui(
     session: &Arc<Session>,
     prompt: Option<String>,
     title: &str,
+    notice: Option<String>,
 ) -> std::io::Result<()> {
     let subscription = session.subscribe();
     let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();
@@ -390,7 +427,14 @@ pub async fn run_tui(
         first_error
     });
 
-    let rendered = tui::run_agent_tui(subscription, submissions_tx, host, title.to_string()).await;
+    let rendered = tui::run_agent_tui(
+        subscription,
+        submissions_tx,
+        host,
+        title.to_string(),
+        notice,
+    )
+    .await;
 
     // 用户退出：取消进行中的一轮，并等驱动任务自然收尾（避免直接 abort 丢掉取消语义）。
     session.abort();
@@ -759,6 +803,36 @@ mod tests {
         session.thinking(Some("high")).expect("set thinking");
         assert_eq!(thinking_level_name(session.state().thinking_level), "high");
         assert!(session.thinking(Some("nope")).is_err());
+    }
+
+    #[tokio::test]
+    async fn command_host_login_configures_a_provider() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        // 会话开始时没有 provider（CLI 无 --provider / 无环境凭据时的占位）。
+        let setup = crate::provider::unconfigured_setup();
+        let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone());
+        assert_eq!(session.state().model.provider, "unconfigured");
+
+        // `/login <provider> <api-key>` 在 TUI 里换掉 provider 服务与模型。
+        let message = session
+            .login(Some("anthropic sk-test"))
+            .expect("login configures the provider");
+        assert!(message.contains("anthropic"), "got: {message}");
+        assert_eq!(session.state().model.provider, "anthropic");
+        assert!(
+            session.state().model.id.starts_with("claude"),
+            "got: {}",
+            session.state().model.id
+        );
+
+        // 无参数给用法；未知 provider / 缺 key 明确报错。
+        assert!(
+            session
+                .login(None)
+                .expect("usage")
+                .contains("/login <provider> <api-key>")
+        );
+        assert!(session.login(Some("nope key")).is_err());
     }
 
     #[tokio::test]

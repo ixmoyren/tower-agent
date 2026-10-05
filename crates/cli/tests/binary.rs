@@ -18,7 +18,7 @@ fn stderr(output: &std::process::Output) -> String {
 fn help_and_version_exit_successfully() {
     let output = cli().arg("--help").output().expect("run cli");
     assert!(output.status.success());
-    assert!(stdout(&output).contains("用法"));
+    assert!(stdout(&output).contains("Usage"));
 
     let output = cli().arg("--version").output().expect("run cli");
     assert!(output.status.success());

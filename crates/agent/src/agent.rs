@@ -373,6 +373,11 @@ impl Agent {
         lock(&self.core).model = model;
     }
 
+    /// 替换 provider 流服务（用于运行时配置/切换 provider）。
+    pub fn set_stream(&self, stream_fn: BoxStreamService) {
+        lock(&self.core).stream_fn = stream_fn;
+    }
+
     /// 替换思考级别。
     pub fn set_thinking_level(&self, level: ModelThinkingLevel) {
         lock(&self.core).thinking_level = level;

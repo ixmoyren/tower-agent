@@ -18,11 +18,13 @@
 use std::time::Duration;
 
 use ai::{
-    ANTHROPIC_MESSAGES_API, AnthropicProvider, BoxProviderService, BoxStreamService,
-    GOOGLE_GENERATIVE_AI_API, GoogleProvider, InputModality, Model, Models, OPENAI_COMPLETIONS_API,
-    OPENAI_RESPONSES_API, OpenAiProvider, OpenAiResponsesProvider, ProviderServiceExt,
-    RetryTransport, TimeoutService, http::ReqwestTransport,
+    ANTHROPIC_MESSAGES_API, AnthropicProvider, AssistantEventStream, BoxProviderService,
+    BoxStreamService, GOOGLE_GENERATIVE_AI_API, GoogleProvider, InputModality, Model, Models,
+    OPENAI_COMPLETIONS_API, OPENAI_RESPONSES_API, OpenAiProvider, OpenAiResponsesProvider, PiError,
+    ProviderServiceExt, RetryTransport, StreamRequest, TimeoutService, http::ReqwestTransport,
 };
+use futures_util::future::BoxFuture;
+use tower::Service;
 
 /// CLI 可选的 provider。
 ///
@@ -261,6 +263,52 @@ pub fn default_kind_from_env() -> Option<ProviderKind> {
     ProviderKind::DEFAULT_ORDER
         .into_iter()
         .find(|kind| kind.has_api_key())
+}
+
+/// 尚未配置 provider 时的占位流服务：被调用时返回明确的错误，提示用 `/login` 配置。
+#[derive(Clone, Copy, Default)]
+struct UnconfiguredProvider;
+
+impl Service<StreamRequest> for UnconfiguredProvider {
+    type Response = AssistantEventStream;
+    type Error = PiError;
+    type Future = BoxFuture<'static, Result<AssistantEventStream, PiError>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _request: StreamRequest) -> Self::Future {
+        Box::pin(async {
+            Err(PiError::Unsupported(
+                "no provider configured; use /login <provider> <api-key> to configure one".into(),
+            ))
+        })
+    }
+}
+
+/// 会话还没有 provider 时的占位组装：先进 TUI，再用 `/login` 配置真实 provider。
+#[must_use]
+pub fn unconfigured_setup() -> ProviderSetup {
+    let model = Model {
+        id: "unconfigured".into(),
+        name: "unconfigured".into(),
+        api: "unconfigured".into(),
+        provider: "unconfigured".into(),
+        ..Model::default()
+    };
+    let mut models = Models::new();
+    models.register_models("unconfigured", vec![model.clone()]);
+    let provider: BoxProviderService = UnconfiguredProvider.boxed_provider();
+    models.register_boxed("unconfigured", "unconfigured", provider.clone());
+    ProviderSetup {
+        models,
+        model,
+        provider,
+    }
 }
 
 /// 组装 provider 栈，api key 由调用方注入（便于无环境依赖地测试）。

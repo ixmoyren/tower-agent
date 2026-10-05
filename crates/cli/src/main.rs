@@ -58,21 +58,30 @@ fn main() -> ExitCode {
         .cwd
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let prompt = args.prompt_text().or_else(read_stdin_prompt);
 
     // pi 的行为：stdin/stdout 都是终端时默认进 TUI；`--print` 或任一路被重定向时
     // 走一次性的纯文本模式（那次必须有提示词）。
+    //
+    // 模式判断要在读 stdin 之前完成：TUI 模式下绝不能碰 stdin，否则会在终端上一直
+    // 等 EOF（看起来就是“没有进入 TUI”）。只有 print 模式才从 stdin 取提示词。
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     let print_mode = args.print || !interactive;
+    let prompt = if print_mode {
+        args.prompt_text().or_else(read_stdin_prompt)
+    } else {
+        // TUI 只接受位置参数作为一次性提示词；没有参数就直接进交互界面。
+        args.prompt_text()
+    };
     if print_mode && prompt.is_none() {
         eprintln!("没有提示词。传入提示词，或通过 stdin 提供；运行 `cli --help` 查看用法。");
         return ExitCode::FAILURE;
     }
 
     // `--provider` 优先；没给就按 pi 的默认顺序挑第一个在环境里有凭据的 provider。
-    let kind = match args.provider.as_deref() {
+    // 都没有时：print 模式直接报错；TUI 模式先进界面，用 `/login` 配置。
+    let requested = match args.provider.as_deref() {
         Some(value) => match ProviderKind::parse(value) {
-            Some(kind) => kind,
+            Some(kind) => Some(kind),
             None => {
                 eprintln!("{}", provider::ProviderError::Unknown(value.to_string()));
                 return ExitCode::FAILURE;
@@ -83,34 +92,43 @@ fn main() -> ExitCode {
             eprintln!("`--api-key` 需要配合 `--provider` 使用：本移植版不会替你猜 provider。");
             return ExitCode::FAILURE;
         }
-        None => match provider::default_kind_from_env() {
-            Some(kind) => kind,
-            None => {
-                eprintln!(
-                    "没有可用的 provider：请设置 ANTHROPIC_API_KEY / OPENAI_API_KEY / \
-                     GEMINI_API_KEY，或用 `--provider` + `--api-key` 指定。"
-                );
-                return ExitCode::FAILURE;
-            }
-        },
+        None => provider::default_kind_from_env(),
     };
 
-    // `--api-key` 覆盖环境变量；没给就照常从各家的环境变量取。
-    let setup = match args.api_key.as_deref() {
-        Some(api_key) => provider::build_with_api_key(
-            kind,
-            args.model.as_deref(),
-            ProviderStackOptions::default(),
-            Some(api_key),
-        ),
-        None => provider::build(kind, args.model.as_deref(), ProviderStackOptions::default()),
-    };
-    let setup = match setup {
-        Ok(setup) => setup,
-        Err(error) => {
-            eprintln!("provider 配置失败：{error}");
+    let setup = match requested {
+        Some(kind) => {
+            // `--api-key` 覆盖环境变量；没给就照常从各家的环境变量取。
+            let result = match args.api_key.as_deref() {
+                Some(api_key) => provider::build_with_api_key(
+                    kind,
+                    args.model.as_deref(),
+                    ProviderStackOptions::default(),
+                    Some(api_key),
+                ),
+                None => {
+                    provider::build(kind, args.model.as_deref(), ProviderStackOptions::default())
+                }
+            };
+            match result {
+                Ok(setup) => setup,
+                // TUI 里缺凭据可以用 `/login` 补，先进界面而不是直接退出。
+                Err(provider::ProviderError::MissingApiKey { .. }) if !print_mode => {
+                    provider::unconfigured_setup()
+                }
+                Err(error) => {
+                    eprintln!("provider 配置失败：{error}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        None if print_mode => {
+            eprintln!(
+                "没有可用的 provider：请设置 ANTHROPIC_API_KEY / OPENAI_API_KEY / \
+                 GEMINI_API_KEY，或用 `--provider` + `--api-key` 指定。"
+            );
             return ExitCode::FAILURE;
         }
+        None => provider::unconfigured_setup(),
     };
 
     let session = std::sync::Arc::new(Session::with_model(
@@ -118,6 +136,10 @@ fn main() -> ExitCode {
         setup.stream_fn(),
         setup.model.clone(),
     ));
+    // 还没有 provider 时在 TUI 里先给一句提示，告诉用户用 `/login` 配置。
+    let tui_notice = (setup.model.provider == "unconfigured").then(|| {
+        "No provider configured. Use /login <provider> <api-key> to set one up.".to_string()
+    });
 
     if let Some(value) = &args.thinking {
         match session::parse_thinking_level(value) {
@@ -137,7 +159,7 @@ fn main() -> ExitCode {
             None => return ExitCode::FAILURE,
         }
     } else {
-        run_tui_blocking(&session, prompt)
+        run_tui_blocking(&session, prompt, tui_notice)
     };
 
     match outcome {
@@ -221,9 +243,10 @@ fn run_print_blocking(session: &Session, prompt: String) -> std::io::Result<()> 
 fn run_tui_blocking(
     session: &std::sync::Arc<Session>,
     prompt: Option<String>,
+    notice: Option<String>,
 ) -> std::io::Result<()> {
     let runtime = single_thread_runtime()?;
-    runtime.block_on(run_tui(session, prompt, "tower-pi-agent"))
+    runtime.block_on(run_tui(session, prompt, "tower-pi-agent", notice))
 }
 
 fn single_thread_runtime() -> std::io::Result<tokio::runtime::Runtime> {
@@ -257,7 +280,7 @@ mod tests {
                 })),
             },
         )
-            .expect("write succeeds");
+        .expect("write succeeds");
         assert_eq!(String::from_utf8(out).expect("utf-8"), "[user] 你好\n");
     }
 }

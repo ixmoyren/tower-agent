@@ -13,50 +13,73 @@ use clap::{Parser, builder::NonEmptyStringValueParser};
 #[command(
     name = "cli",
     version,
-    about = "tower-pi-agent：pi（TypeScript agent 框架）的 Rust 移植版 CLI",
+    about = "tower-pi-agent: a Rust port of the pi (TypeScript agent framework) CLI",
     disable_help_flag = true,
     disable_version_flag = true,
-    help_template = "{about-with-newline}\n用法: {usage}\n\n参数:\n{positionals}\n\n选项:\n{options}"
+    help_template = "{about-with-newline}\nUsage: {usage}\n\nArguments:\n{positionals}\n\nOptions:\n{options}"
 )]
 pub struct CliArgs {
     /// 一次性提示词；缺省时从 stdin 读取全部内容。
-    #[arg(value_name = "提示词")]
+    #[arg(
+        value_name = "prompt",
+        help = "One-shot prompt; reads all of stdin when omitted."
+    )]
     pub prompt: Vec<String>,
 
     /// 工具的工作目录（`-C` / `--cwd`）。
-    #[arg(short = 'C', long = "cwd", value_name = "目录")]
+    #[arg(
+        short = 'C',
+        long = "cwd",
+        value_name = "dir",
+        help = "Working directory for the tools."
+    )]
     pub cwd: Option<PathBuf>,
 
     /// 非交互模式：处理完提示词后退出（对应 pi `-p` / `--print`）。
-    #[arg(short = 'p', long = "print")]
+    #[arg(
+        short = 'p',
+        long = "print",
+        help = "Non-interactive: process the prompt, then exit."
+    )]
     pub print: bool,
 
     /// 只列出内置工具后退出。
-    #[arg(long = "list-tools")]
+    #[arg(long = "list-tools", help = "List the built-in tools, then exit.")]
     pub list_tools: bool,
 
     /// 选择 provider：anthropic / openai / openai-responses / google（缺省时按环境里的凭据挑）。
     #[arg(
         long,
         value_name = "provider",
-        value_parser = NonEmptyStringValueParser::new()
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Provider to use: anthropic / openai / openai-responses / google \
+                (defaults to the first one with credentials in the environment)."
     )]
     pub provider: Option<String>,
 
     /// 一次性 API key（覆盖环境变量；对应 pi `--api-key`）。
-    #[arg(long = "api-key", value_name = "key")]
+    #[arg(
+        long = "api-key",
+        value_name = "key",
+        help = "One-off API key (overrides the environment variable)."
+    )]
     pub api_key: Option<String>,
 
     /// 模型 id（默认取 provider 的默认模型）。
     #[arg(
         long,
         value_name = "id",
-        value_parser = NonEmptyStringValueParser::new()
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Model id (defaults to the provider's default model)."
     )]
     pub model: Option<String>,
 
     /// 思考级别：off / minimal / low / medium / high / xhigh / max（对应 pi `--thinking`）。
-    #[arg(long, value_name = "level")]
+    #[arg(
+        long,
+        value_name = "level",
+        help = "Thinking level: off / minimal / low / medium / high / xhigh / max."
+    )]
     pub thinking: Option<String>,
 
     /// 只启用列出的内置工具，逗号分隔（对应 pi `-t` / `--tools`）。
@@ -65,7 +88,8 @@ pub struct CliArgs {
         long = "tools",
         value_name = "tools",
         value_delimiter = ',',
-        value_parser = trim_value
+        value_parser = trim_value,
+        help = "Only enable the listed built-in tools (comma-separated)."
     )]
     pub tools: Vec<String>,
 
@@ -74,24 +98,38 @@ pub struct CliArgs {
         long = "exclude-tools",
         value_name = "tools",
         value_delimiter = ',',
-        value_parser = trim_value
+        value_parser = trim_value,
+        help = "Exclude the listed built-in tools (comma-separated)."
     )]
     pub exclude_tools: Vec<String>,
 
     /// 禁用全部内置工具（对应 pi `-nt` / `--no-tools`）。
-    #[arg(long = "no-tools")]
+    #[arg(long = "no-tools", help = "Disable all built-in tools.")]
     pub no_tools: bool,
 
     /// 禁用内置工具（本移植版没有扩展工具，等同 `--no-tools`；对应 pi `-nbt`）。
-    #[arg(long = "no-builtin-tools")]
+    #[arg(
+        long = "no-builtin-tools",
+        help = "Disable built-in tools (this port has no extension tools, so it equals --no-tools)."
+    )]
     pub no_builtin_tools: bool,
 
     /// 打印帮助后退出。
-    #[arg(short = 'h', long = "help", action = clap::ArgAction::Help)]
+    #[arg(
+        short = 'h',
+        long = "help",
+        action = clap::ArgAction::Help,
+        help = "Print help and exit."
+    )]
     pub help: Option<bool>,
 
     /// 打印版本后退出。
-    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    #[arg(
+        short = 'v',
+        long = "version",
+        action = clap::ArgAction::Version,
+        help = "Print version and exit."
+    )]
     pub version: Option<bool>,
 }
 
@@ -225,7 +263,7 @@ mod tests {
         let help = parse(["--help"]).expect_err("--help 由 clap 处理");
         assert_eq!(help.kind(), ErrorKind::DisplayHelp);
         assert!(!help.use_stderr());
-        assert!(help.to_string().contains("用法"), "got: {help}");
+        assert!(help.to_string().contains("Usage"), "got: {help}");
 
         // pi 的版本短选项是 `-v`（clap 默认的 `-V` 已关闭）。
         let version = parse(["-v"]).expect_err("-v 由 clap 处理");

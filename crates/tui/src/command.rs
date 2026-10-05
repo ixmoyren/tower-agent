@@ -103,8 +103,8 @@ pub const BUILTIN_SLASH_COMMANDS: &[SlashCommand] = &[
     cmd(
         "login",
         "Configure provider authentication",
-        Some("<provider>"),
-        false,
+        Some("<provider> <api-key>"),
+        true,
     ),
     cmd("logout", "Remove provider authentication", None, false),
     cmd("new", "Start a new session", None, true),
@@ -189,6 +189,9 @@ pub trait CommandHost: Send + Sync {
 
     /// `/thinking [level]`：无参数时返回当前思考级别，有参数时设置。
     fn thinking(&self, arg: Option<&str>) -> Result<String, String>;
+
+    /// `/login [provider] [api-key]`：配置 provider 认证；无参数时返回用法。
+    fn login(&self, arg: Option<&str>) -> Result<String, String>;
 }
 
 #[cfg(test)]
@@ -242,7 +245,9 @@ mod tests {
             .collect();
         assert_eq!(
             ported,
-            vec!["model", "thinking", "session", "hotkeys", "new", "quit"]
+            vec![
+                "model", "thinking", "session", "hotkeys", "login", "new", "quit"
+            ]
         );
     }
 

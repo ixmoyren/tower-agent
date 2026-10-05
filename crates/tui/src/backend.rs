@@ -177,6 +177,7 @@ pub async fn run_agent_tui(
     submissions: mpsc::UnboundedSender<String>,
     host: Arc<dyn CommandHost>,
     title: impl Into<String>,
+    notice: Option<String>,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::unbounded_channel();
     let pump = tokio::spawn(async move {
@@ -186,7 +187,7 @@ pub async fn run_agent_tui(
             }
         }
     });
-    let result = run_tui(rx, submissions, host, title).await;
+    let result = run_tui(rx, submissions, host, title, notice).await;
     pump.abort();
     result
 }
@@ -197,9 +198,14 @@ pub async fn run_tui(
     submissions: mpsc::UnboundedSender<String>,
     host: Arc<dyn CommandHost>,
     title: impl Into<String>,
+    notice: Option<String>,
 ) -> io::Result<()> {
     let (terminal, reader) = init_terminal()?;
-    let mut tui = Tui::new(terminal, TuiState::new(title));
+    let mut state = TuiState::new(title);
+    if let Some(notice) = notice {
+        state.push_notice(notice);
+    }
+    let mut tui = Tui::new(terminal, state);
     let mut input = spawn_input_reader(reader);
 
     let result = run_loop(
@@ -209,7 +215,7 @@ pub async fn run_tui(
         &submissions,
         host.as_ref(),
     )
-        .await;
+    .await;
 
     let mut terminal = tui.into_terminal();
     let restored = restore_terminal(&mut terminal);
@@ -313,6 +319,7 @@ fn evaluate_command(host: &dyn CommandHost, input: &str) -> CommandOutcome {
         "session" => CommandOutcome::Notice(host.session_info().join("\n")),
         "model" => notice(host.model(arg)),
         "thinking" => notice(host.thinking(arg)),
+        "login" => notice(host.login(arg)),
         "hotkeys" => CommandOutcome::Notice(command::hotkeys().join("\n")),
         _ => CommandOutcome::Notice(format!(
             "/{name} is not ported to tower-pi-agent yet (pi description: {}).",
@@ -398,6 +405,13 @@ mod tests {
             Ok(match arg {
                 Some(arg) => format!("thinking level set to: {arg}"),
                 None => "current thinking level: off".into(),
+            })
+        }
+
+        fn login(&self, arg: Option<&str>) -> Result<String, String> {
+            Ok(match arg {
+                Some(provider) => format!("provider configured: {provider}"),
+                None => "usage: /login <provider> <api-key>".into(),
             })
         }
     }
