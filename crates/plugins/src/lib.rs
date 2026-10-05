@@ -8,20 +8,33 @@
 //! - [`StaticPlugin`] 是 M1 唯一有载荷的形态：编译进宿主，`install` 时把工具登记到
 //!   [`PluginContext`]；
 //! - [`default_registry`] / [`resolve_default`] / [`default_tools`]：内置工具插件集合，
-//!   每个内置工具（`tools` crate 里的 tower `Layer`）都是独立插件，`cli` 不再自己构造。
+//!   每个内置工具（`tools` crate 里的 tower `Layer`）都是独立插件，`harness` 不再自己构造；
+//! - [`Lifecycle`] / [`PluginState`]：生命周期状态机与 in-flight 记账（第 7 节）；
+//! - [`HostApi`] / [`PluginAccess`] / [`PermissionPolicy`]：宿主中介调用与运行时权限（第 8、12 节）。
 
 mod builtin;
+#[cfg(feature = "dynamic")]
+#[allow(unsafe_code)] // `libloading` 加载外部代码本质上需要 unsafe。
+pub mod dynamic;
 mod error;
+mod host;
+mod lifecycle;
 mod model;
+mod permission;
 mod registry;
 mod static_plugin;
 
 pub use builtin::{DEFAULT_TOOL_NAMES, default_registry, default_tools, resolve_default};
+#[cfg(feature = "dynamic")]
+pub use dynamic::{AbiCapability, AbiManifest, AbiVersion, LoadedPlugin, PluginVTable};
 pub use error::PluginError;
+pub use host::{HostApi, PluginAccess};
+pub use lifecycle::{InflightGuard, Lifecycle, PluginState};
 pub use model::{
     CapabilityId, CapabilityOverride, Dependency, Permission, PluginId, PluginKind, PluginManifest,
     ProvidedCapability,
 };
+pub use permission::{PermissionDecision, PermissionPolicy, PermissionPrompter};
 pub use registry::{Binding, PluginRegistry, Resolution, ResolvedPlugin, ShadowedPlugin};
 pub use static_plugin::{PluginContext, StaticPlugin};
 

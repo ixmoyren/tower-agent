@@ -10,6 +10,20 @@ workspace = true
 
 [dependencies]
 agent = { path = "../agent" }
+libloading = { version = "0.8", optional = true }
 semver = { workspace = true }
+stabby = { version = "72.1.16", optional = true }
+roto = { git = "https://codeberg.org/NLnetLabs/roto.git", optional = true }
 tools = { path = "../tools" }
 tower.workspace = true
+
+[features]
+default = ["static"]
+static = []
+# 动态插件（stabby cdylib + libloading）与 JIT 插件（Roto + cranelift）的开关。
+dynamic = ["dep:stabby", "dep:libloading"]
+jit = ["dep:roto"]
+
+[dev-dependencies]
+ai = { path = "../ai" }
+tokio = { workspace = true }

@@ -1,6 +1,7 @@
 # 插件 / 扩展体系（子设计）
 
-> 状态：设计稿 v0.2（关键决策已确认，尚未实现）。
+> 状态：v0.4（M1（静态插件）与 M2（stabby 动态插件）已实现；第 5–13 节的宿主侧已落地，见下方实现状态）。
+> M3（Roto JIT）尚未实现——`plugins` 的 `jit` feature 与 `plugins-jit` 待补。
 > 关联：[`design.md`](./design.md)（总体设计、第 4.3 节 provider 分层、第 4.i~4.iv 移植路线）。
 > 本文只描述插件体系本身的结构与规则，不改变 `agents` / `ai` / `tools` / `tui` / `harness` 的既有契约。
 
@@ -73,6 +74,8 @@
 - 宿主通过 `libloading` 加载，做 **ABI 版本 + 插件版本** 双重校验，再调用 `init` 拿到能力表。
 - 卸载安全：宿主以 `Arc<LoadedPlugin>` 持有模块，调用带引用计数； **存在 in-flight 调用时拒绝卸载**（`stop` 后等待归零）。
 - 大插件落在这里：`sandbox`（进程/权限隔离）、`memory`、`persist`（会话/向量/文件持久化）、`codemode`。
+
+> 实现状态（M2 已落地）：`plugins` 的 `dynamic` feature（=`dep:stabby` + `dep:libloading`）提供 `LoadedPlugin::load` / `call` / `stop` / `unload`，`#[repr(C)]` 的 `PluginVTable`（`manifest` / `init` / `call` / `shutdown`）与 stabby 的 ABI 稳定清单（`AbiManifest` / `AbiCapability` / `AbiVersion`）做 SDK ABI major 校验；`plugins-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。示例插件在 `examples/plugin-example`（独立 workspace 的 cdylib）。
 
 ### 4.3 JIT 插件（Roto + cranelift）
 
@@ -209,6 +212,8 @@ Discover ─▶ Load ─▶ Validate(manifest/ABI/权限) ─▶ Resolve(图/版
 - **调用在发起时绑定版本**：in-flight 调用继续在旧版本上完成，`Reload` 之后发起的新调用使用新版本；一次调用不会跨版本。
 - 任何阶段失败都回滚到上一个稳定状态，并保持其余插件不受影响（隔离失败）。
 
+> 实现状态：`plugins::Lifecycle` / `PluginState` / `InflightGuard` 已落地（合法迁移、`Started ↔ Stopped` 供 JIT 重载、`Unload` 前要求 `Stopped` 且 in-flight 归零，否则 `UnloadBusy`）。动态/JIT 的实际 `dlopen` / 编译换绑随加载器落地。
+
 ## 8. 宿主 API / SDK
 
 ### 8.1 宿主对外（插件可用能力）
@@ -216,6 +221,8 @@ Discover ─▶ Load ─▶ Validate(manifest/ABI/权限) ─▶ Resolve(图/版
 - **固有能力**（不可卸载）：`model.*`（模型补全流）、`fs.*`、`process.*`、`log`、`config`、`events`。
 - **可插拔能力**：`tool.*`、`sandbox.*`、`memory.*`、`persist.*`、`code.*`。
 - 插件只能调用其清单 `requires` 声明过的能力，且受 `permissions` 约束（第 12 节）。
+
+> 实现状态：`plugins::HostApi` / `PluginAccess` 已落地——宿主按能力名中介调用 `tool.<name>`，`access_for(manifest)` 按 `requires` 收窄视图，未声明的调用直接 `PermissionDenied`。
 
 ### 8.2 SDK
 
@@ -234,6 +241,8 @@ stabby::export! {
 ```
 
 - **跨形态调用不直连**：无论动态还是 JIT，都通过 `HostApi` 调 `host.call(capability, args)`；宿主完成实现查找、 **调用发起时的版本绑定**与 in-flight 记账。这既统一了两者的互调，也让卸载/热更可以安全等待。
+
+> 实现状态：`plugins-sdk` crate 已落地，提供 `DeclaredPlugin` / `declare_plugin!`（静态插件路径）、`HostApi` / `ToolRegistration` 再导出与共享类型。stabby 的 `__tpa_plugin_entry` 动态入口随 `plugins` 的 `dynamic` feature 落地。
 
 ## 9. 内置工具迁移到静态插件
 
@@ -279,6 +288,8 @@ jit = ["dep:roto", "dep:cranelift"]
 - 沙箱作为 **动态插件**提供 `sandbox.exec`，把不可信执行隔到子进程/受限运行时。
 - 热更/卸载的边界：只允许在引用计数归零后释放；JIT 换绑是原子操作。
 
+> 实现状态：`plugins::PermissionPolicy` / `PermissionPrompter` / `PermissionDecision` 已落地——`AllowOnce` 不缓存、`AllowSession` 按会话缓存、`Deny` 拒绝，无人值守（`--print`）默认拒绝；TUI 提示的 UI 形态待接。
+
 ## 13. 错误处理
 
 ```rust
@@ -297,23 +308,31 @@ pub enum PluginError {
 
 解析失败必须给出 **可操作**的信息（缺哪个能力、哪条环、哪些版本互斥）。
 
+> 实现状态：Rust 侧 `PluginError` 已含 `Load` / `UnloadBusy` / `PermissionDenied`，外加 `Manifest` / `KindViolation` / `MissingCapability` / `VersionConflict` / `Cycle` / `AbiMismatch` / `OverrideTargetMissing` / `Install`。
+
 ## 14. 测试策略
 
 - **单元**：插件级覆盖优先级、 **能力级覆盖**、shadow 记录、环检测、同 major 收敛、跨 major 并存、静态单实例、静态→动态拒绝。
 - **静态插件**：每个内置工具都是一个独立静态插件，经注册表解析后工具集合与迁移前等价。
 - **权限**：首次调用触发运行时提示、决定按会话缓存、无人值守模式拒绝。
-- **动态**：`dynamic` feature 下编译一个测试 `cdylib`，验证加载、调用、`UnloadBusy`、卸载。
+- **动态**：`dynamic` feature 下编译示例 `cdylib`（`examples/plugin-example`），验证加载、调用、`UnloadBusy`、卸载。端到端用例读 `TPA_PLUGIN_EXAMPLE` 指向产物；未设置时跳过（避免与 `cargo test` 抢 target 锁）：
+
+  ```text
+  cargo build --manifest-path examples/plugin-example/Cargo.toml
+  TPA_PLUGIN_EXAMPLE=<target>/debug/libtpa_plugin_example.so \
+    cargo test -p plugins --features dynamic --test dynamic
+  ```
 - **JIT**：`jit` feature 下编译脚本、调用宿主能力、热更失败回滚。
 - **失败注入**：加载失败不污染既有插件；in-flight 时卸载被拒。
 
 ## 15. 里程碑
 
-| 里程碑 | 内容                                                                                                                        |
-|--------|-----------------------------------------------------------------------------------------------------------------------------|
-| M1     | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移 |
-| M2     | `plugins-sdk` + 动态加载器（stabby）：加载/调用/卸载 + 示例插件                                                             |
-| M3     | `plugins-jit`（Roto + cranelift）：编译、宿主能力调用、热加载与回滚                                                         |
-| M4     | 大型动态插件：沙箱 / 记忆 / 持久化 / codemode；cc `mods` 模式接入                                                           |
+| 里程碑 | 内容                                                                                                                                                                 |
+|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| M1 ✅  | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移；生命周期 / 宿主 API / 权限 / 错误已落地 |
+| M2 ✅  | `plugins-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `examples/plugin-example` 示例 cdylib + 端到端测试                         |
+| M3     | `plugins-jit`（Roto + cranelift）：编译、宿主能力调用、热加载与回滚                                                                                                  |
+| M4     | 大型动态插件：沙箱 / 记忆 / 持久化 / codemode；cc `mods` 模式接入                                                                                                    |
 
 ## 16. 已确认决策
 

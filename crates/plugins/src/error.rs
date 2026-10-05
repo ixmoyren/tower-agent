@@ -68,6 +68,25 @@ pub enum PluginError {
         /// 具体问题。
         message: String,
     },
+    /// 动态插件的加载/入口/初始化失败（符号缺失、ABI 不符等）。
+    Load {
+        /// 插件。
+        plugin: String,
+        /// 具体问题。
+        message: String,
+    },
+    /// 卸载时仍有 in-flight 调用（引用计数不为零）。
+    UnloadBusy {
+        /// 插件。
+        plugin: String,
+        /// 当前 in-flight 调用数。
+        inflight: usize,
+    },
+    /// 能力调用被权限策略拒绝。
+    PermissionDenied {
+        /// 被拒绝的能力。
+        capability: CapabilityId,
+    },
 }
 
 impl fmt::Display for PluginError {
@@ -125,6 +144,16 @@ impl fmt::Display for PluginError {
             ),
             Self::Install { plugin, message } => {
                 write!(f, "plugin `{plugin}` failed to install: {message}")
+            }
+            Self::Load { plugin, message } => {
+                write!(f, "plugin `{plugin}` failed to load: {message}")
+            }
+            Self::UnloadBusy { plugin, inflight } => write!(
+                f,
+                "plugin `{plugin}` cannot be unloaded: {inflight} in-flight call(s) remain"
+            ),
+            Self::PermissionDenied { capability } => {
+                write!(f, "permission denied for capability `{capability}`")
             }
         }
     }

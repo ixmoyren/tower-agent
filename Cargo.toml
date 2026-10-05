@@ -33,7 +33,7 @@ serde_json = "1"
 thiserror = "2"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]

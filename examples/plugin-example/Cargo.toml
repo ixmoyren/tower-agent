@@ -1,0 +1,15 @@
+[package]
+name = "tpa-plugin-example"
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+plugins-sdk = { path = "../../crates/plugins-sdk", features = ["dynamic"] }
+stabby = "72.1.16"
+
+# 独立于主 workspace 的示例插件：只在需要时单独构建。
+[workspace]
