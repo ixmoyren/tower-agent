@@ -11,6 +11,8 @@
 
 行为对齐仍然以 pi 参考实现为准，工作流见 skill `rust-pi-agent-rewrite`；本文只规定结构，不改变行为。
 
+> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、Roto JIT 插件）。
+
 ---
 
 ## 1. 目标与非目标
