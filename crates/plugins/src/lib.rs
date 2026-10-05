@@ -29,6 +29,10 @@ pub use builtin::{DEFAULT_TOOL_NAMES, default_registry, default_tools, resolve_d
 pub use dynamic::{AbiCapability, AbiManifest, AbiVersion, LoadedPlugin, PluginVTable};
 pub use error::PluginError;
 pub use host::{HostApi, PluginAccess};
+#[cfg(feature = "jit")]
+pub mod jit;
+#[cfg(feature = "jit")]
+pub use jit::{JitHost, JitPlugin};
 pub use lifecycle::{InflightGuard, Lifecycle, PluginState};
 pub use model::{
     CapabilityId, CapabilityOverride, Dependency, Permission, PluginId, PluginKind, PluginManifest,

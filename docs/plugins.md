@@ -1,7 +1,6 @@
 # 插件 / 扩展体系（子设计）
 
-> 状态：v0.4（M1（静态插件）与 M2（stabby 动态插件）已实现；第 5–13 节的宿主侧已落地，见下方实现状态）。
-> M3（Roto JIT）尚未实现——`plugins` 的 `jit` feature 与 `plugins-jit` 待补。
+> 状态：v0.5（M1 静态插件、M2 stabby 动态插件、M3 Roto JIT 已实现；第 5–13 节的宿主侧已落地，见下方实现状态）。
 > 关联：[`design.md`](./design.md)（总体设计、第 4.3 节 provider 分层、第 4.i~4.iv 移植路线）。
 > 本文只描述插件体系本身的结构与规则，不改变 `agents` / `ai` / `tools` / `tui` / `harness` 的既有契约。
 
@@ -82,6 +81,8 @@
 - 用 Roto 语言编写脚本，宿主用 Roto + cranelift 编译成模块；宿主函数（import）即能力调用。
 - 文件监听 + 原子换绑实现 **热加载**：编译新版本 → 校验 → 原子替换槽位 → 旧版本等待 in-flight 完成后释放；失败保留旧版本并回报错误。
 - 目标场景：cc 的 `mods` 模式（用户/LLM 可写、可热更的轻量逻辑）。
+
+> 实现状态（M3 已落地）：`plugins` 的 `jit` feature 提供 `JitPlugin::load` / `call` / `reload` / `reload_source` / `stop` / `unload`。宿主用 `roto::Runtime` 编译 `.roto` 脚本（入口 `fn main(input: String) -> String`），脚本通过 `host_call(capability, arg)` 回调 `JitHost` 做宿主能力调用；热加载重新编译后 **原子替换**当前模块（`RwLock<Arc<Compiled>>`），编译失败保留旧模块并回报错误；in-flight 调用持有旧模块 `Arc`，换绑后新调用用新模块。测试覆盖编译/调用、源码与文件热加载、失败回滚。
 
 ## 5. 插件模型
 
@@ -261,11 +262,12 @@ stabby::export! {
 crates/
   plugins/        宿主核心：模型、注册表、解析（图/版本/覆盖）、生命周期、静态插件
                   内置工具静态插件（每个工具一个插件，装配 tools 里的 tower Layer）
+                  动态插件加载器（feature = dynamic）、JIT 宿主集成（feature = jit）
   plugins-sdk/    插件作者 SDK：stabby 封装、宏、HostApi（dynamic/jit 共用）
-  plugins-jit/    Roto + cranelift 宿主集成（feature = jit）
 ```
 
-- 依赖方向：`plugins-jit → plugins`、`plugins-sdk → plugins`（仅共享类型）；`plugins → tools`（宿主装配内置工具插件），`tools` 是工具实现所在 crate。
+- 依赖方向：`plugins-sdk → plugins`（仅共享类型）；`plugins → tools`（宿主装配内置工具插件），`tools` 是工具实现所在 crate。
+- JIT 宿主集成（Roto + cranelift）直接放在 `plugins` 的 `jit` feature 下，不再单独成 crate。
 - `agent` / `ai` / `tools` 不反向依赖 `plugins`；`plugins` 依赖它们以包装 `AgentTool`、`BoxStreamService` 等。
 
 ## 11. Feature / 构建
@@ -275,7 +277,7 @@ crates/
 default = ["static"]
 static = []
 dynamic = ["dep:stabby", "dep:libloading"]
-jit = ["dep:roto", "dep:cranelift"]
+jit = ["dep:roto"]   # cranelift 由 roto 传递引入
 ```
 
 - 默认只带静态插件，保证无额外平台/依赖负担。
@@ -322,7 +324,7 @@ pub enum PluginError {
   TPA_PLUGIN_EXAMPLE=<target>/debug/libtpa_plugin_example.so \
     cargo test -p plugins --features dynamic --test dynamic
   ```
-- **JIT**：`jit` feature 下编译脚本、调用宿主能力、热更失败回滚。
+- **JIT**：`jit` feature 下编译脚本、调用宿主能力（`host_call`）、源码/文件热加载、热更失败回滚。
 - **失败注入**：加载失败不污染既有插件；in-flight 时卸载被拒。
 
 ## 15. 里程碑
@@ -331,7 +333,7 @@ pub enum PluginError {
 |--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | M1 ✅  | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移；生命周期 / 宿主 API / 权限 / 错误已落地 |
 | M2 ✅  | `plugins-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `examples/plugin-example` 示例 cdylib + 端到端测试                         |
-| M3     | `plugins-jit`（Roto + cranelift）：编译、宿主能力调用、热加载与回滚                                                                                                  |
+| M3 ✅  | `plugins` 的 `jit` feature（Roto + cranelift）：编译、`host_call` 宿主能力调用、原子换绑热加载与失败回滚                                                             |
 | M4     | 大型动态插件：沙箱 / 记忆 / 持久化 / codemode；cc `mods` 模式接入                                                                                                    |
 
 ## 16. 已确认决策
