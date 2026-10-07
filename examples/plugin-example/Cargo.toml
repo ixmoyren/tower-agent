@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-plugins-sdk = { path = "../../crates/plugins-sdk", features = ["dynamic"] }
+tower-agent-plugin-sdk = { path = "../../crates/tower-agent-plugin-sdk", features = ["dynamic"] }
 stabby = "72.1.16"
 
 # 独立于主 workspace 的示例插件：只在需要时单独构建。

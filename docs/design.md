@@ -1,17 +1,17 @@
-# tower-pi-agent 整体设计
+# tower-agent 整体设计
 
 | 项目     | 值                                                                                                                                                                                                  |
 |----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 状态     | 草案 v1.5（开放问题已确认；第 9 节第 2、3 步与第 4 步的四个阶段、`protocol` crate、以及 provider 层（Anthropic / OpenAI 兼容 / OpenAI Responses / Google + Models 路由与目录刷新 + 观测层）已落地） |
 | 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03）                                                                                                                                 |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）                                                                                                                                            |
-| 目标仓库 | `tower-pi-agent`（Rust，edition 2024，nightly）                                                                                                                                                     |
+| 目标仓库 | `tower-agent`（Rust，edition 2024，nightly）                                                                                                                                                        |
 
 本文档回答一个问题： **把 pi 移植成 Rust 时，tower 的 `Service` / `Layer` 模型应该承担哪些职责，pi 的每个概念落在哪里。**
 
 行为对齐仍然以 pi 参考实现为准，工作流见 skill `rust-pi-agent-rewrite`；本文只规定结构，不改变行为。
 
-> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、Roto JIT 插件）。
+> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、monty 热重载插件）。
 
 ---
 
@@ -190,20 +190,20 @@ protocol/   // 帧、CBOR 编解码、RPC envelope（对应 pi packages/protocol
 ai/         // provider Service、Models 路由、认证/重试/超时 Layer；统一错误/PiError/BoxError/公共 Request/Response（对应 pi packages/ai）
 agent/      // Agent 编排、工具 Service、事件流（对应 pi packages/agent）
 tui/        // 终端 UI（对应 pi packages/tui，不使用 tower）
-harness/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对应 coding-agent）
+tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对应 coding-agent）
 ```
 
-阶段 1 落成 `protocol` / `ai` / `agent` / `tui` / `harness` 五个 crate，拆分依据是上面的模块边界而不是文件数量；公共 `PiError` / `BoxError` / Request/Response 类型放在 `ai`，避免额外引入第 6 个 crate。后续如需可再细分，但不改变该依赖提取策略。 **`harness` 是唯一的可执行入口**（`crates/harness/src/main.rs`），其余四个 crate 都是纯库。
+阶段 1 落成 `protocol` / `ai` / `agent` / `tui` / `tower-agent-cli` 五个 crate，拆分依据是上面的模块边界而不是文件数量；公共 `PiError` / `BoxError` / Request/Response 类型放在 `ai`，避免额外引入第 6 个 crate。后续如需可再细分，但不改变该依赖提取策略。 **`tower-agent-cli` 是唯一的可执行入口**（`crates/tower-agent-cli/src/main.rs`），其余四个 crate 都是纯库。
 
-当前进度：workspace 骨架已建立，`ai`（第一个移植单元 + 真实 provider）、`agent`（第 4.i 步）、`harness`（第 4.ii 步内置工具 + 第 4.iv 步会话入口）、`tui`（第 4.iii 步终端 UI）与 `protocol`（帧 / CBOR / RPC 信封）五个 crate 全部落地。
+当前进度：workspace 骨架已建立，`ai`（第一个移植单元 + 真实 provider）、`agent`（第 4.i 步）、`tower-agent-cli`（第 4.ii 步内置工具 + 第 4.iv 步会话入口）、`tui`（第 4.iii 步终端 UI）与 `protocol`（帧 / CBOR / RPC 信封）五个 crate 全部落地。
 
 本轮把 tower 面扩展为：
 
-- `agent::Agent` 实现 `Service<AgentRequest, Response = AgentResponse>`，并提供 `BoxAgentService` / `AgentServiceExt`，可与 axum 等 tower 生态组合（定位类似 `tower-mcp`）。
-- `agent::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`（pi 的 `tool_call` / `tool_result` 钩子即 tower `Layer`）；工具服务可与 `tower::timeout` / `tower::limit` 等生态 layer 混用（会把错误擦成 `BoxError` 的 layer 用 `map_err(AgentError::other)` 转回）。
-- `agent::ToolRegistration` 提供 schemars + serde 的 typed tool 注册：参数 schema 自动生成，入参自动反序列化，校验失败编码成 `is_error` 工具结果。
-- `tui::UiPlugin` 是 UI 扩展点（状态栏片段 / overlay / 工具结果定制渲染），后端仍固定用 termina（不引入 crossterm）。
-- harness 侧：`cli` crate 重命名为 `harness`，其余 crate 名称与职责不变。
+- `tower_agent_runtime::Agent` 实现 `Service<AgentRequest, Response = AgentResponse>`，并提供 `BoxAgentService` / `AgentServiceExt`，可与 axum 等 tower 生态组合（定位类似 `tower-mcp`）。
+- `tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`（pi 的 `tool_call` / `tool_result` 钩子即 tower `Layer`）；工具服务可与 `tower::timeout` / `tower::limit` 等生态 layer 混用（会把错误擦成 `BoxError` 的 layer 用 `map_err(AgentError::other)` 转回）。
+- `tower_agent_runtime::ToolRegistration` 提供 schemars + serde 的 typed tool 注册：参数 schema 自动生成，入参自动反序列化，校验失败编码成 `is_error` 工具结果。
+- `tower_agent_tui::UiPlugin` 是 UI 扩展点（状态栏片段 / overlay / 工具结果定制渲染），后端仍固定用 termina（不引入 crossterm）。
+- tower-agent-cli 侧：`cli` crate 重命名为 `tower-agent-cli`，其余 crate 名称与职责不变。
 
 `ai` 已落地的 provider 层：
 
@@ -215,12 +215,12 @@ harness/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（
 - `provider::openai_responses`：OpenAI Responses provider —— 与 chat completions 又是另一套协议：请求体是类型化 `input` item 列表（`function_call` / `function_call_output` 与消息平级、`store: false`、`max_output_tokens` 下限 16），流是 **事件类型化**的 SSE（`response.output_text.delta`、`response.reasoning_summary_text.delta`、`response.function_call_arguments.delta|done`、`response.output_item.done`、`response.completed|incomplete|failed`），需要按 `output_index` 把 deltas 归并到对应输出项，并用终态 item 修正文本/参数。
 - `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）、`RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条）、`ObserveTransport`（`onPayload` 可观测/替换载荷，`onResponse` 观测状态码与响应头；[`CallContext`] 携带 provider/api/model 但不上线），以及 `TimeoutService`（`timeoutMs`：只约束 `call` 返回的「建立请求」future，超时映射成 `PiError::Timeout`）。
 - `models::Models`：三块内容 —— `(provider, api) → provider Service` 的路由 Service、`(provider, model id) → Model` 的模型目录，以及 `refresh`：逐个 provider 调用注册的目录来源，成功替换该 provider 的目录并统计 added/updated/removed，失败保留旧条目并把错误记进报告（对应 pi `Models.refresh()` 返回 `{ aborted, errors }` 的语义）。选项支持 `allow_network` / `providers`（限定范围）/ `signal`（取消）。未注册路由返回 `PiError::Unsupported`。
-- `provider::faux`：确定性离线 provider， **仅供测试**——挂在 `test-util` feature（或 `cfg(test)`）下，正常构建不编入任何二进制（`harness` 在 `[dev-dependencies]` 里带 feature 引入）。它只是一个测试 provider，不单独成 crate，用来在不联网、不调用模型的情况下把会话端到端跑通（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
+- `provider::faux`：确定性离线 provider， **仅供测试**——挂在 `test-util` feature（或 `cfg(test)`）下，正常构建不编入任何二进制（`tower-agent-cli` 在 `[dev-dependencies]` 里带 feature 引入）。它只是一个测试 provider，不单独成 crate，用来在不联网、不调用模型的情况下把会话端到端跑通（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
 
 尚未移植的 provider 相关部分：bedrock-converse / vertex / mistral-conversations / pi-messages / cloudflare 等（其中 bedrock 还需要 SigV4 与事件流签名）。CLI 已接上真实 provider：`--provider`（`anthropic` / `openai` / `openai-responses` / `google` / `deepseek`）+ `--model` 组装 `timeout → retry → provider` 的栈（`deepseek` 复用 OpenAI 兼容的 `/chat/completions`，base URL 指向 `api.deepseek.com`），凭据来自各家的环境变量（`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `DEEPSEEK_API_KEY`）。TUI 下缺凭据会直接进入界面并用
 `/login <provider> <api-key>` 配置；print 模式缺凭据则明确报错。
 
-`protocol` 已落地的内容（`crates/protocol`）：
+`protocol` 已落地的内容（`crates/tower-agent-protocol`）：
 
 - `framing`：4 字节大端长度前缀的帧编解码，增量式（任意切分/粘包）、支持零长度帧，带单帧上限与截断检测；失败或结束后再次使用会报错。
 - `cbor`：pi 的 **严格 CBOR 子集**自研实现（不使用通用 CBOR 库）：definite-length only、无 tag / indefinite-length / break、map 键必须是字符串且不得重复、整数与长度受 JS 安全整数范围约束；字节数 / 容器长度 / 嵌套深度上限的默认值与 pi 一致。`CborValue ↔ serde_json::Value` 互转用于协议载荷。
@@ -232,7 +232,7 @@ harness/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（
 
 尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
-`tools` crate 已落地的内置工具（`crates/tools`）：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`（`shell` 是 bash 与 PowerShell 合并后的统一工具：Windows 上用 PowerShell，其余系统用 bash，底层由 `cfg_select!` 选择），以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
+`tools` crate 已落地的内置工具（`crates/tower-agent-tools`）：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`（`shell` 是 bash 与 PowerShell 合并后的统一工具：Windows 上用 PowerShell，其余系统用 bash，底层由 `cfg_select!` 选择），以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
 
 与 pi 的实现差异（都是"进程内实现替代外部二进制"或环境能力所限）：
 
@@ -242,7 +242,7 @@ harness/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（
 - `grep` 不调用外部 `rg`，改用 `regex` + `ignore` 实现相同输出形状与截断/提示文案，并跳过二进制文件。
 - `shell` 在 Windows 上用 PowerShell：找不到 `pwsh`/`powershell` 时每次调用返回错误结果。
 
-`tui` 已落地的内容（`crates/tui`，基于 `ratatui` 0.30）：
+`tui` 已落地的内容（`crates/tower-agent-tui`，基于 `ratatui` 0.30）：
 
 - `model::TuiState` 是唯一状态来源，由 `AgentEvent` 归约（`MessageUpdate` 驱动流式文本，`ToolExecutionStart/Update/End` 驱动工具条目原地更新，`TurnEnd` 记录错误）。
 - `render` 是纯函数：`&TuiState` → 缓冲区，三段布局（状态栏 / transcript / 提示栏），按显示宽度折行（宽字符按 2 列计算）并从底部对齐。
@@ -251,18 +251,18 @@ harness/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（
 - `editor` 模块是输入编辑器： **`ratatui-textarea`**（官方 Ratatui 开发者维护的 fork，git 引入、`termina` 输入适配、`default-features = false`）+ 一层 vim 键位。 **默认 vim 普通模式**，五种模式：Normal / Insert / **Visual**（`v` 逐字符、`V` 整行；`y` `d` `c` `p` 作用在选区上）/ **Replace**（`r` 替换一次、`R` 覆盖输入）/ Operator（`d`/`y`/`c` + 动作，含 `dd`/`yy`/`dw`）。Normal 键位：`i a A I o O`、`Esc`、`h j k l`/方向键、`w e b`、`0 ^ $`、`gg G`、`x D C`、`p u Ctrl+r`、`v V r R`。 **默认显示行号**（`set_line_number_style`
   ），边框标题显示当前模式。Normal 模式 `Enter` 提交、`q` 退出；Insert 模式 `Enter` 换行。
 
-`tui` 是 **纯库**（与 pi `packages/tui` 一致）：不含二进制，事件循环由 `backend::run_agent_tui` / `run_tui` 暴露给调用方。可运行的 TUI 入口在 `harness`（默认模式，见下），它把真实会话（真实 provider + 内置工具）接到同一套渲染上；`cargo run -p harness` 即可试用编辑器。全局按键：`Ctrl+C` 随时退出、`PageUp/PageDown` 滚动会话记录；其余按键归编辑器。
+`tui` 是 **纯库**（与 pi `packages/tui` 一致）：不含二进制，事件循环由 `backend::run_agent_tui` / `run_tui` 暴露给调用方。可运行的 TUI 入口在 `tower-agent-cli`（默认模式，见下），它把真实会话（真实 provider + 内置工具）接到同一套渲染上；`cargo run -p tower-agent-cli` 即可试用编辑器。全局按键：`Ctrl+C` 随时退出、`PageUp/PageDown` 滚动会话记录；其余按键归编辑器。
 
-`harness` 已落地的会话入口（`crates/harness`）：
+`tower-agent-cli` 已落地的会话入口（`crates/tower-agent-cli`）：
 
 - `args`：命令行解析，用 **`clap` derive** 定义参数表， **名称与短选项对齐 pi**：`-p/--print`、`-v/--version`、`-h/--help`、`--provider`、`--model`、`--api-key`、`--thinking <level>`、`-t/--tools`、`--exclude-tools`、`--no-tools`、`--no-builtin-tools`（pi 的多字母短选项 `-nt` / `-nbt` / `-xt` 在解析前展开成对应的长选项），以及本移植版特有的 `-C/--cwd`、`--list-tools`。帮助/版本/参数错误由 clap 生成（帮助模板改成中文），`--provider` / `--model` 的取值语义仍由 `provider` 模块校验以保留中文错误；`--api-key` 走
   `build_with_api_key` 覆盖环境变量。
 - `provider`：把 `--provider` / `--model` 映射到 `ai` 的真实 provider 栈——`ProviderKind`（`anthropic` / `openai` / `openai-responses` / `google`）给出 `(provider, api)`、凭据环境变量与默认模型 id；`build` 读环境变量并用 `Models` 注册路由 + 模型目录，真实 provider 用 `RetryTransport → ReqwestTransport` 加 `TimeoutService`（建立请求超时）。缺凭据返回 `MissingApiKey`，未知 provider 返回 `Unknown`（都带可读文案）。没给 `--provider` 时 `default_kind_from_env` 按 `anthropic → openai → google` 挑第一个有凭据的，都没有就报错。
-- `session::Session`：持有 `agent::Agent` + 七个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它同时实现 `tui::CommandHost`，把会话能力交给斜杠命令。
+- `session::Session`：持有 `tower_agent_runtime::Agent` + 七个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它同时实现 `tower_agent_tui::CommandHost`，把会话能力交给斜杠命令。
 - `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、 **流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。以 `/` 开头的输入不进 agent，而是交给 `tui` 的斜杠命令层。
-- `faux`：确定性的离线 provider， **测试替身**——实现放在 `ai::provider::faux`（`test-util` feature，`harness` 以 dev-dependency 引入），`ProviderKind::Faux` 与 `--provider faux` 都只存在于测试构建里，发布的二进制不含它；不联网也能端到端跑通会话，按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
-- 二进制 `harness`： **不带参数且 stdin/stdout 都是终端时直接进 TUI**（提示词可选，TUI 里用 `/` 命令驱动）；`--print` 或任一路被重定向时走一次性纯文本模式（提示词来自位置参数或 stdin），`--list-tools` 打印八个工具后退屏；`--provider` / `--model` / `--thinking` / `-t` 系列选择 provider、模型与工具。这与 pi「终端交互默认进 TUI、重定向默认 print」一致。
-- TUI 斜杠命令：`tui::command` 的表逐条对齐 pi `BUILTIN_SLASH_COMMANDS`（24 条，名称与说明一致），编辑器里 `/` 打开菜单（前缀优先过滤、`Tab` 补全、`↑/↓` 选择、`Enter` 执行、`Esc` 关闭）。已实现 `/model`、`/thinking`、`/session`、`/hotkeys`、`/new`、`/quit`；其余命令（`/compact`、`/export`、`/login`…）依赖尚未移植的会话持久化/扩展/登录能力，执行时给出明确的“尚未移植”提示。
+- `faux`：确定性的离线 provider， **测试替身**——实现放在 `tower_agent_provider::provider::faux`（`test-util` feature，`tower-agent-cli` 以 dev-dependency 引入），`ProviderKind::Faux` 与 `--provider faux` 都只存在于测试构建里，发布的二进制不含它；不联网也能端到端跑通会话，按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
+- 二进制 `tower-agent-cli`： **不带参数且 stdin/stdout 都是终端时直接进 TUI**（提示词可选，TUI 里用 `/` 命令驱动）；`--print` 或任一路被重定向时走一次性纯文本模式（提示词来自位置参数或 stdin），`--list-tools` 打印八个工具后退屏；`--provider` / `--model` / `--thinking` / `-t` 系列选择 provider、模型与工具。这与 pi「终端交互默认进 TUI、重定向默认 print」一致。
+- TUI 斜杠命令：`tower_agent_tui::command` 的表逐条对齐 pi `BUILTIN_SLASH_COMMANDS`（24 条，名称与说明一致），编辑器里 `/` 打开菜单（前缀优先过滤、`Tab` 补全、`↑/↓` 选择、`Enter` 执行、`Esc` 关闭）。已实现 `/model`、`/thinking`、`/session`、`/hotkeys`、`/new`、`/quit`；其余命令（`/compact`、`/export`、`/login`…）依赖尚未移植的会话持久化/扩展/登录能力，执行时给出明确的“尚未移植”提示。
 - 尚未移植：扩展（extensions/MCP/compaction）。TUI 模式下输入区即 vim 编辑器，提交的文本经 `Session::submit` 进入 agent。
 - 不使用 tower：TUI 订阅事件流，不是"请求 → 响应"边界（第 4.1 节）。
 
@@ -299,8 +299,8 @@ harness/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（
 
 对齐测试的两个现成抓手：
 
-- pi 侧有 faux provider（`packages/ai/src/providers/faux.ts`）与 `coding-agent/test/suite/harness.ts`，可用来生成确定的 provider 流事件序列做金标准。
-- Rust 侧已有对应骨架：`crates/ai/tests/support`（确定性 faux provider，对照 pi faux 的 `start → *_start/*_delta/*_end → done` 与 setup-failure 单 `error`）与 `crates/ai/tests/conformance.rs`（固定金标准序列 + 事件协议不变量）。
+- pi 侧有 faux provider（`packages/ai/src/providers/faux.ts`）与 `coding-agent/test/suite/tower-agent-cli.ts`，可用来生成确定的 provider 流事件序列做金标准。
+- Rust 侧已有对应骨架：`crates/tower-agent-provider/tests/support`（确定性 faux provider，对照 pi faux 的 `start → *_start/*_delta/*_end → done` 与 setup-failure 单 `error`）与 `crates/tower-agent-provider/tests/conformance.rs`（固定金标准序列 + 事件协议不变量）。
 - 后续中间件顺序、`poll_ready` 与背压行为可用 `tower-test` 的 mock 补充验证。
 
 ---
@@ -322,20 +322,22 @@ harness/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（
 ## 9. 下一步
 
 1. ~~确认第 8 节的开放问题（至少 Q1、Q2、Q3）。~~ 已完成，结论见第 8 节"决策"列。
-2. ~~落地第一个移植单元：`ai::StreamFn → Service`，先写类型与 trait 边界（含 `PiError`、`StreamRequest`、`AssistantEventStream`）。~~ 已完成，落在 `crates/ai`：`PiError`/`BoxError`、`StreamRequest`/`StreamOptions`/`SimpleStreamOptions`/`TranscriptContext`、`AssistantEventStream`（`futures_core::Stream`）、`AssistantMessageEvent`，以及 `StreamService`/`BoxStreamService`/`StreamFn` 边界与 `boxed_stream` 装箱助手。
-3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/ai/tests/conformance.rs` + `crates/ai/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
-4. 再按 `agent` → `tools` → `tui` → `harness` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
-    1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/agent`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
-    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `shell` / `read` / `write` / `edit` / `ls` / `find` / `grep`；`shell` 用 `cfg_select!` 把 bash 与 PowerShell 合并成一个工具，Windows → powershell、其余 → bash），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
-    3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tui`（`model` / `render` / `app` / `editor` / `backend`）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件， **`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。 **纯库、无二进制**（与 pi `packages/tui` 一致）；可运行的 TUI 入口在 `harness`。测试：25 个 lib 单元（含 12 个编辑器用例）+ 7 个 `TestBackend`
+2. ~~落地第一个移植单元：`tower_agent_provider::StreamFn → Service`，先写类型与 trait 边界（含 `PiError`、`StreamRequest`、`AssistantEventStream`）。~~ 已完成，落在 `crates/tower-agent-provider`：`PiError`/`BoxError`、`StreamRequest`/`StreamOptions`/`SimpleStreamOptions`/`TranscriptContext`、`AssistantEventStream`（`futures_core::Stream`）、`AssistantMessageEvent`，以及 `StreamService`/`BoxStreamService`/`StreamFn` 边界与 `boxed_stream` 装箱助手。
+3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/tower-agent-provider/tests/conformance.rs` + `crates/tower-agent-provider/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
+4. 再按 `agent` → `tools` → `tui` → `tower-agent-cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
+    1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/tower-agent-runtime`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
+    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/tower-agent-tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `shell` / `read` / `write` / `edit` / `ls` / `find` / `grep`；`shell` 用 `cfg_select!` 把 bash 与 PowerShell 合并成一个工具，Windows → powershell、其余 → bash），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
+    3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tower-agent-tui`（`model` / `render` / `app` / `editor` / `backend`）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件， **`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。 **纯库、无二进制**（与 pi `packages/tui` 一致）；可运行的 TUI 入口在 `tower-agent-cli`。测试：25 个 lib 单元（含 12 个编辑器用例）+ 7 个
+       `TestBackend`
        端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
-    4. `harness`：`harness` crate 的会话入口与扩展。
-        - 会话入口已完成： ~~`args` / `session` / `provider` / `faux` / 二进制入口~~ 落在 `crates/harness`（`args` / `session` / `provider` + `main.rs`）。会话把 agent、七个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（`tui` 的 vim 编辑器 + 事件渲染），无位置参数时从 stdin 读提示词。
+    4. `tower-agent-cli`：`tower-agent-cli` crate 的会话入口与扩展。
+        - 会话入口已完成： ~~`args` / `session` / `provider` / `faux` / 二进制入口~~ 落在 `crates/tower-agent-cli`（`args` / `session` / `provider` + `main.rs`）。会话把 agent、七个内置工具与事件渲染拼在一起：`--print` 打纯文本事件，默认走 TUI（`tui` 的 vim 编辑器 + 事件渲染），无位置参数时从 stdin 读提示词。
         - 真实 provider 已接上： ~~`provider` 模块~~ 用 `--provider`（`anthropic` / `openai` / `openai-responses` / `google` / `deepseek`）+ `--model` 组装 `timeout → retry → provider` 栈，凭据来自 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `DEEPSEEK_API_KEY`，并注册进 `Models` 路由与模型目录；缺凭据或未知 provider 都给出可读错误。没给 `--provider` 时按 `anthropic → openai → google → deepseek` 挑第一个有凭据的；TUI 下一个都没有就先进界面，用 `/login` 配置（print 模式仍报错）。
-        - 参数解析改用 `clap` derive：`args` 只声明参数表，帮助/版本/错误由 clap 生成（帮助模板中文化），`--provider` / `--model` 的语义仍由 `provider` 模块校验。`harness` 也是唯一的可执行入口（`tui` 已是纯库）。
+        - 参数解析改用 `clap` derive：`args` 只声明参数表，帮助/版本/错误由 clap 生成（帮助模板中文化），`--provider` / `--model` 的语义仍由 `provider` 模块校验。`tower-agent-cli` 也是唯一的可执行入口（`tui` 已是纯库）。
         - CLI 参数与 TUI 斜杠命令对齐 pi：`-p/--print`、`-v/--version`、`--thinking`、`-t/--tools`、`--exclude-tools`、`-nt` / `-nbt`（展开成 `--no-tools` / `--no-builtin-tools`）；不带参数且终端交互时直接进 TUI，重定向时回落到 print 模式。TUI 里 `/` 打开与 pi 同名的 24 条内置命令菜单，已实现 `/model` `/thinking` `/session` `/hotkeys` `/login` `/new` `/quit`，其余明确标注“尚未移植”。
-        - `harness` 收敛为 **二进制 crate**：crate 根是 `crates/harness/src/main.rs`，`args` / `session` / `provider` 是它下面的模块（不再有 `lib.rs`，`faux` 也不在这里）；provider 组装与会话入口的测试改成模块内的 `#[cfg(test)] mod tests`。
-        - `faux` 不再编进二进制、也不再单独成 crate：实现落在 `ai::provider::faux`（`test-util` feature），`harness` 只在 `[dev-dependencies]` 里带 feature 引入；删掉 `--faux`，`--provider faux` 会报「未知 provider」。二进制层面的离线端到端测试因此改为在 `cfg(test)` 内做（会话 + `read` 工具的完整链路、纯文本渲染、`/new` `/model` `/thinking`），真正跑二进制的用例保留不需要模型的 CLI 面（帮助/版本/工具清单/参数与 provider 错误）。
-        - 测试：10 个 `args` 单元测试、3 个 `faux` 单元测试（在 `ai` 的 `test-util` 下）、11 个 `provider` 单元测试、3 个二进制单元测试、9 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路、`/new` 重置与 `/model` `/thinking` 的宿主行为、纯文本渲染断言）、9 个 **真正运行 `harness` 二进制**的端到端测试（`--help` / `--version`（含 `-v`）/ `--list-tools` / 错误参数 / `--provider` 选择 / 缺凭据 / 未知 provider / 无凭据时的默认 provider 提示 / `--api-key` 需要 `--provider` / `--faux` 与
+        - `tower-agent-cli` 收敛为 **二进制 crate**：crate 根是 `crates/tower-agent-cli/src/main.rs`，`args` / `session` / `provider` 是它下面的模块（不再有 `lib.rs`，`faux` 也不在这里）；provider 组装与会话入口的测试改成模块内的 `#[cfg(test)] mod tests`。
+        - `faux` 不再编进二进制、也不再单独成 crate：实现落在 `tower_agent_provider::provider::faux`（`test-util` feature），`tower-agent-cli` 只在 `[dev-dependencies]` 里带 feature 引入；删掉 `--faux`，`--provider faux` 会报「未知 provider」。二进制层面的离线端到端测试因此改为在 `cfg(test)` 内做（会话 + `read` 工具的完整链路、纯文本渲染、`/new` `/model` `/thinking`），真正跑二进制的用例保留不需要模型的 CLI 面（帮助/版本/工具清单/参数与 provider 错误）。
+        - 测试：10 个 `args` 单元测试、3 个 `faux` 单元测试（在 `ai` 的 `test-util` 下）、11 个 `provider` 单元测试、3 个二进制单元测试、9 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路、`/new` 重置与 `/model` `/thinking` 的宿主行为、纯文本渲染断言）、9 个 **真正运行 `tower-agent-cli` 二进制**的端到端测试（`--help` / `--version`（含 `-v`）/ `--list-tools` / 错误参数 / `--provider` 选择 / 缺凭据 / 未知 provider / 无凭据时的默认 provider 提示 / `--api-key` 需要 `--provider` /
+          `--faux` 与
           `--provider faux` 都被拒绝）；TUI 侧另有斜杠菜单的编辑器、渲染与命令分派测试。
         - 待办：扩展（extensions/MCP/compaction）与更多 provider（bedrock / vertex / mistral / cloudflare / pi-messages）。

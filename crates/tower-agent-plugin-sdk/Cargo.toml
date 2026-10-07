@@ -1,0 +1,20 @@
+[package]
+name = "tower-agent-plugin-sdk"
+description = "tower-agent plugin author SDK: declare_plugin!, HostApi handle, tool registration."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tower-agent-runtime = { path = "../tower-agent-runtime" }
+tower-agent-plugins = { path = "../tower-agent-plugins" }
+semver = { workspace = true }
+stabby = { version = "72.1.16", optional = true }
+
+[features]
+default = []
+# 动态插件作者需要的 ABI 类型 + `declare_dynamic_plugin!`。
+dynamic = ["tower-agent-plugins/dynamic", "dep:stabby"]

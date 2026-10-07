@@ -1,0 +1,28 @@
+[package]
+name = "tower-agent-cli"
+description = "tower-agent CLI entry point (pi `packages/coding-agent` reference implementation)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tower-agent"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+tower-agent-runtime = { path = "../tower-agent-runtime" }
+tower-agent-provider = { path = "../tower-agent-provider" }
+clap = { workspace = true }
+futures-util = { workspace = true }
+tower-agent-plugins = { path = "../tower-agent-plugins" }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-agent-tui = { path = "../tower-agent-tui" }
+
+[dev-dependencies]
+tower-agent-provider = { path = "../tower-agent-provider", features = ["test-util"] }
+tempfile = { workspace = true }

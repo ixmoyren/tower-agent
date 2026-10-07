@@ -1,0 +1,28 @@
+[package]
+name = "tower-agent-plugins"
+description = "tower-agent plugin/extension host: kinds, capability registry, dependency/version resolution."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tower-agent-runtime = { path = "../tower-agent-runtime" }
+libloading = { version = "0.9.0", optional = true }
+semver = { workspace = true }
+stabby = { version = "72.1.16", optional = true }
+tower-agent-tools = { path = "../tower-agent-tools" }
+tower.workspace = true
+
+[features]
+default = ["static"]
+static = []
+# 动态插件（stabby cdylib + libloading）开关；热重载插件见 `tower-agent-monty`。
+dynamic = ["dep:stabby", "dep:libloading"]
+
+[dev-dependencies]
+futures-util = { workspace = true }
+tower-agent-provider = { path = "../tower-agent-provider" }
+tokio = { workspace = true }

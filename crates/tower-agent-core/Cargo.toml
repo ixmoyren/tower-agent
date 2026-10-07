@@ -1,0 +1,23 @@
+[package]
+name = "tower-agent-core"
+description = "tower-agent core contracts: agent request/response, messages/events, tool boundary, layers."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tower-agent-provider = { path = "../tower-agent-provider" }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true }
+tower = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

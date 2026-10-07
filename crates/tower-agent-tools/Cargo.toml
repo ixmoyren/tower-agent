@@ -1,0 +1,30 @@
+[package]
+name = "tower-agent-tools"
+description = "tower-agent built-in tools (pi `coding-agent` core/tools)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tower-agent-runtime = { path = "../tower-agent-runtime" }
+tower-agent-provider = { path = "../tower-agent-provider" }
+base64 = { workspace = true }
+dirs = { workspace = true }
+futures-util = { workspace = true }
+globset = { workspace = true }
+ignore = { workspace = true }
+regex = { workspace = true }
+serde_json = { workspace = true }
+similar = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tower = { workspace = true }
+unicode-normalization = { workspace = true }
+
+# 只在类 Unix 平台用于杀掉整个进程组（见 `shell.rs` 的 `kill_process_group`）。
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }

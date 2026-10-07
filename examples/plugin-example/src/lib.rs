@@ -3,7 +3,7 @@
 //! 构建：`cargo build --manifest-path examples/plugin-example/Cargo.toml`
 //! 产物：`target/debug/libtpa_plugin_example.so`（Linux）。
 
-use plugins_sdk::{AbiCapability, AbiManifest, AbiVersion};
+use tower_agent_plugin_sdk::{AbiCapability, AbiManifest, AbiVersion};
 use stabby::{string::String, vec::Vec};
 
 extern "C" fn example_manifest() -> AbiManifest {
@@ -40,7 +40,7 @@ extern "C" fn example_call(input: String) -> String {
 
 extern "C" fn example_shutdown() {}
 
-plugins_sdk::declare_dynamic_plugin!(
+tower_agent_plugin_sdk::declare_dynamic_plugin!(
     example_manifest,
     example_init,
     example_call,

@@ -3,43 +3,12 @@
 version = 4
 
 [[package]]
-name = "agent"
-version = "0.1.0"
-dependencies = [
-    "ai",
-    "futures-core",
-    "futures-util",
-    "schemars",
-    "serde",
-    "serde_json",
-    "thiserror",
-    "tokio",
-    "tokio-util",
-    "tower",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
 dependencies = [
     "memchr",
-]
-
-[[package]]
-name = "ai"
-version = "0.1.0"
-dependencies = [
-    "bytes",
-    "futures-core",
-    "futures-util",
-    "reqwest",
-    "serde_json",
-    "thiserror",
-    "tokio",
-    "tokio-util",
-    "tower",
 ]
 
 [[package]]
@@ -642,9 +611,9 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libloading"
-version = "0.8.9"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
 dependencies = [
     "cfg-if",
     "windows-link",
@@ -737,28 +706,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
-name = "plugins"
-version = "0.1.0"
-dependencies = [
-    "agent",
-    "libloading",
-    "semver",
-    "stabby",
-    "tools",
-    "tower",
-]
-
-[[package]]
-name = "plugins-sdk"
-version = "0.1.0"
-dependencies = [
-    "agent",
-    "plugins",
-    "semver",
-    "stabby",
-]
-
-[[package]]
 name = "potential_utf"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.18"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
     "bytes",
     "getrandom 0.4.3",
@@ -829,9 +776,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
     "cfg_aliases",
     "libc",
@@ -1324,17 +1271,6 @@ dependencies = [
 
 [[package]]
 name = "synstructure"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
-dependencies = [
-    "proc-macro2",
-    "quote",
-    "syn 2.0.119",
-]
-
-[[package]]
-name = "synstructure"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02"
@@ -1422,9 +1358,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.26.5"
+version = "0.26.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67"
+checksum = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db"
 dependencies = [
     "rustls",
     "tokio",
@@ -1475,28 +1411,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tools"
-version = "0.1.0"
-dependencies = [
-    "agent",
-    "ai",
-    "base64 0.23.1",
-    "dirs",
-    "futures-util",
-    "globset",
-    "ignore",
-    "regex",
-    "rustix",
-    "serde_json",
-    "similar",
-    "tempfile",
-    "tokio",
-    "tokio-util",
-    "tower",
-    "unicode-normalization",
-]
-
-[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1511,6 +1425,95 @@ dependencies = [
     "tower-layer",
     "tower-service",
     "tracing",
+]
+
+[[package]]
+name = "tower-agent-core"
+version = "0.1.0"
+dependencies = [
+    "futures-core",
+    "futures-util",
+    "schemars",
+    "serde",
+    "serde_json",
+    "thiserror",
+    "tokio-util",
+    "tower",
+    "tower-agent-provider",
+]
+
+[[package]]
+name = "tower-agent-plugin-sdk"
+version = "0.1.0"
+dependencies = [
+    "semver",
+    "stabby",
+    "tower-agent-plugins",
+    "tower-agent-runtime",
+]
+
+[[package]]
+name = "tower-agent-plugins"
+version = "0.1.0"
+dependencies = [
+    "libloading",
+    "semver",
+    "stabby",
+    "tower",
+    "tower-agent-runtime",
+    "tower-agent-tools",
+]
+
+[[package]]
+name = "tower-agent-provider"
+version = "0.1.0"
+dependencies = [
+    "bytes",
+    "futures-core",
+    "futures-util",
+    "reqwest",
+    "serde_json",
+    "thiserror",
+    "tokio",
+    "tokio-util",
+    "tower",
+]
+
+[[package]]
+name = "tower-agent-runtime"
+version = "0.1.0"
+dependencies = [
+    "futures-core",
+    "futures-util",
+    "serde_json",
+    "thiserror",
+    "tokio",
+    "tokio-util",
+    "tower",
+    "tower-agent-core",
+    "tower-agent-provider",
+]
+
+[[package]]
+name = "tower-agent-tools"
+version = "0.1.0"
+dependencies = [
+    "base64 0.23.1",
+    "dirs",
+    "futures-util",
+    "globset",
+    "ignore",
+    "regex",
+    "rustix",
+    "serde_json",
+    "similar",
+    "tempfile",
+    "tokio",
+    "tokio-util",
+    "tower",
+    "tower-agent-provider",
+    "tower-agent-runtime",
+    "unicode-normalization",
 ]
 
 [[package]]
@@ -1547,8 +1550,8 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 name = "tpa-plugin-example"
 version = "1.0.0"
 dependencies = [
-    "plugins-sdk",
     "stabby",
+    "tower-agent-plugin-sdk",
 ]
 
 [[package]]
@@ -1863,14 +1866,14 @@ dependencies = [
 
 [[package]]
 name = "yoke-derive"
-version = "0.8.2"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de844c262c8848816172cef550288e7dc6c7b7814b4ee56b3e1553f275f1858e"
+checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
     "proc-macro2",
     "quote",
-    "syn 2.0.119",
-    "synstructure 0.13.2",
+    "syn 3.0.6",
+    "synstructure",
 ]
 
 [[package]]
@@ -1891,7 +1894,7 @@ dependencies = [
     "proc-macro2",
     "quote",
     "syn 3.0.6",
-    "synstructure 0.14.0",
+    "synstructure",
 ]
 
 [[package]]

@@ -1,0 +1,26 @@
+[package]
+name = "tower-agent"
+description = "tower-agent: a tower-native agent framework (core + runtime + provider + tools + plugins)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# 可选前端/协议/插件 SDK。
+tui = ["dep:tower-agent-tui"]
+protocol = ["dep:tower-agent-protocol"]
+plugin-sdk = ["dep:tower-agent-plugin-sdk"]
+
+[dependencies]
+tower-agent-core = { path = "../tower-agent-core" }
+tower-agent-runtime = { path = "../tower-agent-runtime" }
+tower-agent-provider = { path = "../tower-agent-provider" }
+tower-agent-tools = { path = "../tower-agent-tools" }
+tower-agent-plugins = { path = "../tower-agent-plugins" }
+tower-agent-tui = { path = "../tower-agent-tui", optional = true }
+tower-agent-protocol = { path = "../tower-agent-protocol", optional = true }
+tower-agent-plugin-sdk = { path = "../tower-agent-plugin-sdk", optional = true }

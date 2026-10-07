@@ -1,0 +1,16 @@
+[package]
+name = "tower-agent-monty"
+description = "tower-agent hot-reloadable plugin host based on monty-pool (crash-isolated Python-subset sandbox)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+monty-pool = "1.1.0"
+monty-types = "1.1.0"
+semver = { workspace = true }
+tokio = { workspace = true }
+tower-agent-plugins = { path = "../tower-agent-plugins" }

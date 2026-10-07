@@ -1,0 +1,16 @@
+[package]
+name = "tower-agent-protocol"
+description = "tower-agent protocol: framing, strict CBOR subset, RPC envelopes (pi `protocol`)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+cbor4ii = { version = "1.2.3", features = ["use_alloc"] }
