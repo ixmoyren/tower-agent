@@ -1,0 +1,51 @@
+/// monty 沙箱组件：宿主驱动的 REPL 状态机。
+///
+/// 宿主调用 `start` 喂入源码，组件返回一个 `progress`；若挂起在外部函数调用，
+/// 宿主算完结果后调用 `resume-function` 继续。所有数据都以 JSON 字符串过界，
+/// 因此组件不依赖任何宿主类型。
+package tower-agent:monty@0.1.0;
+
+interface sandbox {
+  /// 沙箱请求宿主求值的一次外部函数调用。
+  record function-call {
+    function-name: string,
+    /// 位置参数（JSON 数组）。
+    args-json: string,
+    /// 关键字参数（JSON 对象）。
+    kwargs-json: string,
+    call-id: u32,
+  }
+
+  /// 一次 feed/resume 的结果。
+  variant progress {
+    /// 脚本跑完，携带最终值的 JSON。
+    complete(string),
+    /// 挂起在外部函数调用。
+    function-call(function-call),
+    /// 挂起在未定义名字（宿主应回 NameError）。
+    name-lookup(string),
+    /// 挂起在 OS 调用（宿主应回无处理器默认异常）。
+    os-call(u32),
+    /// 沙箱侧错误（语法/运行时/协议）。
+    error(string),
+  }
+
+  /// 新建会话并喂入源码，返回首个挂起点或完成。
+  start: func(source: string) -> progress;
+
+  /// 用 JSON 结果恢复一次 `function-call`。
+  resume-function: func(call-id: u32, result-json: string) -> progress;
+
+  /// 让一次 `function-call` 在沙箱里抛出 `RuntimeError`。
+  reject-function: func(call-id: u32, message: string) -> progress;
+
+  /// 未定义名字 -> `NameError`。
+  resume-name: func(name: string) -> progress;
+
+  /// OS 调用按沙箱默认（通常是 `PermissionError`）失败。
+  resume-os: func(call-id: u32) -> progress;
+}
+
+world monty-sandbox {
+  export sandbox;
+}

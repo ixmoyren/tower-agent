@@ -48,16 +48,16 @@
 
 ## 4. 三种插件形态
 
-| 维度     | 静态插件                       | 动态插件                        | 热重载插件                    |
-|----------|--------------------------------|---------------------------------|-------------------------------|
-| 载体     | Rust crate（编译进宿主）       | `cdylib`（`.so` / `.dll`）      | monty 脚本（Python 子集）     |
-| 组合方式 | `tower::Layer` 叠加到服务栈    | stabby ABI 导出入口             | monty-pool 子进程解释执行     |
-| 加载     | 编译期                         | `libloading` 运行时加载         | 运行时编译 + 换绑             |
-| 卸载     | 不卸载（随进程）               | 支持卸载                        | 支持热替换                    |
-| 热更新   | 不支持（重新构建）             | 需 stop→unload→load（可选实现） | 原生热加载                    |
-| 调用开销 | 零（直接函数调用）             | 一次间接调用 + ABI 编解码       | 编译后接近原生                |
-| 典型用途 | 内置 tool、provider 层、观测层 | 沙箱、记忆、持久化、codemode    | cc `mods`、用户脚本、轻量扩展 |
-| feature  | 默认开启                       | `dynamic`                       | `jit`                         |
+| 维度     | 静态插件                       | 动态插件                        | 热重载插件                      |
+|----------|--------------------------------|---------------------------------|---------------------------------|
+| 载体     | Rust crate（编译进宿主）       | `cdylib`（`.so` / `.dll`）      | monty 脚本（Python 子集）       |
+| 组合方式 | `tower::Layer` 叠加到服务栈    | stabby ABI 导出入口             | 内嵌 wasm 组件（wasmtime 执行） |
+| 加载     | 编译期                         | `libloading` 运行时加载         | 运行时编译 + 换绑               |
+| 卸载     | 不卸载（随进程）               | 支持卸载                        | 支持热替换                      |
+| 热更新   | 不支持（重新构建）             | 需 stop→unload→load（可选实现） | 原生热加载                      |
+| 调用开销 | 零（直接函数调用）             | 一次间接调用 + ABI 编解码       | 编译后接近原生                  |
+| 典型用途 | 内置 tool、provider 层、观测层 | 沙箱、记忆、持久化、codemode    | cc `mods`、用户脚本、轻量扩展   |
+| feature  | 默认开启                       | `dynamic`                       | `jit`                           |
 
 ### 4.1 静态插件（tower Layer）
 
@@ -79,11 +79,12 @@
 
 ### 4.3 热重载插件（monty）
 
-- 用 monty（Python 子集）编写脚本；宿主用 `monty-pool` 把解释器跑在 **工作子进程**里（崩溃隔离），脚本调用的未定义外部函数即宿主能力调用（`TurnEvent::FunctionCall` → `MontyHost` 回调 → `resume`）。
+- 用 monty（Python 子集）编写脚本；宿主把 monty 解释器编译成 **wasm 组件**（`wasm/monty-sandbox`）内嵌进二进制，用 wasmtime 在沙箱里执行（崩溃/越界/内存超限转成 trap，不波及宿主）；脚本调用的未定义外部函数即宿主能力调用（组件返回 `function-call` → `MontyHost` 回调 → `resume`）。
 - 原子换绑实现 **热加载**：试跑新版本 → 成功才替换源码槽位 → 旧版本等待 in-flight 完成后释放；失败保留旧版本并回报错误。
 - 目标场景：cc 的 `mods` 模式（用户/LLM 可写、可热更的轻量逻辑）。
 
-> 实现状态（M3 已落地，mods 作者闭环见下）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload`。宿主用 `monty_pool::Pool`（`PoolConfig::subprocess(worker)`）跑子进程 worker；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主（参数/返回值都是 JSON），热加载用 `reload_checked` 试跑成功后原子替换源码。运行需要 monty worker 二进制（`cargo build -p monty-runtime` 或 PyPI 的 `pydantic-monty-runtime`，路径由 `TPA_MONTY_BIN` 给出）。
+> 实现状态（M3 已落地，mods 作者闭环见下）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload`。 **执行在 wasm 沙箱里**：`wasm/monty-sandbox` 把 monty 解释器（及其 ruff 解析器依赖）编译成 `wasm32-wasip2` 组件，经 `wasm-opt -Oz --strip-debug` 优化后内嵌进 `tower-agent-monty`（`assets/monty-sandbox.wasm`，约 6.5 MB），宿主用 wasmtime 的 **组件绑定**驱动，开启 JIT + JIT 缓存（缓存键含 wasmtime 版本，升级后自动失效）。没有外部 `monty`
+> CLI、没有子进程、不需要 `TPA_MONTY_BIN`；mods 代码的越界/栈溢出/内存超限被 wasmtime 转成 trap 错误，不会带走宿主进程。WIT 接口是宿主驱动的 REPL 状态机（`start` + `resume-*`），参数/返回值都是 JSON；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主，热加载用 `reload_checked` 试跑成功后原子替换源码。重新生成组件：`./wasm/monty-sandbox/generate.sh`。
 >
 > **mods（cc `mods` 模式）**：`ModManager` 管理一组 monty mod，对 LLM 暴露 `mod_write` / `mod_reload` / `mod_list` / `mod_remove` 作者工具。mod 脚本可：
 > 1. **调宿主能力**：`tool_call(name, args)` / `log` / `state_get` / `state_set`；

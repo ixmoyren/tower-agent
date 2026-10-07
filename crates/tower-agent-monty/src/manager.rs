@@ -10,8 +10,7 @@
 
 use std::{
     collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use futures_util::{StreamExt as _, future::BoxFuture};
@@ -26,6 +25,7 @@ use tower_agent_provider::{Arguments, ToolCall};
 use crate::{
     host::{HostCall, MontyHost},
     plugin::MontyPlugin,
+    sandbox::SandboxEngine,
     tool::{ModTool, ToolSpec},
 };
 
@@ -42,9 +42,10 @@ pub struct ModSummary {
 
 /// mods 宿主。
 pub struct ModManager {
-    worker: PathBuf,
     host: HostApi,
     ui: UiState,
+    /// 共享的 wasmtime 引擎 + 已编译组件（首次用到时惰性创建）。
+    engine: OnceLock<Arc<SandboxEngine>>,
     mods: Mutex<BTreeMap<String, Arc<MontyPlugin>>>,
     tools: Mutex<BTreeMap<String, Vec<ToolSpec>>>,
     kv: Mutex<BTreeMap<String, Value>>,
@@ -53,24 +54,34 @@ pub struct ModManager {
 impl std::fmt::Debug for ModManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ModManager")
-            .field("worker", &self.worker)
             .field("mods", &self.list())
             .finish_non_exhaustive()
     }
 }
 
 impl ModManager {
-    /// 用 worker 二进制路径、宿主能力表与共享 UI 状态构造。
+    /// 用宿主能力表与共享 UI 状态构造（monty 解释器内嵌在 wasm 组件里，无需外部 CLI）。
     #[must_use]
-    pub fn new(worker: impl Into<PathBuf>, host: HostApi, ui: UiState) -> Arc<Self> {
+    pub fn new(host: HostApi, ui: UiState) -> Arc<Self> {
         Arc::new(Self {
-            worker: worker.into(),
             host,
             ui,
+            engine: OnceLock::new(),
             mods: Mutex::new(BTreeMap::new()),
             tools: Mutex::new(BTreeMap::new()),
             kv: Mutex::new(BTreeMap::new()),
         })
+    }
+
+    /// 共享的 wasm 沙箱引擎（首次调用时创建并编译内嵌组件）。
+    fn engine(&self) -> Result<Arc<SandboxEngine>, PluginError> {
+        if let Some(engine) = self.engine.get() {
+            return Ok(Arc::clone(engine));
+        }
+        let engine = Arc::new(SandboxEngine::new()?);
+        // 并发下可能有人抢先 set；失败就用已存在的那份。
+        let _ = self.engine.set(Arc::clone(&engine));
+        Ok(self.engine.get().map(Arc::clone).unwrap_or(engine))
     }
 
     /// 共享的 UI 状态（前端据此渲染 mod 贡献）。
@@ -191,8 +202,8 @@ impl ModManager {
             plugin: name.to_string(),
             permissions: manifest.permissions.clone(),
         });
-        let plugin =
-            Arc::new(MontyPlugin::load(manifest, code, self.worker.clone(), adapter).await?);
+        let sandbox = self.engine()?.checkout()?;
+        let plugin = Arc::new(MontyPlugin::load(manifest, code, adapter, sandbox)?);
         self.take_specs(name);
         if let Err(error) = plugin.activate().await {
             // 激活失败：丢掉半途注册的工具声明，保持宿主干净。
@@ -501,14 +512,4 @@ fn mod_error(name: &str, message: impl Into<String>) -> PluginError {
         plugin: name.to_string(),
         message: message.into(),
     }
-}
-
-/// 便捷：用 worker 路径构造一个 mods 宿主。
-#[must_use]
-pub fn manager_with_worker(
-    worker: impl AsRef<Path>,
-    host: HostApi,
-    ui: UiState,
-) -> Arc<ModManager> {
-    ModManager::new(worker.as_ref().to_path_buf(), host, ui)
 }

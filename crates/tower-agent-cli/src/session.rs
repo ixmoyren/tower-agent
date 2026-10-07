@@ -43,7 +43,7 @@ pub struct Session {
     /// `AgentTool` 是 `Send` 但非 `Sync`（内含 `BoxCloneService`），用 `Mutex` 包一层
     /// 让 `Session` 保持 `Sync`（TUI 驱动任务要求 `Arc<Session>: Send`）。
     authoring_tools: Mutex<Vec<AgentTool>>,
-    /// mods 宿主；只有设置了 `TPA_MONTY_BIN`（monty worker 二进制）时才启用。
+    /// mods 宿主；解释器内嵌在 `tower-agent-monty` 中，默认启用（`TPA_NO_MODS` 可关闭）。
     mods: Option<Arc<ModManager>>,
 }
 
@@ -65,15 +65,14 @@ impl Session {
         );
         let base_tools = tower_agent_plugins::default_tools(&cwd);
         // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
-        // 需要 monty worker 二进制，路径由 `TPA_MONTY_BIN` 给出；未设置则关闭。
-        let (mods, authoring) = match std::env::var_os("TPA_MONTY_BIN") {
-            Some(worker) => {
-                let host = HostApi::from_tools(base_tools.clone());
-                let manager = ModManager::new(worker, host, UiState::new());
-                let authoring = authoring_tools(Arc::clone(&manager));
-                (Some(manager), authoring)
-            }
-            None => (None, Vec::new()),
+        // monty 解释器随 `tower-agent-monty` 内嵌，默认启用；`TPA_NO_MODS` 可关闭。
+        let (mods, authoring) = if std::env::var_os("TPA_NO_MODS").is_none() {
+            let host = HostApi::from_tools(base_tools.clone());
+            let manager = ModManager::new(host, UiState::new());
+            let authoring = authoring_tools(Arc::clone(&manager));
+            (Some(manager), authoring)
+        } else {
+            (None, Vec::new())
         };
 
         let mut initial_tools = base_tools.clone();

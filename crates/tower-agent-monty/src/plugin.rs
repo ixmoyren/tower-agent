@@ -1,49 +1,44 @@
-//! 一个 monty 热重载插件：把沙箱脚本 + 宿主接口 + 生命周期打包在一起。
+//! 一个 wasm 沙箱 monty 插件：把沙箱实例 + 脚本 + 宿主接口 + 生命周期打包在一起。
+//!
+//! 执行全部发生在内嵌的 wasm 组件里（见 [`crate::sandbox`]）：脚本里未定义的函数调用
+//! 会让组件返回一个 `function-call` 进度，宿主求值后（异步）恢复它，直到脚本跑完。
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
-use monty_pool::{Pool, PoolConfig, PoolError, ReplConfig, ResumeValue, TurnEvent, on_print_sync};
-use monty_types::{ExcType, MontyException, MontyObject, NameLookupResult, NamedValues};
 use serde_json::Value;
 use tower_agent_plugins::{Lifecycle, PluginError, PluginManifest, PluginState};
 
-use crate::{MontyHost, host::HostCall, json};
+use crate::{
+    MontyHost,
+    host::HostCall,
+    python,
+    sandbox::{Progress, Sandbox},
+};
 
-/// 一个基于 monty-pool 的热重载插件。
-///
-/// 每次调用都会把脚本源码 + 一段调用表达式喂给沙箱（子进程，崩溃隔离）；脚本里
-/// 未定义的函数调用会经 [`MontyHost::dispatch`] 回调宿主。热更新用
-/// [`MontyPlugin::reload_checked`] 先试跑、成功后原子替换源码。
+/// 一个内嵌 wasm 沙箱的 monty 插件。
 pub struct MontyPlugin {
     manifest: PluginManifest,
-    pool: Pool,
     code: Mutex<String>,
     host: Arc<dyn MontyHost>,
     lifecycle: Lifecycle,
+    sandbox: Mutex<Sandbox>,
 }
 
 impl MontyPlugin {
-    /// 用 worker 二进制路径与初始脚本构造（不执行；调用 [`MontyPlugin::activate`] 安装）。
-    pub async fn load(
+    /// 用初始脚本、宿主接口与一个沙箱实例构造（不执行；调用 [`MontyPlugin::activate`] 安装）。
+    pub fn load(
         manifest: PluginManifest,
         code: impl Into<String>,
-        worker: impl Into<PathBuf>,
         host: Arc<dyn MontyHost>,
+        sandbox: Sandbox,
     ) -> Result<Self, PluginError> {
         let name = manifest.name.clone();
-        let config = PoolConfig::subprocess(worker.into());
-        let pool = Pool::new(config)
-            .await
-            .map_err(|error| load_error(&name, error))?;
         let plugin = Self {
             manifest,
-            pool,
             code: Mutex::new(code.into()),
             host,
-            lifecycle: Lifecycle::new(name.clone()),
+            lifecycle: Lifecycle::new(name),
+            sandbox: Mutex::new(sandbox),
         };
         for state in [
             PluginState::Loaded,
@@ -75,21 +70,19 @@ impl MontyPlugin {
     }
 
     /// 安装阶段：跑一次脚本，让它注册工具 / 贡献 UI。
-    ///
-    /// 此时 `tool_register` 等安装期宿主调用生效。
     pub async fn activate(&self) -> Result<(), PluginError> {
         let code = self.code();
         self.run_source(&code, true).await.map(|_| ())
     }
 
     /// 调用脚本里的 `function`，把 `args` 作为单个位置参数传入。
-    ///
-    /// 返回值是函数结果的 JSON 视图。
     pub async fn call_function(&self, function: &str, args: &Value) -> Result<Value, PluginError> {
         let code = self.code();
-        let source = format!("{code}\n\n{function}({})", json::python_literal(args));
-        let value = self.run_source(&source, false).await?;
-        Ok(json::monty_to_json(&value))
+        let source = format!("{code}\n\n{function}({})", python::literal(args));
+        let json = self.run_source(&source, false).await?;
+        serde_json::from_str(&json).map_err(|error| {
+            message_error(&self.manifest.name, format!("invalid result JSON: {error}"))
+        })
     }
 
     /// 原子替换脚本源码（下一次调用生效）。
@@ -115,96 +108,67 @@ impl MontyPlugin {
         self.lifecycle.unload()
     }
 
-    /// 在一个 checkout 会话里跑一段脚本，驱动 FunctionCall 挂起直到完成。
-    async fn run_source(&self, source: &str, setup: bool) -> Result<MontyObject, PluginError> {
+    /// 在沙箱里驱动一段脚本直到完成，返回最终值的 JSON。
+    async fn run_source(&self, source: &str, setup: bool) -> Result<String, PluginError> {
         let name = self.manifest.name.clone();
         let _guard = self
             .lifecycle
             .begin_call()
-            .ok_or_else(|| PluginError::Load {
-                plugin: name.clone(),
-                message: "plugin is not started".into(),
-            })?;
-        let mut checkout = self
-            .pool
-            .checkout(&ReplConfig::default())
-            .await
-            .map_err(|error| load_error(&name, error))?;
+            .ok_or_else(|| message_error(&name, "plugin is not started"))?;
 
-        let mut on_print = on_print_sync(|_stream, _text| {});
-        let mut event = checkout
-            .feed(source, NamedValues::new(), Vec::new(), true, &mut on_print)
-            .await
-            .map_err(|error| load_error(&name, error))?;
+        // 每次组件调用都是一段很短的同步临界区；宿主派发（异步）在锁外进行。
+        let mut progress = { self.lock_sandbox()?.start(source)? };
 
         loop {
-            match event {
-                TurnEvent::Complete(value) => {
-                    checkout
-                        .finish()
-                        .await
-                        .map_err(|error| load_error(&name, error))?;
-                    return Ok(value);
-                }
-                TurnEvent::FunctionCall {
-                    function_name,
-                    args,
-                    ..
-                } => {
-                    let call = HostCall {
-                        function: function_name,
-                        args: args.args().map(json::object_ref_to_json).collect(),
-                        kwargs: args
-                            .kwargs()
-                            .map(|(key, value)| {
-                                let key =
-                                    key.as_str().map_or_else(|| key.py_repr(), str::to_string);
-                                (key, json::object_ref_to_json(value))
-                            })
-                            .collect(),
+            match progress {
+                Progress::Complete(json) => return Ok(json),
+                Progress::FunctionCall(call) => {
+                    let host_call = HostCall {
+                        function: call.function_name.clone(),
+                        args: parse_args(&call.args_json),
+                        kwargs: parse_kwargs(&call.kwargs_json),
                         setup,
                         plugin: name.clone(),
                     };
-                    let resume = match self.host.dispatch(call).await {
-                        Ok(value) => ResumeValue::Return(json::json_to_monty(&value)),
-                        Err(message) => ResumeValue::Error(MontyException::new(
-                            ExcType::RuntimeError,
-                            Some(message),
-                        )),
+                    // 锁外 await，避免在 await 点持有 `MutexGuard`。
+                    let result = self.host.dispatch(host_call).await;
+                    let call_id = call.call_id;
+                    progress = match result {
+                        Ok(value) => self
+                            .lock_sandbox()?
+                            .resume_function(call_id, &value.to_string())?,
+                        Err(message) => self.lock_sandbox()?.reject_function(call_id, &message)?,
                     };
-                    event = checkout
-                        .resume(resume, &mut on_print)
-                        .await
-                        .map_err(|error| load_error(&name, error))?;
                 }
-                // 未定义的名字：让沙箱抛 NameError，而不是中断整个插件。
-                TurnEvent::NameLookup { .. } => {
-                    event = checkout
-                        .resume_name_lookup(NameLookupResult::Undefined, &mut on_print)
-                        .await
-                        .map_err(|error| load_error(&name, error))?;
+                Progress::NameLookup(name_) => {
+                    progress = self.lock_sandbox()?.resume_name(&name_)?;
                 }
-                // 文件系统等 OS 调用：v1 全部交给沙箱的默认行为（通常报错）。
-                TurnEvent::OsCall { .. } => {
-                    event = checkout
-                        .resume(ResumeValue::NotHandled, &mut on_print)
-                        .await
-                        .map_err(|error| load_error(&name, error))?;
+                Progress::OsCall(call_id) => {
+                    progress = self.lock_sandbox()?.resume_os(call_id)?;
                 }
-                other => {
-                    return Err(PluginError::Load {
-                        plugin: name,
-                        message: format!("unsupported monty suspension: {other:?}"),
-                    });
-                }
+                Progress::Error(message) => return Err(message_error(&name, message)),
             }
         }
     }
+
+    fn lock_sandbox(&self) -> Result<std::sync::MutexGuard<'_, Sandbox>, PluginError> {
+        self.sandbox
+            .lock()
+            .map_err(|_| message_error(&self.manifest.name, "sandbox mutex poisoned"))
+    }
 }
 
-fn load_error(plugin: &str, error: PoolError) -> PluginError {
+fn parse_args(json: &str) -> Vec<Value> {
+    serde_json::from_str::<Vec<Value>>(json).unwrap_or_default()
+}
+
+fn parse_kwargs(json: &str) -> std::collections::BTreeMap<String, Value> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+fn message_error(plugin: &str, message: impl Into<String>) -> PluginError {
     PluginError::Load {
-        plugin: plugin.into(),
-        message: error.to_string(),
+        plugin: plugin.to_string(),
+        message: message.into(),
     }
 }
