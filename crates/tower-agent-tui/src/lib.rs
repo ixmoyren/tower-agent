@@ -33,5 +33,5 @@ pub use backend::{
 pub use command::{BUILTIN_SLASH_COMMANDS, CommandHost, SlashCommand};
 pub use editor::{Editor, EditorAction, Mode};
 pub use model::{Entry, EntryKind, ToolEntry, ToolResultView, TuiState, render_message};
-pub use plugin::{TuiPlugin, UiPlugin, frontend_plugins};
+pub use plugin::{ContributionPlugin, TuiPlugin, UiPlugin, frontend_plugins};
 pub use render::{EDITOR_HEIGHT, render, render_with_plugins, transcript_lines};

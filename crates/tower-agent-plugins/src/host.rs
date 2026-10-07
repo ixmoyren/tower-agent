@@ -69,6 +69,35 @@ impl HostApi {
             .collect()
     }
 
+    /// 运行时登记（或覆盖）一个工具能力。
+    ///
+    /// 动态/JIT 插件在加载时通过它把新工具暴露给宿主；同名工具直接覆盖，返回
+    /// 被替换掉的旧实现。
+    pub fn register_tool(&self, tool: AgentTool) -> Option<AgentTool> {
+        self.tools
+            .lock()
+            .expect("host tools mutex poisoned")
+            .insert(tool.name().to_string(), tool)
+    }
+
+    /// 运行时移除一个工具能力，返回被移除的实现。
+    pub fn remove_tool(&self, name: &str) -> Option<AgentTool> {
+        self.tools
+            .lock()
+            .expect("host tools mutex poisoned")
+            .remove(name)
+    }
+
+    /// 取一个已登记工具能力的克隆（不存在时 `None`）。
+    #[must_use]
+    pub fn tool(&self, name: &str) -> Option<AgentTool> {
+        self.tools
+            .lock()
+            .expect("host tools mutex poisoned")
+            .get(name)
+            .cloned()
+    }
+
     /// 为某个插件构造受限的能力视图。
     pub fn access_for(&self, manifest: &PluginManifest) -> Result<PluginAccess, PluginError> {
         let mut allowed = BTreeSet::new();

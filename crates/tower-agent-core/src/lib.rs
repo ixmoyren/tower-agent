@@ -10,6 +10,7 @@ pub mod layer;
 mod registration;
 mod service;
 mod tool;
+mod ui;
 
 pub use error::{AgentError, BoxError};
 pub use event::{AgentEvent, AgentMessage};
@@ -24,4 +25,7 @@ pub use service::{
 pub use tool::{
     AgentTool, AgentToolResult, AgentToolService, AgentToolServiceExt, BoxToolService,
     PrepareArguments, Replay, ToolCallRequest, ToolExecutionMode, ToolResultStream,
+};
+pub use ui::{
+    Panel, PanelAnchor, StatusSegment, ToolRenderer, UiContribution, UiState, render_template,
 };

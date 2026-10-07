@@ -9,8 +9,16 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+futures-util.workspace = true
 monty-pool = "1.1.0"
 monty-types = "1.1.0"
+schemars.workspace = true
 semver = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true }
+tower.workspace = true
+tower-agent-core = { version = "0.1.0", path = "../tower-agent-core" }
 tower-agent-plugins = { path = "../tower-agent-plugins" }
+tower-agent-provider = { version = "0.1.0", path = "../tower-agent-provider" }
+tower-agent-runtime = { version = "0.1.0", path = "../tower-agent-runtime" }

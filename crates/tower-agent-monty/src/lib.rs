@@ -1,215 +1,59 @@
-//! 基于 [monty](https://crates.io/crates/monty) 的热重载插件宿主（`docs/plugins.md` §4.3）。
+//! `tower-agent-monty` — 基于 [monty](https://crates.io/crates/monty) 的 mods 宿主
+//! （`docs/plugins.md` §4.3；cc `mods` 模式）。
 //!
-//! monty 是 Rust 写的 Python 子集沙箱；这里用 `monty-pool` 把解释器跑在**工作子进程**里
-//! （崩溃隔离）：崩溃只杀掉 worker，池会替换它，宿主进程不受影响。
+//! monty 是 Rust 写的 Python 子集沙箱；这里用 `monty-pool` 把解释器跑在**工作子进程**
+//! 里（崩溃隔离）：崩溃只杀掉 worker，池会替换它，宿主进程不受影响。
 //!
-//! - 宿主能力调用：脚本调用未定义的外部函数会挂起为 [`TurnEvent::FunctionCall`]，由
-//!   [`MontyHost`] 回调求值后 `resume` 继续——这就是“宿主函数即能力调用”。
-//! - 热重载：[`MontyPlugin::reload`] 原子替换脚本源码；[`MontyPlugin::reload_checked`]
-//!   先试跑一次，成功才替换、失败保留旧版本并回报错误。
+//! 一个「mod」就是一段 LLM/用户生成的 monty 代码，它能：
 //!
-//! 运行需要 `monty` worker 二进制（`cargo build -p monty-runtime` 或 PyPI 的
-//! `pydantic-monty-runtime`），路径由构造参数给出。
+//! - **调宿主能力**：脚本里未定义的函数调用会挂起为 `TurnEvent::FunctionCall`，经
+//!   [`MontyHost`] 派发到宿主（[`ModManager`] 提供 `tool_call` / `log` / `state_*`）；
+//! - **提供工具**：安装期调用 `tool_register(name, function, ...)`，宿主把它包成一个
+//!   [`ModTool`] 动态注册进工具集；
+//! - **改 UI**：调用 `ui_status` / `ui_panel` / `ui_tool_render`，写进前端无关的
+//!   [`tower_agent_core::UiState`]，由 TUI / web / GUI 各自渲染。
+//!
+//! 对 LLM 暴露的作者工具（[`authoring_tools`]）：`mod_write` / `mod_reload` /
+//! `mod_list` / `mod_remove`。
+//!
+//! 运行需要 monty worker 二进制（`cargo build -p monty-runtime` 或 PyPI 的
+//! `pydantic-monty-runtime`），路径由 [`ModManager::new`] 给出。
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+mod author;
+pub mod host;
+mod json;
+mod manager;
+mod plugin;
+mod tool;
 
-use monty_pool::{Pool, PoolConfig, PoolError, ReplConfig, ResumeValue, TurnEvent, on_print_sync};
-use monty_types::{MontyObject, NamedValues};
-use tower_agent_plugins::{Lifecycle, PluginError, PluginManifest, PluginState};
-
-/// 宿主能力回调：脚本调用未定义的 `function(*args)` 时触发。
-pub trait MontyHost: Send + Sync + 'static {
-    /// 求值一次外部函数调用，返回值会被送回沙箱。
-    fn call(&self, function: &str, args: &[String]) -> String;
-}
-
-/// 一个 monty 热重载插件。
-pub struct MontyPlugin {
-    manifest: PluginManifest,
-    pool: Pool,
-    code: Mutex<String>,
-    host: Arc<dyn MontyHost>,
-    lifecycle: Lifecycle,
-}
-
-impl MontyPlugin {
-    /// 用 worker 二进制路径与初始脚本构造（并试跑一次校验）。
-    pub async fn load(
-        manifest: PluginManifest,
-        code: impl Into<String>,
-        worker: impl Into<PathBuf>,
-        host: Arc<dyn MontyHost>,
-    ) -> Result<Self, PluginError> {
-        let name = manifest.name.clone();
-        let config = PoolConfig::subprocess(worker.into());
-        let pool = Pool::new(config)
-            .await
-            .map_err(|error| load_error(&name, error))?;
-        let plugin = Self {
-            manifest,
-            pool,
-            code: Mutex::new(code.into()),
-            host,
-            lifecycle: Lifecycle::new(name.clone()),
-        };
-        for state in [
-            PluginState::Loaded,
-            PluginState::Validated,
-            PluginState::Resolved,
-            PluginState::Started,
-        ] {
-            plugin.lifecycle.transition(state)?;
-        }
-        Ok(plugin)
-    }
-
-    /// 插件清单。
-    #[must_use]
-    pub fn manifest(&self) -> &PluginManifest {
-        &self.manifest
-    }
-
-    /// 生命周期句柄。
-    #[must_use]
-    pub fn lifecycle(&self) -> &Lifecycle {
-        &self.lifecycle
-    }
-
-    /// 当前脚本源码。
-    #[must_use]
-    pub fn code(&self) -> String {
-        self.code.lock().expect("monty code poisoned").clone()
-    }
-
-    /// 跑一次：把 `input` 作为沙箱全局 `input` 注入当前脚本，返回最终表达式的值。
-    pub async fn call(&self, input: &str) -> Result<String, PluginError> {
-        let _guard = self
-            .lifecycle
-            .begin_call()
-            .ok_or_else(|| PluginError::Load {
-                plugin: self.manifest.name.clone(),
-                message: "plugin is not started".into(),
-            })?;
-        let code = self.code();
-        self.run(&code, Some(input)).await
-    }
-
-    /// 原子替换脚本源码（下一次调用生效）。
-    pub fn reload(&self, code: impl Into<String>) {
-        *self.code.lock().expect("monty code poisoned") = code.into();
-    }
-
-    /// 试跑新脚本，成功才替换；失败保留旧版本并回报错误。
-    pub async fn reload_checked(&self, code: impl Into<String>) -> Result<(), PluginError> {
-        let code = code.into();
-        self.run(&code, Some("")).await?;
-        *self.code.lock().expect("monty code poisoned") = code;
-        Ok(())
-    }
-
-    /// 停止：卸载前必须调用。
-    pub fn stop(&self) -> Result<(), PluginError> {
-        self.lifecycle.stop()
-    }
-
-    /// 卸载：要求已 `stop` 且 in-flight 归零。
-    pub fn unload(&self) -> Result<(), PluginError> {
-        self.lifecycle.unload()
-    }
-
-    /// 在一个 checkout 会话里跑一段脚本，驱动 FunctionCall 挂起。
-    async fn run(&self, code: &str, input: Option<&str>) -> Result<String, PluginError> {
-        let name = self.manifest.name.clone();
-        let mut checkout = self
-            .pool
-            .checkout(&ReplConfig::default())
-            .await
-            .map_err(|error| load_error(&name, error))?;
-
-        let mut inputs = NamedValues::new();
-        if let Some(input) = input {
-            inputs.push("input", MontyObject::string(input));
-        }
-
-        let mut on_print = on_print_sync(|_stream, _text| {});
-        let mut event = checkout
-            .feed(code, inputs, Vec::new(), true, &mut on_print)
-            .await
-            .map_err(|error| load_error(&name, error))?;
-
-        loop {
-            match event {
-                TurnEvent::Complete(value) => {
-                    checkout
-                        .finish()
-                        .await
-                        .map_err(|error| load_error(&name, error))?;
-                    return Ok(value.to_string());
-                }
-                TurnEvent::FunctionCall {
-                    function_name,
-                    args,
-                    ..
-                } => {
-                    let args: Vec<String> = args.args().map(|arg| arg.to_string()).collect();
-                    let result = self.host.call(&function_name, &args);
-                    event = checkout
-                        .resume(
-                            ResumeValue::Return(MontyObject::string(result)),
-                            &mut on_print,
-                        )
-                        .await
-                        .map_err(|error| load_error(&name, error))?;
-                }
-                other => {
-                    return Err(PluginError::Load {
-                        plugin: name,
-                        message: format!("unsupported monty suspension: {other:?}"),
-                    });
-                }
-            }
-        }
-    }
-}
-
-fn load_error(plugin: &str, error: PoolError) -> PluginError {
-    PluginError::Load {
-        plugin: plugin.into(),
-        message: error.to_string(),
-    }
-}
-
-/// 便捷：用一段源码与 worker 路径构造（清单名固定为 `monty`）。
-pub async fn load_plugin(
-    code: impl Into<String>,
-    worker: impl Into<PathBuf>,
-    host: Arc<dyn MontyHost>,
-) -> Result<MontyPlugin, PluginError> {
-    let manifest = PluginManifest::new(
-        "monty",
-        semver::Version::new(1, 0, 0),
-        tower_agent_plugins::PluginKind::Jit,
-    );
-    MontyPlugin::load(manifest, code, worker, host).await
-}
+pub use author::authoring_tools;
+pub use host::{HostCall, MontyHost};
+pub use manager::{ModManager, ModSummary, manager_with_worker};
+pub use plugin::MontyPlugin;
+pub use tool::{ModTool, ToolSpec};
 
 #[cfg(test)]
 mod tests {
+    use std::{path::PathBuf, sync::Arc};
+
+    use futures_util::future::BoxFuture;
+    use serde_json::{Value, json};
+    use tower_agent_core::UiState;
+    use tower_agent_plugins::HostApi;
+
     use super::*;
-
-    struct NoHost;
-
-    impl MontyHost for NoHost {
-        fn call(&self, _function: &str, _args: &[String]) -> String {
-            String::new()
-        }
-    }
 
     fn worker() -> Option<PathBuf> {
         std::env::var_os("TPA_MONTY_BIN").map(PathBuf::from)
+    }
+
+    /// 一个把宿主调用记录下来的派发器。
+    struct RecordingHost;
+
+    impl MontyHost for RecordingHost {
+        fn dispatch(&self, call: HostCall) -> BoxFuture<'static, Result<Value, String>> {
+            Box::pin(async move { Ok(json!({ "echo": call.function })) })
+        }
     }
 
     #[tokio::test]
@@ -218,10 +62,24 @@ mod tests {
             eprintln!("skipping: set TPA_MONTY_BIN to the monty worker binary");
             return;
         };
-        let plugin = load_plugin("input.upper()", worker, Arc::new(NoHost))
+        let plugin = MontyPlugin::load(
+            tower_agent_plugins::PluginManifest::new(
+                "demo",
+                semver::Version::new(1, 0, 0),
+                tower_agent_plugins::PluginKind::Jit,
+            ),
+            "def upper(value):\n    return value.upper()\n",
+            worker,
+            Arc::new(RecordingHost),
+        )
+        .await
+        .expect("load monty plugin");
+        plugin.activate().await.expect("activate");
+        let result = plugin
+            .call_function("upper", &json!("hi"))
             .await
-            .expect("load monty plugin");
-        assert_eq!(plugin.call("hi").await.expect("call"), "HI");
+            .expect("call");
+        assert_eq!(result, json!("HI"));
     }
 
     #[tokio::test]
@@ -232,13 +90,158 @@ mod tests {
         };
         struct Greet;
         impl MontyHost for Greet {
-            fn call(&self, function: &str, args: &[String]) -> String {
-                format!("{function}:{}", args.join(","))
+            fn dispatch(&self, call: HostCall) -> BoxFuture<'static, Result<Value, String>> {
+                Box::pin(
+                    async move { Ok(json!(format!("{}({})", call.function, call.args.len()))) },
+                )
             }
         }
-        let plugin = load_plugin("greet(input)", worker, Arc::new(Greet))
+        let plugin = MontyPlugin::load(
+            tower_agent_plugins::PluginManifest::new(
+                "greeter",
+                semver::Version::new(1, 0, 0),
+                tower_agent_plugins::PluginKind::Jit,
+            ),
+            "def greet(value):\n    return host_hello(value)\n",
+            worker,
+            Arc::new(Greet),
+        )
+        .await
+        .expect("load monty plugin");
+        plugin.activate().await.expect("activate");
+        let result = plugin
+            .call_function("greet", &json!("world"))
             .await
-            .expect("load monty plugin");
-        assert_eq!(plugin.call("world").await.expect("call"), "greet:world");
+            .expect("call");
+        assert_eq!(result, json!("host_hello(1)"));
+    }
+
+    #[tokio::test]
+    async fn mod_registers_a_tool_and_writes_status() {
+        let Some(worker) = worker() else {
+            eprintln!("skipping: set TPA_MONTY_BIN to the monty worker binary");
+            return;
+        };
+        let ui = UiState::new();
+        let host = HostApi::from_tools(Vec::<tower_agent_core::AgentTool>::new());
+        let manager = ModManager::new(worker, host, ui.clone());
+
+        let code = "\
+tool_register(\"shout\", \"shout\", \"shout a string\", {\"type\": \"object\"})
+ui_status(\"mod:demo\", \"demo active\", \"cyan\", 5)
+
+def shout(args):
+    return args[\"text\"].upper()
+";
+        manager.write("demo", code).await.expect("write mod");
+
+        let summaries = manager.list();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].tools, vec!["shout"]);
+        assert_eq!(
+            ui.snapshot().status[0].text,
+            "demo active",
+            "ui_status 写进了共享 UI 状态"
+        );
+
+        let tools = manager.tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name(), "shout");
+
+        // 通过 ToolRouter 真的调用 mod 工具。
+        let mut router = tower_agent_runtime::ToolRouter::new();
+        router.insert_boxed("shout", tools[0].service().clone());
+        let request = tower_agent_core::ToolCallRequest::new(tower_agent_provider::ToolCall {
+            id: "c1".into(),
+            name: "shout".into(),
+            arguments: serde_json::json!({ "text": "hi" })
+                .as_object()
+                .cloned()
+                .unwrap()
+                .into(),
+            thought_signature: None,
+            namespace: None,
+        });
+        use tower::ServiceExt as _;
+        let stream = router.oneshot(request).await.expect("router call");
+        let results: Vec<_> = {
+            use futures_util::StreamExt as _;
+            stream.collect().await
+        };
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].is_error);
+        let text: String = results[0]
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                tower_agent_provider::ContentBlock::Text(text) => Some(text.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "HI", "mod 工具真的执行了 Python 函数");
+    }
+
+    #[tokio::test]
+    async fn mod_can_call_host_tools() {
+        use schemars::JsonSchema;
+        use serde::Deserialize;
+
+        let Some(worker) = worker() else {
+            eprintln!("skipping: set TPA_MONTY_BIN to the monty worker binary");
+            return;
+        };
+
+        #[derive(Deserialize, JsonSchema)]
+        struct EchoParams {
+            text: String,
+        }
+
+        let echo = tower_agent_core::ToolRegistration::new::<EchoParams, _, _>(
+            "echo",
+            "echo text back",
+            |params: EchoParams, _request| async move {
+                Ok(tower_agent_core::AgentToolResult::text(params.text))
+            },
+        );
+        let host = HostApi::from_tools([echo]);
+        let manager = ModManager::new(worker, host, UiState::new());
+
+        let code = "\
+tool_register(\"shout\", \"shout\", \"uppercase via host echo\", {\"type\": \"object\"})
+
+def shout(args):
+    return tool_call(\"echo\", {\"text\": args[\"text\"]}).upper()
+";
+        manager.write("echoer", code).await.expect("write mod");
+
+        let tools = manager.tools();
+        let mut router = tower_agent_runtime::ToolRouter::new();
+        router.insert_boxed("shout", tools[0].service().clone());
+        let request = tower_agent_core::ToolCallRequest::new(tower_agent_provider::ToolCall {
+            id: "c2".into(),
+            name: "shout".into(),
+            arguments: serde_json::json!({ "text": "hi" })
+                .as_object()
+                .cloned()
+                .unwrap()
+                .into(),
+            thought_signature: None,
+            namespace: None,
+        });
+        use tower::ServiceExt as _;
+        let stream = router.oneshot(request).await.expect("router call");
+        let results: Vec<_> = {
+            use futures_util::StreamExt as _;
+            stream.collect().await
+        };
+        let text: String = results[0]
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                tower_agent_provider::ContentBlock::Text(text) => Some(text.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "HI", "mod 通过 tool_call 调用了宿主工具并拿回结果");
     }
 }

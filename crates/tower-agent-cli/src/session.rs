@@ -18,6 +18,9 @@ use std::{
 
 use tokio::sync::mpsc;
 use tower::ServiceExt as _;
+use tower_agent_core::UiState;
+use tower_agent_monty::{ModManager, authoring_tools};
+use tower_agent_plugins::HostApi;
 use tower_agent_provider::{
     BoxStreamService, Message, Model, ModelThinkingLevel, UserContent, UserMessage,
 };
@@ -33,6 +36,15 @@ pub struct Session {
     service: Mutex<BoxAgentService>,
     control: BoxAgentControl,
     cwd: PathBuf,
+    /// 会话基础工具集（内置工具，或经 `--tools` 过滤后的结果）。
+    base_tools: Mutex<Vec<AgentTool>>,
+    /// mods 作者工具（`mod_write` 等）；mods 未启用时为空。
+    ///
+    /// `AgentTool` 是 `Send` 但非 `Sync`（内含 `BoxCloneService`），用 `Mutex` 包一层
+    /// 让 `Session` 保持 `Sync`（TUI 驱动任务要求 `Arc<Session>: Send`）。
+    authoring_tools: Mutex<Vec<AgentTool>>,
+    /// mods 宿主；只有设置了 `TPA_MONTY_BIN`（monty worker 二进制）时才启用。
+    mods: Option<Arc<ModManager>>,
 }
 
 impl Session {
@@ -51,8 +63,23 @@ impl Session {
          使用工具而不是猜测文件内容；修改文件前先读一遍。",
             tower_agent_plugins::DEFAULT_TOOL_NAMES.join(", ")
         );
+        let base_tools = tower_agent_plugins::default_tools(&cwd);
+        // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
+        // 需要 monty worker 二进制，路径由 `TPA_MONTY_BIN` 给出；未设置则关闭。
+        let (mods, authoring) = match std::env::var_os("TPA_MONTY_BIN") {
+            Some(worker) => {
+                let host = HostApi::from_tools(base_tools.clone());
+                let manager = ModManager::new(worker, host, UiState::new());
+                let authoring = authoring_tools(Arc::clone(&manager));
+                (Some(manager), authoring)
+            }
+            None => (None, Vec::new()),
+        };
+
+        let mut initial_tools = base_tools.clone();
+        initial_tools.extend(authoring.iter().cloned());
         let mut options = AgentOptions::new(stream);
-        options.initial.tools = tower_agent_plugins::default_tools(&cwd);
+        options.initial.tools = initial_tools;
         options.initial.model = Some(model);
         options.initial.system_prompt = Some(system_prompt);
         let (service, control) = crate::stack::assemble(options);
@@ -60,6 +87,9 @@ impl Session {
             service: Mutex::new(service),
             control,
             cwd,
+            base_tools: Mutex::new(base_tools),
+            authoring_tools: Mutex::new(authoring),
+            mods,
         }
     }
 
@@ -119,6 +149,32 @@ impl Session {
 
     /// 替换可执行工具集（`--tools` / `--exclude-tools` / `--no-tools`）。
     pub fn set_tools(&self, tools: Vec<AgentTool>) {
+        *self.base_tools.lock().expect("base tools poisoned") = tools;
+        self.refresh_tools();
+    }
+
+    /// mods 的共享 UI 状态（未启用 mods 时为 `None`）。
+    #[must_use]
+    pub fn ui_state(&self) -> Option<UiState> {
+        self.mods.as_ref().map(|mods| mods.ui())
+    }
+
+    /// 重新计算工具集：基础工具 + mods 作者工具 + mods 提供的工具。
+    ///
+    /// mod 在运行中 `tool_register` 之后，下一轮 turn 开始前会走到这里，因此新工具
+    /// 会被 agent 看到。
+    fn refresh_tools(&self) {
+        let mut tools = self.base_tools.lock().expect("base tools poisoned").clone();
+        tools.extend(
+            self.authoring_tools
+                .lock()
+                .expect("authoring tools poisoned")
+                .iter()
+                .cloned(),
+        );
+        if let Some(mods) = &self.mods {
+            tools.extend(mods.tools());
+        }
         self.control.set_tools(tools);
     }
 
@@ -129,6 +185,8 @@ impl Session {
 
     /// 走 Service 边界跑一轮：`messages` 为空表示继续当前 transcript。
     async fn turn(&self, messages: Vec<AgentMessage>) -> Result<(), AgentError> {
+        // 上一轮 mod 注册的工具在这一轮生效。
+        self.refresh_tools();
         let request = AgentRequest {
             messages,
             ..AgentRequest::default()
@@ -138,7 +196,10 @@ impl Session {
             .lock()
             .expect("session service poisoned")
             .clone();
-        service.oneshot(request).await.map(|_| ())
+        let outcome = service.oneshot(request).await.map(|_| ());
+        // 本轮 mod 注册的工具在下一轮生效。
+        self.refresh_tools();
+        outcome
     }
 }
 
@@ -346,7 +407,7 @@ impl tower_agent_tui::CommandHost for Session {
             }
             None => crate::provider::build(kind, None, options),
         }
-            .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())?;
 
         self.control.set_stream(setup.stream_fn());
         self.control.set_model(setup.model.clone());
@@ -474,15 +535,22 @@ pub async fn run_tui(
         first_error
     });
 
+    let mut plugins = tower_agent_tui::frontend_plugins();
+    if let Some(mods) = &session.mods {
+        plugins.push(Box::new(tower_agent_tui::ContributionPlugin::new(
+            mods.ui(),
+        )));
+    }
+
     let rendered = tower_agent_tui::run_agent_tui(
         subscription,
         submissions_tx,
         host,
         title.to_string(),
         notice,
-        tower_agent_tui::frontend_plugins(),
+        plugins,
     )
-        .await;
+    .await;
 
     // 用户退出：取消进行中的一轮，并等驱动任务自然收尾（避免直接 abort 丢掉取消语义）。
     session.abort();
@@ -722,7 +790,7 @@ mod tests {
             tower_agent_tui::render_message(&tower_agent_runtime::AgentMessage::Message(
                 tower_agent_provider::Message::ToolResult(result)
             ))
-                .contains("Tool nope not found")
+            .contains("Tool nope not found")
         );
     }
 
@@ -789,9 +857,10 @@ mod tests {
         let session = session(dir.path());
         let state = session.state();
         let names: Vec<&str> = state.tools.iter().map(|tool| tool.name()).collect();
-        assert_eq!(
-            names.as_slice(),
-            tower_agent_plugins::DEFAULT_TOOL_NAMES.as_slice()
+        // 内置工具在最前；启用 mods 时其后会追加 `mod_*` 作者工具。
+        assert!(
+            names.starts_with(&tower_agent_plugins::DEFAULT_TOOL_NAMES),
+            "内置工具应按顺序领先：{names:?}"
         );
         assert!(state.system_prompt.contains("read"));
     }
@@ -840,7 +909,7 @@ mod tests {
             crate::provider::ProviderStackOptions::default(),
             Some("test-key"),
         )
-            .expect("provider setup");
+        .expect("provider setup");
         let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone());
 
         let info = session.session_info().join("\n");

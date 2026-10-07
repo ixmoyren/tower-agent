@@ -22,6 +22,8 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
 tower-agent-tui = { path = "../tower-agent-tui" }
+tower-agent-monty = { version = "0.1.0", path = "../tower-agent-monty" }
+tower-agent-core = { version = "0.1.0", path = "../tower-agent-core" }
 
 [dev-dependencies]
 tower-agent-provider = { path = "../tower-agent-provider", features = ["test-util"] }

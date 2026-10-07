@@ -83,7 +83,12 @@
 - 原子换绑实现 **热加载**：试跑新版本 → 成功才替换源码槽位 → 旧版本等待 in-flight 完成后释放；失败保留旧版本并回报错误。
 - 目标场景：cc 的 `mods` 模式（用户/LLM 可写、可热更的轻量逻辑）。
 
-> 实现状态（M3 已落地）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `call` / `reload` / `reload_checked` / `stop` / `unload`。宿主用 `monty_pool::Pool`（`PoolConfig::subprocess(worker)`）跑子进程 worker，`MontyHost` 回调外部函数，热加载用 `reload_checked` 试跑成功后原子替换源码。运行需要 monty worker 二进制（`cargo build -p monty-runtime`）。
+> 实现状态（M3 已落地，mods 作者闭环见下）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload`。宿主用 `monty_pool::Pool`（`PoolConfig::subprocess(worker)`）跑子进程 worker；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主（参数/返回值都是 JSON），热加载用 `reload_checked` 试跑成功后原子替换源码。运行需要 monty worker 二进制（`cargo build -p monty-runtime` 或 PyPI 的 `pydantic-monty-runtime`，路径由 `TPA_MONTY_BIN` 给出）。
+>
+> **mods（cc `mods` 模式）**：`ModManager` 管理一组 monty mod，对 LLM 暴露 `mod_write` / `mod_reload` / `mod_list` / `mod_remove` 作者工具。mod 脚本可：
+> 1. **调宿主能力**：`tool_call(name, args)` / `log` / `state_get` / `state_set`；
+> 2. **提供工具**：安装期 `tool_register(name, function, description, parameters)` 把 Python 函数包成 `ModTool`，运行时动态注册进 `HostApi` 与 agent 工具集（`tool_unregister` 注销）；
+> 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据。
 
 ## 5. 插件模型
 
