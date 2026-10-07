@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower_agent_core::{AgentTool, AgentToolResult, ToolRegistration};
 
-use crate::manager::{ModManager, ModSummary};
+use crate::manager::{ModManager, ModPermissions, ModSummary};
 
 /// `mod_write` / `mod_reload` 的参数。
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -18,6 +18,9 @@ struct WriteParams {
     name: String,
     /// monty Python 源码。
     code: String,
+    /// 可选权限；缺省 = 默认权限（工具/UI/状态/FS 全开，FS 可写范围由挂载模式决定）。
+    #[serde(default)]
+    permissions: Option<ModPermissions>,
 }
 
 /// 只带名字的参数。
@@ -42,7 +45,13 @@ pub fn authoring_tools(manager: Arc<ModManager>) -> Vec<AgentTool> {
              （tool_call/log/state_*）、注册工具（tool_register）、贡献 UI（ui_status/ui_panel/ui_tool_render）。",
             move |params, _request| {
                 let manager = manager.clone();
-                async move { Ok(render(manager.write(&params.name, &params.code).await)) }
+                async move {
+                    Ok(render(
+                        manager
+                            .write_with_permissions(&params.name, &params.code, params.permissions)
+                            .await,
+                    ))
+                }
             },
         )
     };

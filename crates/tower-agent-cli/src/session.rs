@@ -69,6 +69,8 @@ impl Session {
         let (mods, authoring) = if std::env::var_os("TPA_NO_MODS").is_none() {
             let host = HostApi::from_tools(base_tools.clone());
             let manager = ModManager::new(host, UiState::new());
+            // 把工作目录只读挂到 /work，供 mod 读取项目文件；写操作被拒。
+            let _ = manager.mount_readonly("/work", &cwd);
             let authoring = authoring_tools(Arc::clone(&manager));
             (Some(manager), authoring)
         } else {
@@ -156,6 +158,13 @@ impl Session {
     #[must_use]
     pub fn ui_state(&self) -> Option<UiState> {
         self.mods.as_ref().map(|mods| mods.ui())
+    }
+
+    /// 后台预热 mods 沙箱（编译组件 + 预建实例）；在运行时内调用才生效。
+    pub fn prewarm_mods(&self) {
+        if let Some(mods) = &self.mods {
+            mods.spawn_warmup();
+        }
     }
 
     /// 重新计算工具集：基础工具 + mods 作者工具 + mods 提供的工具。
@@ -513,6 +522,8 @@ pub async fn run_tui(
     title: &str,
     notice: Option<String>,
 ) -> std::io::Result<()> {
+    // 后台预热 mods 沙箱，避免第一次写 mod 时才付 JIT 编译的代价。
+    session.prewarm_mods();
     let subscription = session.subscribe();
     let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();
     // 斜杠命令（`/new`、`/model`…）在 TUI 里执行，通过这个 trait 回调到会话。

@@ -1,7 +1,7 @@
-//! mods 宿主：管理一组 monty 插件，派发宿主能力调用，并把 mod 提供的工具
-//! 动态注册进 [`HostApi`]。
+//! mods 宿主：管理一组沙箱化的 monty 插件，派发宿主能力调用，把 mod 提供的工具
+//! 动态注册进 [`HostApi`]，并负责沙箱池、文件系统挂载与每-mod 权限。
 //!
-//! 三条能力轴都在这里落地：
+//! 三条能力轴（`docs`）：
 //!
 //! - **调宿主**：`tool_call` / `log` / `state_*`；
 //! - **提供工具**：`tool_register` / `tool_unregister`（运行时生效）；
@@ -10,24 +10,60 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    path::Path,
+    sync::{Arc, Mutex, Weak},
 };
 
 use futures_util::{StreamExt as _, future::BoxFuture};
+use monty_fs::{MountCallOutcome, MountMode, MountTable};
+use monty_types::OsFunctionCall;
 use semver::Version;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tower_agent_core::{
     AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer, UiState,
 };
-use tower_agent_plugins::{HostApi, Permission, PluginError, PluginKind, PluginManifest};
+use tower_agent_plugins::{HostApi, PluginError, PluginKind, PluginManifest};
 use tower_agent_provider::{Arguments, ToolCall};
 
 use crate::{
     host::{HostCall, MontyHost},
     plugin::MontyPlugin,
-    sandbox::SandboxEngine,
+    sandbox::SandboxPool,
     tool::{ModTool, ToolSpec},
+    wire,
 };
+
+/// 池里默认保留的空闲沙箱数。
+const DEFAULT_POOL_SIZE: usize = 4;
+
+/// 一个 mod 的权限。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct ModPermissions {
+    /// 允许调用宿主工具（`tool_call` / `tool_list`）。
+    pub tools: bool,
+    /// 允许注册/注销工具（`tool_register` / `tool_unregister`）。
+    pub register_tools: bool,
+    /// 允许贡献 UI（`ui_*`）。
+    pub ui: bool,
+    /// 允许读写宿主状态（`state_*`）与 `log`。
+    pub state: bool,
+    /// 允许文件系统 / OS 调用（实际可写范围由挂载模式决定）。
+    pub fs: bool,
+}
+
+impl Default for ModPermissions {
+    fn default() -> Self {
+        Self {
+            tools: true,
+            register_tools: true,
+            ui: true,
+            state: true,
+            fs: true,
+        }
+    }
+}
 
 /// 一个已加载 mod 的摘要（用于 `mod_list` / UI 展示）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,8 +80,9 @@ pub struct ModSummary {
 pub struct ModManager {
     host: HostApi,
     ui: UiState,
-    /// 共享的 wasmtime 引擎 + 已编译组件（首次用到时惰性创建）。
-    engine: OnceLock<Arc<SandboxEngine>>,
+    pool: Arc<SandboxPool>,
+    mounts: Mutex<MountTable>,
+    permissions: Mutex<BTreeMap<String, ModPermissions>>,
     mods: Mutex<BTreeMap<String, Arc<MontyPlugin>>>,
     tools: Mutex<BTreeMap<String, Vec<ToolSpec>>>,
     kv: Mutex<BTreeMap<String, Value>>,
@@ -55,33 +92,25 @@ impl std::fmt::Debug for ModManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ModManager")
             .field("mods", &self.list())
+            .field("idle_sandboxes", &self.pool.idle_count())
             .finish_non_exhaustive()
     }
 }
 
 impl ModManager {
-    /// 用宿主能力表与共享 UI 状态构造（monty 解释器内嵌在 wasm 组件里，无需外部 CLI）。
+    /// 用宿主能力表与共享 UI 状态构造。
     #[must_use]
     pub fn new(host: HostApi, ui: UiState) -> Arc<Self> {
         Arc::new(Self {
             host,
             ui,
-            engine: OnceLock::new(),
+            pool: Arc::new(SandboxPool::new(DEFAULT_POOL_SIZE)),
+            mounts: Mutex::new(MountTable::new()),
+            permissions: Mutex::new(BTreeMap::new()),
             mods: Mutex::new(BTreeMap::new()),
             tools: Mutex::new(BTreeMap::new()),
             kv: Mutex::new(BTreeMap::new()),
         })
-    }
-
-    /// 共享的 wasm 沙箱引擎（首次调用时创建并编译内嵌组件）。
-    fn engine(&self) -> Result<Arc<SandboxEngine>, PluginError> {
-        if let Some(engine) = self.engine.get() {
-            return Ok(Arc::clone(engine));
-        }
-        let engine = Arc::new(SandboxEngine::new()?);
-        // 并发下可能有人抢先 set；失败就用已存在的那份。
-        let _ = self.engine.set(Arc::clone(&engine));
-        Ok(self.engine.get().map(Arc::clone).unwrap_or(engine))
     }
 
     /// 共享的 UI 状态（前端据此渲染 mod 贡献）。
@@ -94,6 +123,88 @@ impl ModManager {
     #[must_use]
     pub fn host_api(&self) -> &HostApi {
         &self.host
+    }
+
+    /// 挂载一个宿主目录到沙箱虚拟路径。
+    ///
+    /// `mode` 决定读写：`ReadOnly` 下写操作抛 `PermissionError`；`OverlayMemory` 把写入
+    /// 留在内存里（默认推荐）；`ReadWrite` 直接写宿主（慎用）。
+    pub fn mount(
+        &self,
+        virtual_path: &str,
+        host_path: impl AsRef<Path>,
+        mode: MountMode,
+    ) -> Result<(), PluginError> {
+        self.mounts
+            .lock()
+            .expect("mount table poisoned")
+            .mount(virtual_path, host_path, mode, None)
+            .map_err(|error| PluginError::Load {
+                plugin: "mount".to_string(),
+                message: error.to_string(),
+            })
+    }
+
+    /// 只读挂载宿主目录（写操作抛 `PermissionError`）。
+    pub fn mount_readonly(
+        &self,
+        virtual_path: &str,
+        host_path: impl AsRef<Path>,
+    ) -> Result<(), PluginError> {
+        self.mount(virtual_path, host_path, MountMode::ReadOnly)
+    }
+
+    /// 以内存 overlay 挂载宿主目录：读取穿透到宿主，写入留在内存（不会改宿主）。
+    pub fn mount_overlay(
+        &self,
+        virtual_path: &str,
+        host_path: impl AsRef<Path>,
+    ) -> Result<(), PluginError> {
+        self.mount(
+            virtual_path,
+            host_path,
+            MountMode::OverlayMemory(monty_fs::OverlayState::new()),
+        )
+    }
+
+    /// 预热沙箱池：编译组件并预先创建 `instances` 个实例。
+    pub fn warmup(&self, instances: usize) -> Result<(), PluginError> {
+        self.pool.warmup(instances)
+    }
+
+    /// 在当前运行时后台预热（没有运行时则跳过，首次使用再惰性编译）。
+    pub fn spawn_warmup(self: &Arc<Self>) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let this = Arc::clone(self);
+            handle.spawn_blocking(move || {
+                let _ = this.warmup(2);
+            });
+        }
+    }
+
+    /// 当前空闲沙箱数（测试/诊断用）。
+    #[must_use]
+    pub fn idle_sandboxes(&self) -> usize {
+        self.pool.idle_count()
+    }
+
+    /// 设置某个 mod 的权限（默认在安装时写入）。
+    pub fn set_permissions(&self, name: &str, permissions: ModPermissions) {
+        self.permissions
+            .lock()
+            .expect("permissions poisoned")
+            .insert(name.to_string(), permissions);
+    }
+
+    /// 取某个 mod 的权限（没有记录时返回默认权限）。
+    #[must_use]
+    pub fn permissions(&self, name: &str) -> ModPermissions {
+        self.permissions
+            .lock()
+            .expect("permissions poisoned")
+            .get(name)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// 当前所有 mod 提供的工具。
@@ -147,6 +258,19 @@ impl ModManager {
         name: &str,
         code: &str,
     ) -> Result<ModSummary, PluginError> {
+        self.write_with_permissions(name, code, None).await
+    }
+
+    /// 写一个 mod，并（可选）设置它的权限。
+    pub async fn write_with_permissions(
+        self: &Arc<Self>,
+        name: &str,
+        code: &str,
+        permissions: Option<ModPermissions>,
+    ) -> Result<ModSummary, PluginError> {
+        if let Some(permissions) = permissions {
+            self.set_permissions(name, permissions);
+        }
         if self.mods.lock().expect("mods poisoned").contains_key(name) {
             return self.reload(name, code).await;
         }
@@ -189,21 +313,28 @@ impl ModManager {
         for spec in self.take_specs(name) {
             self.host.remove_tool(&spec.name);
         }
+        self.permissions
+            .lock()
+            .expect("permissions poisoned")
+            .remove(name);
         let _ = plugin.stop();
         let _ = plugin.unload();
         Ok(true)
     }
 
-    /// 创建并安装一个新 mod（内部：构造 → `activate` → 注册工具）。
+    /// 创建并安装一个新 mod（构造 → `activate` → 注册工具）。
     async fn install(self: &Arc<Self>, name: &str, code: &str) -> Result<ModSummary, PluginError> {
         let manifest = PluginManifest::new(name, Version::new(1, 0, 0), PluginKind::Jit);
         let adapter = Arc::new(ModHostAdapter {
             manager: Arc::downgrade(self),
             plugin: name.to_string(),
-            permissions: manifest.permissions.clone(),
         });
-        let sandbox = self.engine()?.checkout()?;
-        let plugin = Arc::new(MontyPlugin::load(manifest, code, adapter, sandbox)?);
+        let plugin = Arc::new(MontyPlugin::load(
+            manifest,
+            code,
+            adapter,
+            Arc::clone(&self.pool),
+        )?);
         self.take_specs(name);
         if let Err(error) = plugin.activate().await {
             // 激活失败：丢掉半途注册的工具声明，保持宿主干净。
@@ -265,18 +396,43 @@ impl ModManager {
     }
 
     /// 派发一次宿主调用（由 [`ModHostAdapter`] 调用）。
-    async fn dispatch(&self, call: HostCall, permissions: &[Permission]) -> Result<Value, String> {
+    async fn dispatch(&self, call: HostCall) -> Result<Value, String> {
+        let permissions = self.permissions(&call.plugin);
+        let denied = |what: &str| Err(format!("mod `{}` is not allowed to {what}", call.plugin));
+
         match call.function.as_str() {
-            "tool_call" => self.host_tool_call(&call, permissions).await,
-            "tool_list" => Ok(self.tool_names()),
-            "tool_register" => self.host_tool_register(&call),
-            "tool_unregister" => self.host_tool_unregister(&call),
+            "tool_call" | "tool_list" => {
+                if !permissions.tools {
+                    return denied("call host tools");
+                }
+                if call.function == "tool_list" {
+                    Ok(self.tool_names())
+                } else {
+                    self.host_tool_call(&call).await
+                }
+            }
+            "tool_register" | "tool_unregister" => {
+                if !permissions.register_tools {
+                    return denied("register tools");
+                }
+                if call.function == "tool_register" {
+                    self.host_tool_register(&call)
+                } else {
+                    self.host_tool_unregister(&call)
+                }
+            }
             "log" => {
+                if !permissions.state {
+                    return denied("log");
+                }
                 let message = arg_str(&call, 0, "message").unwrap_or_default();
                 eprintln!("[mod {}] {message}", call.plugin);
                 Ok(Value::Null)
             }
             "state_set" => {
+                if !permissions.state {
+                    return denied("write host state");
+                }
                 let key = arg_str(&call, 0, "key").ok_or("state_set requires (key, value)")?;
                 let value = call
                     .positional_or_kwarg(1, "value")
@@ -289,6 +445,9 @@ impl ModManager {
                 Ok(Value::Null)
             }
             "state_get" => {
+                if !permissions.state {
+                    return denied("read host state");
+                }
                 let key = arg_str(&call, 0, "key").ok_or("state_get requires (key)")?;
                 Ok(self
                     .kv
@@ -298,12 +457,55 @@ impl ModManager {
                     .cloned()
                     .unwrap_or(Value::Null))
             }
-            "ui_status" => self.host_ui_status(&call),
-            "ui_panel" => self.host_ui_panel(&call),
-            "ui_clear" => self.host_ui_clear(&call),
-            "ui_tool_render" => self.host_ui_tool_render(&call),
-            "ui_state" => serde_json::to_value(self.ui.snapshot()).map_err(|e| e.to_string()),
+            "ui_state" => {
+                if !permissions.ui {
+                    return denied("read UI state");
+                }
+                serde_json::to_value(self.ui.snapshot()).map_err(|error| error.to_string())
+            }
+            name if name.starts_with("ui_") => {
+                if !permissions.ui {
+                    return denied("change the UI");
+                }
+                match name {
+                    "ui_status" => self.host_ui_status(&call),
+                    "ui_panel" => self.host_ui_panel(&call),
+                    "ui_clear" => self.host_ui_clear(&call),
+                    "ui_tool_render" => self.host_ui_tool_render(&call),
+                    other => Err(format!("unknown host function `{other}`")),
+                }
+            }
             other => Err(format!("unknown host function `{other}`")),
+        }
+    }
+
+    /// 服务一次 OS 调用（由 [`ModHostAdapter::handle_os_call`] 调用）。
+    fn handle_os_call(&self, plugin: &str, call_json: &str) -> String {
+        if !self.permissions(plugin).fs {
+            return wire::permission_denied("filesystem access is not allowed for this mod")
+                .to_string();
+        }
+        let call: OsFunctionCall = match serde_json::from_str(call_json) {
+            Ok(call) => call,
+            Err(error) => {
+                return wire::error_result(monty_types::MontyException::new(
+                    monty_types::ExcType::RuntimeError,
+                    Some(format!("invalid os-call payload: {error}")),
+                ))
+                .to_string();
+            }
+        };
+        let outcome = self
+            .mounts
+            .lock()
+            .expect("mount table poisoned")
+            .handle_os_call(call);
+        match outcome {
+            MountCallOutcome::Handled(Ok(value)) => wire::return_result(&value).to_string(),
+            MountCallOutcome::Handled(Err(error)) => {
+                wire::error_result(error.into_exception()).to_string()
+            }
+            MountCallOutcome::NotHandled(_) => wire::NOT_HANDLED.to_string(),
         }
     }
 
@@ -313,11 +515,7 @@ impl ModManager {
         json!(names)
     }
 
-    async fn host_tool_call(
-        &self,
-        call: &HostCall,
-        permissions: &[Permission],
-    ) -> Result<Value, String> {
+    async fn host_tool_call(&self, call: &HostCall) -> Result<Value, String> {
         let name = arg_str(call, 0, "name").ok_or("tool_call requires (name, args)")?;
         let arguments = match call.positional_or_kwarg(1, "args") {
             Some(Value::Object(object)) => object.clone(),
@@ -333,7 +531,7 @@ impl ModManager {
         });
         let stream = self
             .host
-            .call_tool_with(name, request, permissions)
+            .call_tool(name, request)
             .await
             .map_err(|error| error.to_string())?;
         let mut stream = stream;
@@ -467,24 +665,29 @@ impl ModManager {
     }
 }
 
-/// 每个 mod 的宿主适配器：把 [`HostCall`] 转交给 [`ModManager::dispatch`]。
+/// 每个 mod 的宿主适配器：把调用转交给 [`ModManager`]。
 struct ModHostAdapter {
     manager: Weak<ModManager>,
     plugin: String,
-    permissions: Vec<Permission>,
 }
 
 impl MontyHost for ModHostAdapter {
     fn dispatch(&self, call: HostCall) -> BoxFuture<'static, Result<Value, String>> {
         let manager = self.manager.upgrade();
         let plugin = self.plugin.clone();
-        let permissions = self.permissions.clone();
         Box::pin(async move {
             let Some(manager) = manager else {
                 return Err(format!("mod `{plugin}` host is gone"));
             };
-            manager.dispatch(call, &permissions).await
+            manager.dispatch(call).await
         })
+    }
+
+    fn handle_os_call(&self, call_json: &str) -> String {
+        match self.manager.upgrade() {
+            Some(manager) => manager.handle_os_call(&self.plugin, call_json),
+            None => wire::NOT_HANDLED.to_string(),
+        }
     }
 }
 

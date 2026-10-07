@@ -10,11 +10,17 @@
 - `start(source)`：新建会话并喂入源码，返回首个 `progress`；
 - `resume-function(call-id, result-json)` / `reject-function(call-id, message)`：
   恢复一次挂起的外部函数调用；
-- `resume-name(name)` / `resume-os(call-id)`：未定义名字 / OS 调用的默认处理。
+- `resume-name(name)`：未定义名字（回 `NameError`）；
+- `resume-os(call-id, result-json)`：恢复一次 OS 调用（宿主按挂载表服务，或回
+  `not_handled` 让沙箱用默认异常）。
 
 `progress` 是 `complete` / `function-call` / `name-lookup` / `os-call` / `error`
-的变体，参数与返回值都以 JSON 字符串过界。每个组件实例内部用一个 `thread_local`
-保存当前挂起的 REPL 进度，因此「一个组件实例 = 一个 mod 会话」。
+的变体。外部函数调用与 OS 调用都以 JSON 字符串过界（`os-call` 携带序列化的
+`OsFunctionCall`）。每个组件实例内部用一个 `thread_local` 保存当前挂起的 REPL
+进度；宿主每次运行以 `start` 开头会重置它，因此实例可以进池复用。
+
+资源上限（见 `src/lib.rs`：单次 feed 5s / turn 2s / 递归 200 / 挂起 10000）
+在组件内强制，避免 `while True: pass` 之类占死执行。
 
 ## 重新生成
 

@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 dirs.workspace = true
 futures-util.workspace = true
+monty-fs = "1.1.0"
+monty-types = "1.1.0"
 schemars.workspace = true
 semver = { workspace = true }
 serde.workspace = true
@@ -23,3 +25,6 @@ tower-agent-provider = { version = "0.1.0", path = "../tower-agent-provider" }
 tower-agent-runtime = { version = "0.1.0", path = "../tower-agent-runtime" }
 wasmtime = { version = "49", default-features = false, features = ["cranelift", "component-model", "cache", "runtime", "std", "parallel-compilation"] }
 wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
+
+[dev-dependencies]
+tempfile.workspace = true

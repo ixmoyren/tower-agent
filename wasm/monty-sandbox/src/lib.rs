@@ -11,7 +11,7 @@ mod json;
 
 use std::cell::RefCell;
 
-use bindings::exports::tower_agent::monty::sandbox::{FunctionCall, Guest, Progress};
+use bindings::exports::tower_agent::monty::sandbox::{FunctionCall, Guest, OsCall, Progress};
 use monty::{MontyRepl, ReplProgress, ReplStartError};
 use monty_types::{
     CompileOptions, ExcType, ExtFunctionResult, MontyException, NameLookupResult, NamedValues,
@@ -87,7 +87,10 @@ fn view_of(progress: &ReplProgress) -> Progress {
             call_id: call.call_id,
         }),
         ReplProgress::NameLookup(lookup) => Progress::NameLookup(lookup.name.clone()),
-        ReplProgress::OsCall(call) => Progress::OsCall(call.call_id),
+        ReplProgress::OsCall(call) => Progress::OsCall(OsCall {
+            call_id: call.call_id,
+            payload_json: serde_json::to_string(&call.function_call).unwrap_or_default(),
+        }),
         ReplProgress::ResolveFutures(_) => {
             Progress::Error("async sandbox futures are not supported".to_string())
         }
@@ -150,7 +153,7 @@ impl Guest for Component {
         }
     }
 
-    fn resume_os(call_id: u32) -> Progress {
+    fn resume_os(call_id: u32, result_json: String) -> Progress {
         let Some(ReplProgress::OsCall(call)) = take_state() else {
             return Progress::Error("no suspended os call".to_string());
         };
@@ -158,9 +161,33 @@ impl Guest for Component {
             STATE.with(|state| *state.borrow_mut() = Some(ReplProgress::OsCall(call)));
             return Progress::Error("os call id mismatch".to_string());
         }
-        let exception = call.function_call.on_no_handler();
-        finish(call.resume(ExtFunctionResult::Error(exception), PrintWriter::Disabled))
+        let result = match serde_json::from_str::<OsResult>(&result_json) {
+            Ok(OsResult::Return { value }) => {
+                ExtFunctionResult::Return(json::json_to_monty(&value))
+            }
+            Ok(OsResult::Error { exception }) => ExtFunctionResult::Error(exception),
+            Ok(OsResult::NotHandled) => {
+                ExtFunctionResult::Error(call.function_call.on_no_handler())
+            }
+            Err(error) => ExtFunctionResult::Error(MontyException::new(
+                ExcType::RuntimeError,
+                Some(format!("invalid os-call result: {error}")),
+            )),
+        };
+        finish(call.resume(result, PrintWriter::Disabled))
     }
+}
+
+/// 宿主回传的 OS 调用结果。
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OsResult {
+    /// 宿主处理成功，携带结果值（JSON）。
+    Return { value: serde_json::Value },
+    /// 宿主处理失败，携带要抛出的异常。
+    Error { exception: MontyException },
+    /// 没有处理器：由沙箱自己决定默认异常。
+    NotHandled,
 }
 
 bindings::export!(Component with_types_in bindings);

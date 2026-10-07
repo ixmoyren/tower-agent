@@ -6,6 +6,8 @@
 //!
 //! 每个 mod 一个 `Sandbox`（独立 `Store` + 组件实例），互不共享状态。
 
+use std::sync::{Arc, Mutex, OnceLock};
+
 use wasmtime::{
     Config, Engine, Store, StoreLimits, StoreLimitsBuilder,
     component::{Component, Linker},
@@ -23,8 +25,8 @@ pub use self::exports::tower_agent::monty::sandbox::Progress;
 
 /// 内嵌的沙箱组件（由 `wasm/monty-sandbox/generate.sh` 生成）。
 const MONTY_SANDBOX: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/monty-sandbox.wasm"
+env!("CARGO_MANIFEST_DIR"),
+"/assets/monty-sandbox.wasm"
 ));
 
 /// WASI 上下文：不挂载任何 preopen，因此沙箱内没有文件系统访问。
@@ -134,12 +136,76 @@ impl Sandbox {
             .map_err(sandbox_error)
     }
 
-    /// OS 调用按沙箱默认失败。
-    pub fn resume_os(&mut self, call_id: u32) -> Result<Progress, PluginError> {
+    /// 用宿主给的 `result-json` 恢复一次 os-call。
+    pub fn resume_os(&mut self, call_id: u32, result_json: &str) -> Result<Progress, PluginError> {
         self.bindings
             .tower_agent_monty_sandbox()
-            .call_resume_os(&mut self.store, call_id)
+            .call_resume_os(&mut self.store, call_id, result_json)
             .map_err(sandbox_error)
+    }
+}
+
+/// 沙箱实例池。
+///
+/// 组件只编译一次（JIT 缓存）；实例（`Store` + 组件实例）可以复用，因为每次运行都
+/// 以 `start()` 开头会重置组件内的挂起状态。池用于摊薄实例创建成本，并支持预热。
+pub struct SandboxPool {
+    engine: OnceLock<Arc<SandboxEngine>>,
+    idle: Mutex<Vec<Sandbox>>,
+    max_idle: usize,
+}
+
+impl SandboxPool {
+    /// 建池，最多保留 `max_idle` 个空闲实例。
+    #[must_use]
+    pub fn new(max_idle: usize) -> Self {
+        Self {
+            engine: OnceLock::new(),
+            idle: Mutex::new(Vec::new()),
+            max_idle,
+        }
+    }
+
+    /// 引擎（首次调用时编译内嵌组件）。
+    pub fn engine(&self) -> Result<Arc<SandboxEngine>, PluginError> {
+        if let Some(engine) = self.engine.get() {
+            return Ok(Arc::clone(engine));
+        }
+        let engine = Arc::new(SandboxEngine::new()?);
+        let _ = self.engine.set(Arc::clone(&engine));
+        Ok(self.engine.get().map(Arc::clone).unwrap_or(engine))
+    }
+
+    /// 预热：编译组件并预先创建 `instances` 个实例放进池子。
+    pub fn warmup(&self, instances: usize) -> Result<(), PluginError> {
+        let engine = self.engine()?;
+        let mut idle = self.idle.lock().expect("sandbox pool poisoned");
+        while idle.len() < instances.min(self.max_idle) {
+            idle.push(engine.checkout()?);
+        }
+        Ok(())
+    }
+
+    /// 取一个实例（池空则新建）。
+    pub fn acquire(&self) -> Result<Sandbox, PluginError> {
+        if let Some(sandbox) = self.idle.lock().expect("sandbox pool poisoned").pop() {
+            return Ok(sandbox);
+        }
+        self.engine()?.checkout()
+    }
+
+    /// 归还一个实例（超过上限则丢弃）。
+    pub fn release(&self, sandbox: Sandbox) {
+        let mut idle = self.idle.lock().expect("sandbox pool poisoned");
+        if idle.len() < self.max_idle {
+            idle.push(sandbox);
+        }
+    }
+
+    /// 当前空闲实例数（用于测试/诊断）。
+    #[must_use]
+    pub fn idle_count(&self) -> usize {
+        self.idle.lock().map(|idle| idle.len()).unwrap_or(0)
     }
 }
 

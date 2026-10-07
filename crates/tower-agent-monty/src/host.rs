@@ -51,4 +51,11 @@ impl HostCall {
 pub trait MontyHost: Send + Sync + 'static {
     /// 派发一次宿主调用。
     fn dispatch(&self, call: HostCall) -> BoxFuture<'static, Result<Value, String>>;
+
+    /// 服务一次沙箱 OS 调用（文件系统等）。`call_json` 是序列化的 `OsFunctionCall`，
+    /// 返回值是 `wire` 模块定义的三种结果之一。默认不处理。
+    fn handle_os_call(&self, call_json: &str) -> String {
+        let _ = call_json;
+        crate::wire::NOT_HANDLED.to_string()
+    }
 }

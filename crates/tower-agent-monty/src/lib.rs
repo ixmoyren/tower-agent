@@ -28,10 +28,11 @@ mod plugin;
 mod python;
 mod sandbox;
 mod tool;
+mod wire;
 
 pub use author::authoring_tools;
 pub use host::{HostCall, MontyHost};
-pub use manager::{ModManager, ModSummary};
+pub use manager::{ModManager, ModPermissions, ModSummary};
 pub use plugin::MontyPlugin;
 pub use tool::{ModTool, ToolSpec};
 
@@ -45,12 +46,12 @@ mod tests {
     use tower_agent_plugins::HostApi;
 
     use super::*;
-    use crate::sandbox::SandboxEngine;
+    use crate::sandbox::SandboxPool;
 
-    /// 测试共享一个引擎（避免每个用例都重新 JIT 编译组件）。
-    fn engine() -> Arc<SandboxEngine> {
-        static ENGINE: OnceLock<Arc<SandboxEngine>> = OnceLock::new();
-        Arc::clone(ENGINE.get_or_init(|| Arc::new(SandboxEngine::new().expect("sandbox engine"))))
+    /// 测试共享一个沙箱池（避免每个用例都重新 JIT 编译组件）。
+    fn pool() -> Arc<SandboxPool> {
+        static POOL: OnceLock<Arc<SandboxPool>> = OnceLock::new();
+        Arc::clone(POOL.get_or_init(|| Arc::new(SandboxPool::new(4))))
     }
 
     /// 通过 ToolRouter 调用一个 mod 工具，返回模型可见文本。
@@ -98,14 +99,13 @@ mod tests {
 
     #[tokio::test]
     async fn runs_a_script_and_calls_a_function() {
-        let sandbox = engine().checkout().expect("checkout");
         let plugin = MontyPlugin::load(
             manifest("demo"),
             "def upper(value):\n    return value.upper()\n",
             Arc::new(RecordingHost),
-            sandbox,
+            pool(),
         )
-        .expect("load monty plugin");
+            .expect("load monty plugin");
         plugin.activate().await.expect("activate");
         let result = plugin
             .call_function("upper", &json!("hi"))
@@ -124,14 +124,13 @@ mod tests {
                 )
             }
         }
-        let sandbox = engine().checkout().expect("checkout");
         let plugin = MontyPlugin::load(
             manifest("greeter"),
             "def greet(value):\n    return host_hello(value)\n",
             Arc::new(Greet),
-            sandbox,
+            pool(),
         )
-        .expect("load monty plugin");
+            .expect("load monty plugin");
         plugin.activate().await.expect("activate");
         let result = plugin
             .call_function("greet", &json!("world"))
@@ -142,14 +141,13 @@ mod tests {
 
     #[tokio::test]
     async fn infinite_loop_is_bounded_by_resource_limits() {
-        let sandbox = engine().checkout().expect("checkout");
         let plugin = MontyPlugin::load(
             manifest("spin"),
             "while True:\n    pass\n",
             Arc::new(RecordingHost),
-            sandbox,
+            pool(),
         )
-        .expect("load monty plugin");
+            .expect("load monty plugin");
         let error = plugin.activate().await.expect_err("must be bounded");
         let message = error.to_string();
         assert!(
@@ -244,6 +242,82 @@ def shout(args):
             call_mod_tool(&manager.tools()[0], json!({ "text": "hi" })).await,
             "HI",
             "热重载替换了工具实现"
+        );
+    }
+
+    #[tokio::test]
+    async fn warmup_prefills_the_sandbox_pool() {
+        let manager = ModManager::new(
+            HostApi::from_tools(Vec::<tower_agent_core::AgentTool>::new()),
+            UiState::new(),
+        );
+        manager.warmup(2).expect("warmup");
+        assert!(
+            manager.idle_sandboxes() >= 2,
+            "warmup 应预先创建实例，实际 {}",
+            manager.idle_sandboxes()
+        );
+    }
+
+    #[tokio::test]
+    async fn mod_reads_a_mounted_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("note.txt"), "hello from mount").expect("write note");
+
+        let manager = ModManager::new(
+            HostApi::from_tools(Vec::<tower_agent_core::AgentTool>::new()),
+            UiState::new(),
+        );
+        manager
+            .mount("/work", dir.path(), monty_fs::MountMode::ReadOnly)
+            .expect("mount");
+
+        let code = "\
+from pathlib import Path
+
+tool_register(\"read_note\", \"read_note\", \"\", {\"type\": \"object\"})
+
+def read_note(args):
+    return Path(\"/work/note.txt\").read_text()
+";
+        manager.write("reader", code).await.expect("write mod");
+        let text = call_mod_tool(&manager.tools()[0], json!({})).await;
+        assert_eq!(text, "hello from mount", "mod 读到了挂载的宿主文件");
+    }
+
+    #[tokio::test]
+    async fn fs_permission_denies_mounted_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("note.txt"), "secret").expect("write note");
+
+        let manager = ModManager::new(
+            HostApi::from_tools(Vec::<tower_agent_core::AgentTool>::new()),
+            UiState::new(),
+        );
+        manager
+            .mount("/work", dir.path(), monty_fs::MountMode::ReadOnly)
+            .expect("mount");
+        manager.set_permissions(
+            "locked",
+            ModPermissions {
+                fs: false,
+                ..ModPermissions::default()
+            },
+        );
+
+        let code = "\
+from pathlib import Path
+
+tool_register(\"read_note\", \"read_note\", \"\", {\"type\": \"object\"})
+
+def read_note(args):
+    return Path(\"/work/note.txt\").read_text()
+";
+        manager.write("locked", code).await.expect("write mod");
+        let text = call_mod_tool(&manager.tools()[0], json!({})).await;
+        assert!(
+            text.contains("PermissionError") || text.contains("not allowed"),
+            "无 fs 权限时应被拒，实际：{text}"
         );
     }
 }

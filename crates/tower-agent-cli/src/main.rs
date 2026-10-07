@@ -236,6 +236,7 @@ fn read_stdin_prompt() -> Option<String> {
 fn run_print_blocking(session: &Session, prompt: String) -> std::io::Result<()> {
     let runtime = single_thread_runtime()?;
     runtime.block_on(async {
+        session.prewarm_mods();
         let subscription = session.subscribe();
         let ask = session.ask(prompt);
         let (result, printed) =
@@ -288,7 +289,7 @@ mod tests {
                 )),
             },
         )
-            .expect("write succeeds");
+        .expect("write succeeds");
         assert_eq!(String::from_utf8(out).expect("utf-8"), "[user] 你好\n");
     }
 }

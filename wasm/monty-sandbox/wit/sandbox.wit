@@ -16,6 +16,13 @@ interface sandbox {
     call-id: u32,
   }
 
+  /// 沙箱请求宿主处理的一次 OS 调用（文件系统等）。
+  record os-call {
+    call-id: u32,
+    /// 序列化后的 `OsFunctionCall`（JSON）。
+    payload-json: string,
+  }
+
   /// 一次 feed/resume 的结果。
   variant progress {
     /// 脚本跑完，携带最终值的 JSON。
@@ -24,8 +31,8 @@ interface sandbox {
     function-call(function-call),
     /// 挂起在未定义名字（宿主应回 NameError）。
     name-lookup(string),
-    /// 挂起在 OS 调用（宿主应回无处理器默认异常）。
-    os-call(u32),
+    /// 挂起在 OS 调用（宿主按挂载表处理或回无处理器默认异常）。
+    os-call(os-call),
     /// 沙箱侧错误（语法/运行时/协议）。
     error(string),
   }
@@ -42,8 +49,8 @@ interface sandbox {
   /// 未定义名字 -> `NameError`。
   resume-name: func(name: string) -> progress;
 
-  /// OS 调用按沙箱默认（通常是 `PermissionError`）失败。
-  resume-os: func(call-id: u32) -> progress;
+  /// 恢复一次 `os-call`：`result-json` 是 `return` / `error` / `not_handled` 之一。
+  resume-os: func(call-id: u32, result-json: string) -> progress;
 }
 
 world monty-sandbox {
