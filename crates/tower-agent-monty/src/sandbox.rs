@@ -25,8 +25,8 @@ pub use self::exports::tower_agent::monty::sandbox::Progress;
 
 /// 内嵌的沙箱组件（由 `wasm/monty-sandbox/generate.sh` 生成）。
 const MONTY_SANDBOX: &[u8] = include_bytes!(concat!(
-env!("CARGO_MANIFEST_DIR"),
-"/assets/monty-sandbox.wasm"
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/monty-sandbox.wasm"
 ));
 
 /// WASI 上下文：不挂载任何 preopen，因此沙箱内没有文件系统访问。

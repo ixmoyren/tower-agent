@@ -29,10 +29,9 @@ use provider::{ProviderKind, ProviderStackOptions};
 use session::{Session, run_print, run_tui};
 use std::{
     io::{IsTerminal as _, Read as _},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::ExitCode,
 };
-use tower_agent_runtime::AgentTool;
 
 fn main() -> ExitCode {
     let args = match parse(std::env::args().skip(1)) {
@@ -153,7 +152,7 @@ fn main() -> ExitCode {
             ),
         }
     }
-    session.set_tools(select_tools(&args, &cwd));
+    session.set_tool_filter(select_filter(&args));
 
     let outcome = if print_mode {
         match prompt {
@@ -191,25 +190,16 @@ fn print_tools() {
 /// 按 pi 的工具选项算出本次会话启用的内置工具。
 ///
 /// `--tools` 是白名单（替换默认全集），`--exclude-tools` 是黑名单，`--no-tools` /
-/// `--no-builtin-tools` 直接清空（本移植版还没有扩展/自定义工具，两者等价）。
-fn select_tools(args: &CliArgs, cwd: &Path) -> Vec<AgentTool> {
-    if args.no_tools || args.no_builtin_tools {
-        return Vec::new();
+/// `--no-builtin-tools` 直接清空；过滤作用在工具目录（静态 + JIT 统一解析结果）上。
+fn select_filter(args: &CliArgs) -> session::ToolFilter {
+    for name in args.tools.iter().chain(args.exclude_tools.iter()) {
+        warn_unknown_tool(name);
     }
-    let mut selected = tower_agent_plugins::default_tools(cwd);
-    if !args.tools.is_empty() {
-        for name in &args.tools {
-            warn_unknown_tool(name);
-        }
-        selected.retain(|tool| args.tools.iter().any(|name| name == tool.name()));
+    session::ToolFilter {
+        none: args.no_tools || args.no_builtin_tools,
+        allow: args.tools.clone(),
+        exclude: args.exclude_tools.clone(),
     }
-    if !args.exclude_tools.is_empty() {
-        for name in &args.exclude_tools {
-            warn_unknown_tool(name);
-        }
-        selected.retain(|tool| !args.exclude_tools.iter().any(|name| name == tool.name()));
-    }
-    selected
 }
 
 /// `--tools` / `--exclude-tools` 里写了不存在的工具名时给出提示（pi 会忽略它们）。
@@ -236,6 +226,8 @@ fn read_stdin_prompt() -> Option<String> {
 fn run_print_blocking(session: &Session, prompt: String) -> std::io::Result<()> {
     let runtime = single_thread_runtime()?;
     runtime.block_on(async {
+        session.load_persisted_mods().await;
+        session.load_dynamic_plugins();
         session.prewarm_mods();
         let subscription = session.subscribe();
         let ask = session.ask(prompt);

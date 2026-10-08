@@ -20,7 +20,6 @@ use tokio::sync::mpsc;
 use tower::ServiceExt as _;
 use tower_agent_core::UiState;
 use tower_agent_monty::{ModManager, authoring_tools};
-use tower_agent_plugins::HostApi;
 use tower_agent_provider::{
     BoxStreamService, Message, Model, ModelThinkingLevel, UserContent, UserMessage,
 };
@@ -30,13 +29,16 @@ use tower_agent_runtime::{
 };
 
 /// 会话。
+///
+/// 工具目录的唯一来源是 mods 注册表（启用 mods 时）；`--tools` 等选项以 [`ToolFilter`]
+/// 的形式作用在目录之上。
 pub struct Session {
     // `BoxAgentService` 是 `Send` 但非 `Sync`；用 `Mutex` 包一层让 `Session` 可跨线程共享
     // （TUI 驱动任务把 `Arc<Session>` move 进 `tokio::spawn`）。
     service: Mutex<BoxAgentService>,
     control: BoxAgentControl,
     cwd: PathBuf,
-    /// 会话基础工具集（内置工具，或经 `--tools` 过滤后的结果）。
+    /// mods 未启用时的工具目录（内置工具）。
     base_tools: Mutex<Vec<AgentTool>>,
     /// mods 作者工具（`mod_write` 等）；mods 未启用时为空。
     ///
@@ -45,6 +47,33 @@ pub struct Session {
     authoring_tools: Mutex<Vec<AgentTool>>,
     /// mods 宿主；解释器内嵌在 `tower-agent-monty` 中，默认启用（`TPA_NO_MODS` 可关闭）。
     mods: Option<Arc<ModManager>>,
+    /// 工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
+    tool_filter: Mutex<ToolFilter>,
+}
+
+/// 工具过滤：`none` 清空，`allow` 白名单（空 = 全放行），`exclude` 黑名单。
+#[derive(Debug, Clone, Default)]
+pub struct ToolFilter {
+    /// `--no-tools` / `--no-builtin-tools`。
+    pub none: bool,
+    /// `--tools` 白名单。
+    pub allow: Vec<String>,
+    /// `--exclude-tools` 黑名单。
+    pub exclude: Vec<String>,
+}
+
+impl ToolFilter {
+    /// 某个工具名是否通过过滤。
+    #[must_use]
+    pub fn allows(&self, name: &str) -> bool {
+        if self.none {
+            return false;
+        }
+        if !self.allow.is_empty() && !self.allow.iter().any(|allowed| allowed == name) {
+            return false;
+        }
+        !self.exclude.iter().any(|excluded| excluded == name)
+    }
 }
 
 impl Session {
@@ -65,19 +94,30 @@ impl Session {
         );
         let base_tools = tower_agent_plugins::default_tools(&cwd);
         // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
+        // 内置静态插件与 JIT mod 共用一张注册表：工具目录来自「解析 + 安装」。
         // monty 解释器随 `tower-agent-monty` 内嵌，默认启用；`TPA_NO_MODS` 可关闭。
         let (mods, authoring) = if std::env::var_os("TPA_NO_MODS").is_none() {
-            let host = HostApi::from_tools(base_tools.clone());
-            let manager = ModManager::new(host, UiState::new());
-            // 把工作目录只读挂到 /work，供 mod 读取项目文件；写操作被拒。
-            let _ = manager.mount_readonly("/work", &cwd);
-            let authoring = authoring_tools(Arc::clone(&manager));
-            (Some(manager), authoring)
+            let registry = tower_agent_plugins::default_registry(&cwd);
+            match ModManager::new(UiState::new(), registry) {
+                Ok(manager) => {
+                    // 把工作目录只读挂到 /work，供 mod 读取项目文件；写操作被拒。
+                    let _ = manager.mount_readonly("/work", &cwd);
+                    let authoring = authoring_tools(Arc::clone(&manager));
+                    (Some(manager), authoring)
+                }
+                Err(error) => {
+                    eprintln!("mods 初始化失败（本次会话已关闭 mods）：{error}");
+                    (None, Vec::new())
+                }
+            }
         } else {
             (None, Vec::new())
         };
 
-        let mut initial_tools = base_tools.clone();
+        let mut initial_tools = match &mods {
+            Some(mods) => mods.tools(),
+            None => base_tools.clone(),
+        };
         initial_tools.extend(authoring.iter().cloned());
         let mut options = AgentOptions::new(stream);
         options.initial.tools = initial_tools;
@@ -91,6 +131,7 @@ impl Session {
             base_tools: Mutex::new(base_tools),
             authoring_tools: Mutex::new(authoring),
             mods,
+            tool_filter: Mutex::new(ToolFilter::default()),
         }
     }
 
@@ -148,9 +189,12 @@ impl Session {
         self.control.set_thinking_level(level);
     }
 
-    /// 替换可执行工具集（`--tools` / `--exclude-tools` / `--no-tools`）。
-    pub fn set_tools(&self, tools: Vec<AgentTool>) {
-        *self.base_tools.lock().expect("base tools poisoned") = tools;
+    /// 设置工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
+    ///
+    /// 过滤作用在**目录**（mods 注册表解析结果，或未启用 mods 时的内置工具）之上；
+    /// mods 作者工具不受过滤影响（否则就没法写 mod 了）。
+    pub fn set_tool_filter(&self, filter: ToolFilter) {
+        *self.tool_filter.lock().expect("tool filter poisoned") = filter;
         self.refresh_tools();
     }
 
@@ -167,12 +211,47 @@ impl Session {
         }
     }
 
-    /// 重新计算工具集：基础工具 + mods 作者工具 + mods 提供的工具。
+    /// 加载持久化的 mod（`dirs` 的 config 目录）；返回加载数量。
+    pub async fn load_persisted_mods(&self) -> usize {
+        match &self.mods {
+            Some(mods) => mods.load_persisted().await,
+            None => 0,
+        }
+    }
+
+    /// 从 `dirs` 的 config 目录（`tower-agent/plugins`）加载动态插件；返回加载数量。
+    #[allow(unsafe_code)] // 加载用户配置目录里的动态库，视作受信任。
+    pub fn load_dynamic_plugins(&self) -> usize {
+        let Some(mods) = &self.mods else {
+            return 0;
+        };
+        match unsafe { mods.load_dynamic_plugins_from_config() } {
+            Ok(names) => names.len(),
+            Err(error) => {
+                eprintln!("加载动态插件失败：{error}");
+                0
+            }
+        }
+    }
+
+    /// 重新计算工具集：目录（静态 + JIT 的统一解析结果）经过滤 + mods 作者工具。
     ///
     /// mod 在运行中 `tool_register` 之后，下一轮 turn 开始前会走到这里，因此新工具
     /// 会被 agent 看到。
     fn refresh_tools(&self) {
-        let mut tools = self.base_tools.lock().expect("base tools poisoned").clone();
+        let catalog = match &self.mods {
+            Some(mods) => mods.tools(),
+            None => self.base_tools.lock().expect("base tools poisoned").clone(),
+        };
+        let filter = self
+            .tool_filter
+            .lock()
+            .expect("tool filter poisoned")
+            .clone();
+        let mut tools: Vec<AgentTool> = catalog
+            .into_iter()
+            .filter(|tool| filter.allows(tool.name()))
+            .collect();
         tools.extend(
             self.authoring_tools
                 .lock()
@@ -180,9 +259,6 @@ impl Session {
                 .iter()
                 .cloned(),
         );
-        if let Some(mods) = &self.mods {
-            tools.extend(mods.tools());
-        }
         self.control.set_tools(tools);
     }
 
@@ -522,7 +598,9 @@ pub async fn run_tui(
     title: &str,
     notice: Option<String>,
 ) -> std::io::Result<()> {
-    // 后台预热 mods 沙箱，避免第一次写 mod 时才付 JIT 编译的代价。
+    // 先恢复持久化的 mod、加载动态插件，再后台预热沙箱。
+    session.load_persisted_mods().await;
+    session.load_dynamic_plugins();
     session.prewarm_mods();
     let subscription = session.subscribe();
     let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();

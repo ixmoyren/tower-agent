@@ -7,13 +7,16 @@ use tower_agent_runtime::{AgentEvent, AgentTool, BoxAgentService, BoxToolService
 use crate::{
     error::PluginError,
     layer::{AgentLayer, EventHandler, ToolLayer},
-    model::PluginManifest,
+    model::{PluginId, PluginKind, PluginManifest},
 };
 
 /// 静态插件的安装上下文：插件把工具、中间件层与事件处理器登记进来。
 #[derive(Default)]
 pub struct PluginContext {
     tools: Vec<AgentTool>,
+    /// 与 `tools` 平行：每个工具由哪个插件（id + 形态）提供。
+    tool_sources: Vec<Option<(PluginId, PluginKind)>>,
+    current_source: Option<(PluginId, PluginKind)>,
     agent_layers: Vec<Box<dyn AgentLayer>>,
     tool_layers: Vec<Box<dyn ToolLayer>>,
     event_handlers: Vec<Box<dyn EventHandler>>,
@@ -40,12 +43,24 @@ impl PluginContext {
     /// 登记一个内置工具。
     pub fn register_tool(&mut self, tool: AgentTool) {
         self.tools.push(tool);
+        self.tool_sources.push(self.current_source.clone());
     }
 
     /// 已登记的工具（按登记顺序）。
     #[must_use]
     pub fn tools(&self) -> &[AgentTool] {
         &self.tools
+    }
+
+    /// 设置「后续登记的工具」的来源（由 `Resolution::install` 在安装每个插件前调用）。
+    pub fn set_current_source(&mut self, source: Option<(PluginId, PluginKind)>) {
+        self.current_source = source;
+    }
+
+    /// 每个工具的来源（与 [`Self::tools`] 平行）。
+    #[must_use]
+    pub fn tool_sources(&self) -> &[Option<(PluginId, PluginKind)>] {
+        &self.tool_sources
     }
 
     /// 登记一层 agent 级中间件（`tower::Layer` 形态，见 [`crate::layer`]）。

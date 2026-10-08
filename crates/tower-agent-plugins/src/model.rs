@@ -235,6 +235,10 @@ pub struct PluginManifest {
     pub requires: Vec<Dependency>,
     /// 权限声明。
     pub permissions: Vec<Permission>,
+    /// 是否受保护：受保护的插件**永不被遮蔽**（同名的高优先级插件也只能进入 shadow）。
+    ///
+    /// 用于 JIT 运行时（agent-monty）这类「插件体系的地基」。
+    pub protected: bool,
 }
 
 impl PluginManifest {
@@ -249,6 +253,7 @@ impl PluginManifest {
             provides: Vec::new(),
             requires: Vec::new(),
             permissions: Vec::new(),
+            protected: false,
         }
     }
 
@@ -277,6 +282,13 @@ impl PluginManifest {
     #[must_use]
     pub fn with_permission(mut self, permission: impl Into<String>) -> Self {
         self.permissions.push(Permission::new(permission));
+        self
+    }
+
+    /// 标记为受保护（永不被遮蔽）。
+    #[must_use]
+    pub fn protected(mut self) -> Self {
+        self.protected = true;
         self
     }
 

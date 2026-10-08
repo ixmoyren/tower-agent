@@ -88,6 +88,15 @@ impl HostApi {
             .remove(name)
     }
 
+    /// 用一组工具整体替换当前能力表（注册表解析结果回写用）。
+    pub fn replace_tools(&self, tools: impl IntoIterator<Item = AgentTool>) {
+        let mut table = self.tools.lock().expect("host tools mutex poisoned");
+        table.clear();
+        for tool in tools {
+            table.insert(tool.name().to_string(), tool);
+        }
+    }
+
     /// 取一个已登记工具能力的克隆（不存在时 `None`）。
     #[must_use]
     pub fn tool(&self, name: &str) -> Option<AgentTool> {

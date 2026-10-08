@@ -103,6 +103,7 @@ impl Resolution {
         let mut context = PluginContext::new();
         for plugin in &self.plugins {
             if let Some(payload) = &plugin.payload {
+                context.set_current_source(Some((plugin.id.clone(), plugin.kind)));
                 for layer in payload.agent_layers() {
                     context.register_agent_layer(layer);
                 }
@@ -122,6 +123,7 @@ impl Resolution {
                         message: other.to_string(),
                     },
                 })?;
+                context.set_current_source(None);
             }
         }
         Ok(context)
@@ -147,7 +149,10 @@ impl PluginRegistry {
         Self::default()
     }
 
-    /// 注册一个静态插件（带载荷）。
+    /// 注册一个带载荷的插件。
+    ///
+    /// 载荷形态由 `manifest().kind` 决定：静态插件（编译期 Layer）与 JIT 插件（可热重载
+    /// 的运行时载荷）都走这里；解析时的覆盖优先级、依赖与版本规则只看 `kind`。
     pub fn register_static(&mut self, plugin: Arc<dyn StaticPlugin>) -> Result<(), PluginError> {
         let manifest = plugin.manifest();
         manifest.validate()?;
@@ -156,6 +161,60 @@ impl PluginRegistry {
             payload: Some(plugin),
         });
         Ok(())
+    }
+
+    /// [`Self::register_static`] 的别名，表达「与形态无关」。
+    pub fn register_plugin(&mut self, plugin: Arc<dyn StaticPlugin>) -> Result<(), PluginError> {
+        self.register_static(plugin)
+    }
+
+    /// 便捷：把一个现成工具注册成一个静态插件（提供 `tool.<name>`）。
+    ///
+    /// 用于把宿主/测试注入的工具也纳入统一解析（`AgentTool` 非 `Sync`，用 `Mutex`
+    /// 包一层让它能进 `StaticPlugin`）。
+    pub fn register_tool(&mut self, tool: AgentTool) -> Result<(), PluginError> {
+        let manifest = PluginManifest::new(
+            tool.name(),
+            Version::new(1, 0, 0),
+            crate::PluginKind::Static,
+        )
+        .providing(
+            CapabilityId::new("tool", tool.name()),
+            Version::new(1, 0, 0),
+        );
+        self.register_static(Arc::new(ToolPlugin {
+            manifest,
+            tool: std::sync::Mutex::new(tool),
+        }))
+    }
+
+    /// 按插件名移除候选（JIT 插件热更/卸载用）。返回移除的候选数。
+    pub fn remove(&mut self, name: &str) -> usize {
+        let before = self.candidates.len();
+        self.candidates
+            .retain(|candidate| candidate.manifest.name != name);
+        before - self.candidates.len()
+    }
+
+    /// 受保护插件声明的能力（JIT 运行时地基提供的能力，不允许被 JIT 插件遮蔽）。
+    #[must_use]
+    pub fn protected_capabilities(&self) -> Vec<CapabilityId> {
+        self.candidates
+            .iter()
+            .filter(|candidate| candidate.manifest.protected)
+            .flat_map(|candidate| candidate.manifest.provides.iter())
+            .map(|provided| provided.id.clone())
+            .collect()
+    }
+
+    /// 受保护插件的名字。
+    #[must_use]
+    pub fn protected_names(&self) -> Vec<String> {
+        self.candidates
+            .iter()
+            .filter(|candidate| candidate.manifest.protected)
+            .map(|candidate| candidate.manifest.name.clone())
+            .collect()
     }
 
     /// 注册一个只有清单的实现（动态 / JIT 在 M1 之外；测试与后续加载器用）。
@@ -203,6 +262,34 @@ impl PluginRegistry {
         let mut active: Vec<usize> = Vec::new();
         let mut shadows: Vec<ShadowedPlugin> = Vec::new();
         for indices in by_name.values() {
+            // 受保护的插件永不被遮蔽：protected 组内取胜者，其余（含同名 JIT）全部进入 shadow。
+            let protected: Vec<usize> = indices
+                .iter()
+                .copied()
+                .filter(|&index| candidates[index].manifest.protected)
+                .collect();
+            if !protected.is_empty() {
+                let beacon = *protected
+                    .iter()
+                    .max_by_key(|&&index| {
+                        (
+                            candidates[index].manifest.kind,
+                            candidates[index].manifest.version.clone(),
+                        )
+                    })
+                    .expect("protected group is non-empty");
+                for &index in indices {
+                    if index != beacon {
+                        shadows.push(ShadowedPlugin {
+                            id: candidates[index].manifest.id(),
+                            shadowed_by: candidates[beacon].manifest.id(),
+                        });
+                    }
+                }
+                active.push(beacon);
+                continue;
+            }
+
             let top_kind = indices
                 .iter()
                 .map(|&index| candidates[index].manifest.kind)
@@ -380,6 +467,31 @@ impl PluginRegistry {
     }
 }
 
+/// 把一个现成工具包装成静态插件载荷。
+struct ToolPlugin {
+    manifest: PluginManifest,
+    tool: std::sync::Mutex<AgentTool>,
+}
+
+impl StaticPlugin for ToolPlugin {
+    fn manifest(&self) -> PluginManifest {
+        self.manifest.clone()
+    }
+
+    fn install(&self, context: &mut PluginContext) -> Result<(), PluginError> {
+        let tool = self
+            .tool
+            .lock()
+            .map_err(|_| PluginError::Install {
+                plugin: self.manifest.name.clone(),
+                message: "tool plugin mutex poisoned".into(),
+            })?
+            .clone();
+        context.register_tool(tool);
+        Ok(())
+    }
+}
+
 /// 为一个能力选择提供者（能力级覆盖优先，其次形态优先级 + 版本规则）。
 fn select_providers(
     capability: &CapabilityId,
@@ -400,12 +512,12 @@ fn select_providers(
                 let manifest = &candidates[index].manifest;
                 manifest.name == capability_override.provider
                     && capability_override
-                    .version
-                    .as_ref()
-                    .is_none_or(|version| &manifest.version == version)
+                        .version
+                        .as_ref()
+                        .is_none_or(|version| &manifest.version == version)
                     && capability_override
-                    .kind
-                    .is_none_or(|kind| manifest.kind == kind)
+                        .kind
+                        .is_none_or(|kind| manifest.kind == kind)
             })
             .ok_or_else(|| PluginError::OverrideTargetMissing {
                 capability: capability.clone(),

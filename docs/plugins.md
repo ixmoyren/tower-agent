@@ -92,6 +92,12 @@
 > 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据。
 >
 > 沙箱侧还提供： **实例池**（`SandboxPool`，一次运行借出、跑完归还）+ **预热**（`ModManager::warmup` / `spawn_warmup` 后台编译组件、预建实例）、 **文件系统挂载**（`ModManager::mount*` 用 `monty-fs` 的 `MountTable` 在宿主侧服务 OS 调用：`ReadOnly` / `OverlayMemory` / `ReadWrite`）与 **每-mod 权限**（`ModPermissions`：`tools` / `register_tools` / `ui` / `state` / `fs`，在派发与 OS 处理时强制）。CLI 默认把工作目录只读挂到 `/work`。
+>
+> **三形态同表（解析规则一致）**：mod 以 `PluginKind::Jit` 载荷注册进**同一个 `PluginRegistry`**（内置工具是同一注册表里的静态插件），因此覆盖优先级（静态 < 动态 < JIT）、能力级覆盖、依赖图/拓扑排序、版本收敛与被遮蔽记录（`ModManager::shadows`）对三形态统一生效——同名 JIT mod 会遮蔽同名静态插件。工具目录的唯一来源是「解析 + 安装」的结果（`ModManager::tools`），`HostApi` 同步获得同一份工具集；`--tools` / `--exclude-tools` / `--no-tools` 以 `ToolFilter` 作用在该目录之上。
+>
+> **`protected` 标记与遮蔽规则**：`PluginManifest.protected` 的实现**永不被遮蔽**——JIT 运行时（agent-monty）就以一张 protected 插件清单注册（提供 `tool.mod_*` 与 `jit.run`），任何试图用同名插件/同名工具遮蔽它的 mod 会被 `ModManager` **阻断**并回滚。除它之外：JIT 可以遮蔽静态与动态插件，**JIT 之间也允许**，规则是「后写覆盖先写」，工具目录按名去重并登记 `ModManager::shadowed_tools()`。
+>
+> **持久化（`dirs`）**：mod 默认只活在会话内，源码同时写到 `dirs::cache_dir()/tower-agent/mods`（临时，不算保存）；`mod_persist` 把它复制到 `dirs::config_dir()/tower-agent/mods`（跨会话保留，启动时自动加载），`mod_discard` 卸载并从 config/cache 删除。动态插件从 `dirs::config_dir()/tower-agent/plugins` 加载（`.so`/`.dll`/`.dylib`，其 `tool.<name>` 能力被包装成工具，因此可被更高优先级的 JIT mod 遮蔽）。
 
 ## 5. 插件模型
 

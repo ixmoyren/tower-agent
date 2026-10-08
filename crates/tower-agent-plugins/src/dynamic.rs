@@ -98,6 +98,7 @@ impl AbiManifest {
             provides,
             requires: Vec::new(),
             permissions: Vec::new(),
+            protected: false,
         }
     }
 }

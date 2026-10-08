@@ -5,8 +5,11 @@ use std::task::{Context, Poll};
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower::Service;
-use tower_agent_core::{AgentError, AgentTool, AgentToolResult, ToolCallRequest, ToolResultStream};
+use tower::{Layer, Service};
+use tower_agent_core::{
+    AgentError, AgentTool, AgentToolResult, ToolCallRequest, ToolNotFound, ToolResultStream,
+    ToolRoute,
+};
 use tower_agent_provider::JsonValue;
 
 use crate::plugin::MontyPlugin;
@@ -58,13 +61,32 @@ impl ModTool {
     }
 
     /// 转成可注册进 `ToolRouter` / agent 工具集的 [`AgentTool`]。
+    ///
+    /// 与内置工具同构：把工具层叠到 [`ToolNotFound`] 上，经 [`ToolRoute`] 按名分派。
     #[must_use]
     pub fn into_agent_tool(self) -> AgentTool {
         let spec = self.spec.clone();
-        AgentTool::new(spec.name.clone(), self)
+        let service = self.layer(ToolNotFound);
+        AgentTool::new(spec.name.clone(), service)
             .label(spec.name)
             .description(spec.description)
             .parameters(spec.parameters)
+    }
+}
+
+/// 让 `ModTool` 像内置工具一样是一个 tower `Layer`：层叠到内层服务上后按名分派。
+impl<S> Layer<S> for ModTool
+where
+    S: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = ToolRoute<S, ModTool>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ToolRoute::new(inner, self.clone(), self.spec.name.clone())
     }
 }
 

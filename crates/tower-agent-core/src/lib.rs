@@ -8,6 +8,7 @@ mod error;
 mod event;
 pub mod layer;
 mod registration;
+mod route;
 mod service;
 mod tool;
 mod ui;
@@ -19,6 +20,7 @@ pub use layer::{
     ToolCallDecision,
 };
 pub use registration::ToolRegistration;
+pub use route::{ToolNotFound, ToolRoute};
 pub use service::{
     AgentEventStream, AgentRequest, AgentResponse, AgentServiceExt, BoxAgentService, SessionStore,
 };
