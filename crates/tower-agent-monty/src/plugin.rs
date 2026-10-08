@@ -114,7 +114,10 @@ impl MontyPlugin {
             .lifecycle
             .begin_call()
             .ok_or_else(|| message_error(&self.manifest.name, "plugin is not started"))?;
-        let mut sandbox = self.pool.acquire()?;
+        let mut sandbox = self
+            .pool
+            .acquire()
+            .map_err(crate::sandbox::to_plugin_error)?;
         let outcome = self.drive(&mut sandbox, source, setup).await;
         if outcome.is_ok() {
             self.pool.release(sandbox);

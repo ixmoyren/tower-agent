@@ -57,7 +57,7 @@ mod tests {
     /// 测试共享一个沙箱池（避免每个用例都重新 JIT 编译组件）。
     fn pool() -> Arc<SandboxPool> {
         static POOL: OnceLock<Arc<SandboxPool>> = OnceLock::new();
-        Arc::clone(POOL.get_or_init(|| Arc::new(SandboxPool::new(4))))
+        Arc::clone(POOL.get_or_init(|| crate::sandbox::new_pool(4)))
     }
 
     /// 空注册表的 mods 宿主。

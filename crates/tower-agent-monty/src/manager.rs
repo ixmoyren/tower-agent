@@ -166,7 +166,7 @@ impl ModManager {
         let manager = Arc::new(Self {
             host: HostApi::from_tools(Vec::<AgentTool>::new()),
             ui,
-            pool: Arc::new(SandboxPool::new(DEFAULT_POOL_SIZE)),
+            pool: crate::sandbox::new_pool(DEFAULT_POOL_SIZE),
             mounts: Mutex::new(MountTable::new()),
             permissions: Mutex::new(BTreeMap::new()),
             registry: Mutex::new(registry),
@@ -292,7 +292,9 @@ impl ModManager {
 
     /// 预热沙箱池：编译组件并预先创建 `instances` 个实例。
     pub fn warmup(&self, instances: usize) -> Result<(), PluginError> {
-        self.pool.warmup(instances)
+        self.pool
+            .warmup(instances)
+            .map_err(crate::sandbox::to_plugin_error)
     }
 
     /// 在当前运行时后台预热（没有运行时则跳过，首次使用再惰性编译）。

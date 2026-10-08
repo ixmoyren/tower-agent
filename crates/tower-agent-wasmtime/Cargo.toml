@@ -1,0 +1,16 @@
+[package]
+name = "tower-agent-wasmtime"
+description = "tower-agent wasm sandbox: wasmtime engine/component, WASI, limits, JIT cache and instance pool."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dirs = { workspace = true }
+thiserror = { workspace = true }
+wasmtime = { workspace = true }
+# 只被本 crate 使用。
+wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
