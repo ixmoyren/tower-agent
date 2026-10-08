@@ -14,16 +14,16 @@ tower-agent-provider = { path = "../tower-agent-provider" }
 base64 = { workspace = true }
 dirs = { workspace = true }
 futures-util = { workspace = true }
-globset = { workspace = true }
-ignore = { workspace = true }
-regex = { workspace = true }
+globset = "0.4"
+ignore = "0.4"
+regex = "1.13"
 serde_json = { workspace = true }
-similar = { workspace = true }
+similar = "3.2"
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tower = { workspace = true }
-unicode-normalization = { workspace = true }
+unicode-normalization = "0.1"
 
 # 只在类 Unix 平台用于杀掉整个进程组（见 `shell.rs` 的 `kill_process_group`）。
 [target.'cfg(unix)'.dependencies]

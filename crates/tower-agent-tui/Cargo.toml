@@ -15,5 +15,5 @@ ratatui = { version = "0.30", default-features = false, features = ["all-widgets
 ratatui-textarea = { git = "https://github.com/ixmoyren/ratatui-textarea", default-features = false, features = ["termina"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-unicode-width = { workspace = true }
+unicode-width = "0.2"
 tower-agent-core = { version = "0.1.0", path = "../tower-agent-core" }
