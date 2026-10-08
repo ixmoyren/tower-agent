@@ -19,7 +19,7 @@ use std::{
 use tokio::sync::mpsc;
 use tower::ServiceExt as _;
 use tower_agent_core::UiState;
-use tower_agent_monty::{ModManager, authoring_tools};
+use tower_agent_monty::ModManager;
 use tower_agent_provider::{
     BoxStreamService, Message, Model, ModelThinkingLevel, UserContent, UserMessage,
 };
@@ -40,11 +40,6 @@ pub struct Session {
     cwd: PathBuf,
     /// mods 未启用时的工具目录（内置工具）。
     base_tools: Mutex<Vec<AgentTool>>,
-    /// mods 作者工具（`mod_write` 等）；mods 未启用时为空。
-    ///
-    /// `AgentTool` 是 `Send` 但非 `Sync`（内含 `BoxCloneService`），用 `Mutex` 包一层
-    /// 让 `Session` 保持 `Sync`（TUI 驱动任务要求 `Arc<Session>: Send`）。
-    authoring_tools: Mutex<Vec<AgentTool>>,
     /// mods 宿主；解释器内嵌在 `tower-agent-monty` 中，默认启用（`TPA_NO_MODS` 可关闭）。
     mods: Option<Arc<ModManager>>,
     /// 工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
@@ -96,29 +91,27 @@ impl Session {
         // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
         // 内置静态插件与 JIT mod 共用一张注册表：工具目录来自「解析 + 安装」。
         // monty 解释器随 `tower-agent-monty` 内嵌，默认启用；`TPA_NO_MODS` 可关闭。
-        let (mods, authoring) = if std::env::var_os("TPA_NO_MODS").is_none() {
+        let mods = if std::env::var_os("TPA_NO_MODS").is_none() {
             let registry = tower_agent_plugins::default_registry(&cwd);
             match ModManager::new(UiState::new(), registry) {
                 Ok(manager) => {
                     // 把工作目录只读挂到 /work，供 mod 读取项目文件；写操作被拒。
                     let _ = manager.mount_readonly("/work", &cwd);
-                    let authoring = authoring_tools(Arc::clone(&manager));
-                    (Some(manager), authoring)
+                    Some(manager)
                 }
                 Err(error) => {
                     eprintln!("mods 初始化失败（本次会话已关闭 mods）：{error}");
-                    (None, Vec::new())
+                    None
                 }
             }
         } else {
-            (None, Vec::new())
+            None
         };
 
-        let mut initial_tools = match &mods {
+        let initial_tools = match &mods {
             Some(mods) => mods.tools(),
             None => base_tools.clone(),
         };
-        initial_tools.extend(authoring.iter().cloned());
         let mut options = AgentOptions::new(stream);
         options.initial.tools = initial_tools;
         options.initial.model = Some(model);
@@ -129,7 +122,6 @@ impl Session {
             control,
             cwd,
             base_tools: Mutex::new(base_tools),
-            authoring_tools: Mutex::new(authoring),
             mods,
             tool_filter: Mutex::new(ToolFilter::default()),
         }
@@ -248,17 +240,11 @@ impl Session {
             .lock()
             .expect("tool filter poisoned")
             .clone();
-        let mut tools: Vec<AgentTool> = catalog
+        // 地基（作者工具）不受 `--tools` 过滤影响，否则就没法写 mod 了。
+        let tools: Vec<AgentTool> = catalog
             .into_iter()
-            .filter(|tool| filter.allows(tool.name()))
+            .filter(|tool| filter.allows(tool.name()) || tower_agent_monty::is_reserved_name(tool.name()))
             .collect();
-        tools.extend(
-            self.authoring_tools
-                .lock()
-                .expect("authoring tools poisoned")
-                .iter()
-                .cloned(),
-        );
         self.control.set_tools(tools);
     }
 

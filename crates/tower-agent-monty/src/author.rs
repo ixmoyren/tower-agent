@@ -2,8 +2,12 @@
 //!
 //! 模型自己生成 monty Python 代码，通过 `mod_write` 校验/加载；mod 再用宿主函数
 //! 调能力（`tool_call`）、提供工具（`tool_register`）、改界面（`ui_*`）。
+//!
+//! 这些工具由 **JIT 运行时地基插件**（protected）在 `install` 时装进工具目录，因此
+//! 和 mod 工具同表。工具句柄用 [`Weak`] 指向 `ModManager`，避免
+//! 「管理器 → 注册表 → 地基插件 → 工具 → 管理器」的强引用环。
 
-use std::sync::Arc;
+use std::sync::Weak;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -60,19 +64,23 @@ struct NameParams {
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct ListParams {}
 
-/// 构造一组作者工具：`mod_write` / `mod_reload` / `mod_list` / `mod_remove`。
+/// 构造一组作者工具（由地基插件 `install`）：`mod_write` / `mod_reload` / `mod_list`
+/// / `mod_remove` / `mod_persist` / `mod_discard`。
 #[must_use]
-pub fn authoring_tools(manager: Arc<ModManager>) -> Vec<AgentTool> {
+pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
     let write = {
-        let manager = manager.clone();
+        let manager = Weak::clone(&manager);
         ToolRegistration::new::<WriteParams, _, _>(
             MOD_WRITE,
             "创建或热重载一个 monty mod：模型生成 Python 代码，代码可调用宿主函数 \
              （tool_call/log/state_*）、注册工具（tool_register）、贡献 UI（ui_status/ui_panel/ui_tool_render）。\
              可用 `requires` 声明依赖的宿主能力（如 `tool.read`），`permissions` 收窄权限。",
             move |params, _request| {
-                let manager = manager.clone();
+                let manager = Weak::clone(&manager);
                 async move {
+                    let Some(manager) = manager.upgrade() else {
+                        return Ok(host_gone());
+                    };
                     Ok(render(
                         manager
                             .write_with_options(
@@ -90,38 +98,48 @@ pub fn authoring_tools(manager: Arc<ModManager>) -> Vec<AgentTool> {
         )
     };
     let reload = {
-        let manager = manager.clone();
+        let manager = Weak::clone(&manager);
         ToolRegistration::new::<WriteParams, _, _>(
             MOD_RELOAD,
             "热重载一个已存在的 mod；新代码校验通过才替换，失败保留旧版本。",
             move |params, _request| {
-                let manager = manager.clone();
-                async move { Ok(render(manager.reload(&params.name, &params.code).await)) }
+                let manager = Weak::clone(&manager);
+                async move {
+                    let Some(manager) = manager.upgrade() else {
+                        return Ok(host_gone());
+                    };
+                    Ok(render(manager.reload(&params.name, &params.code).await))
+                }
             },
         )
     };
     let list = {
-        let manager = manager.clone();
+        let manager = Weak::clone(&manager);
         ToolRegistration::new::<ListParams, _, _>(
             MOD_LIST,
             "列出当前已加载的 mod 及其提供的工具。",
             move |_params, _request| {
-                let manager = manager.clone();
+                let manager = Weak::clone(&manager);
                 async move {
-                    let summaries = manager.list();
-                    Ok(AgentToolResult::text(render_list(&summaries)))
+                    let Some(manager) = manager.upgrade() else {
+                        return Ok(host_gone());
+                    };
+                    Ok(AgentToolResult::text(render_list(&manager.list())))
                 }
             },
         )
     };
     let remove = {
-        let manager = manager.clone();
+        let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
             MOD_REMOVE,
             "卸载一个 mod，并注销它注册的工具。",
             move |params, _request| {
-                let manager = manager.clone();
+                let manager = Weak::clone(&manager);
                 async move {
+                    let Some(manager) = manager.upgrade() else {
+                        return Ok(host_gone());
+                    };
                     match manager.remove(&params.name) {
                         Ok(true) => Ok(AgentToolResult::text(format!(
                             "removed mod `{}`",
@@ -138,13 +156,16 @@ pub fn authoring_tools(manager: Arc<ModManager>) -> Vec<AgentTool> {
         )
     };
     let persist = {
-        let manager = manager.clone();
+        let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
             MOD_PERSIST,
             "把一个 mod 持久化到用户配置目录（跨会话保留）。",
             move |params, _request| {
-                let manager = manager.clone();
+                let manager = Weak::clone(&manager);
                 async move {
+                    let Some(manager) = manager.upgrade() else {
+                        return Ok(host_gone());
+                    };
                     match manager.persist(&params.name) {
                         Ok(()) => Ok(AgentToolResult::text(format!(
                             "persisted mod `{}`",
@@ -157,13 +178,16 @@ pub fn authoring_tools(manager: Arc<ModManager>) -> Vec<AgentTool> {
         )
     };
     let discard = {
-        let manager = manager.clone();
+        let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
             MOD_DISCARD,
             "丢弃一个 mod：卸载它并删除持久化/临时副本。",
             move |params, _request| {
-                let manager = manager.clone();
+                let manager = Weak::clone(&manager);
                 async move {
+                    let Some(manager) = manager.upgrade() else {
+                        return Ok(host_gone());
+                    };
                     match manager.discard(&params.name) {
                         Ok(true) => Ok(AgentToolResult::text(format!(
                             "discarded mod `{}`",
@@ -180,6 +204,10 @@ pub fn authoring_tools(manager: Arc<ModManager>) -> Vec<AgentTool> {
         )
     };
     vec![write, reload, list, remove, persist, discard]
+}
+
+fn host_gone() -> AgentToolResult {
+    AgentToolResult::error("mods host is gone")
 }
 
 /// 把写/重载结果渲染成模型可见文本。

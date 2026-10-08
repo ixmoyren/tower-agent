@@ -33,9 +33,11 @@ mod store;
 mod tool;
 mod wire;
 
-pub use author::authoring_tools;
 pub use host::{HostCall, MontyHost};
-pub use manager::{ModManager, ModOptions, ModPermissions, ModSummary};
+pub use manager::{
+    JIT_RUNTIME_PLUGIN, ModManager, ModOptions, ModPermissions, ModSummary, RESERVED_NAMES,
+    ShadowedTool, is_reserved_name, jit_runtime_manifest,
+};
 pub use plugin::MontyPlugin;
 pub use store::{ModMeta, ModStore, StoredMod};
 pub use tool::{ModTool, ToolSpec};
@@ -97,6 +99,15 @@ mod tests {
             .collect()
     }
 
+    /// 按名从目录（含地基的作者工具）取工具。
+    fn tool(manager: &ModManager, name: &str) -> tower_agent_core::AgentTool {
+        manager
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == name)
+            .unwrap_or_else(|| panic!("tool `{name}` not in catalog"))
+    }
+
     #[tokio::test]
     async fn mod_tool_is_a_tool_route_layer() {
         let manager = manager();
@@ -107,7 +118,7 @@ def shout(args):
     return \"hi\"
 ";
         manager.write("demo", code).await.expect("write mod");
-        let tool = manager.tools().remove(0);
+        let tool = tool(&manager, "shout");
 
         // 名字不匹配时，ToolRoute 委托内层 ToolNotFound —— 与内置工具完全同构。
         use tower::ServiceExt as _;
@@ -197,11 +208,16 @@ def evil(args):
             .expect_err("must be blocked");
         assert!(error.to_string().contains("reserved"), "{error}");
         assert!(
-            !manager
+            !manager.list().iter().any(|summary| summary.name == "evil"),
+            "被阻断的 mod 不应进入目录"
+        );
+        // 目录里的 `mod_write` 来自地基插件（protected），不是被劫持的实现。
+        assert!(
+            manager
                 .tools()
                 .iter()
                 .any(|tool| tool.name() == "mod_write"),
-            "目录里不应出现被劫持的 mod_write"
+            "地基应提供 mod_write"
         );
     }
 
@@ -213,6 +229,38 @@ def evil(args):
             .await
             .expect_err("must be blocked");
         assert!(error.to_string().contains("reserved"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn foundation_plugin_installs_authoring_tools() {
+        let manager = manager();
+        let names: Vec<String> = manager
+            .tools()
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect();
+        for expected in crate::author::AUTHORING_TOOL_NAMES {
+            assert!(
+                names.iter().any(|name| name == expected),
+                "地基插件应 install 出作者工具 `{expected}`，实际：{names:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn authoring_tool_created_by_foundation_works() {
+        let manager = manager();
+        let write = tool(&manager, "mod_write");
+        let args = json!({
+            "name": "demo",
+            "code": "tool_register(\"shout\", \"shout\", \"\", {\"type\": \"object\"})\n\ndef shout(args):\n    return args[\"text\"].upper()\n",
+        });
+        let text = call_mod_tool(&write, args).await;
+        assert!(text.contains("demo"), "mod_write 结果：{text}");
+        assert!(
+            manager.list().iter().any(|summary| summary.name == "demo"),
+            "通过地基工具创建的 mod 应进入目录"
+        );
     }
 
     #[tokio::test]
@@ -417,10 +465,7 @@ def shout(args):
             "ui_status 写进了共享 UI 状态"
         );
 
-        let tools = manager.tools();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name(), "shout");
-        let text = call_mod_tool(&tools[0], json!({ "text": "hi" })).await;
+        let text = call_mod_tool(&tool(&manager, "shout"), json!({ "text": "hi" })).await;
         assert_eq!(text, "HI", "mod 工具真的执行了 Python 函数");
     }
 
@@ -477,14 +522,14 @@ def shout(args):
         let first = format!("{header}    return args[\"text\"]\n");
         manager.write("demo", &first).await.expect("install");
         assert_eq!(
-            call_mod_tool(&manager.tools()[0], json!({ "text": "hi" })).await,
+            call_mod_tool(&tool(&manager, "shout"), json!({ "text": "hi" })).await,
             "hi"
         );
 
         let second = format!("{header}    return args[\"text\"].upper()\n");
         manager.reload("demo", &second).await.expect("reload");
         assert_eq!(
-            call_mod_tool(&manager.tools()[0], json!({ "text": "hi" })).await,
+            call_mod_tool(&tool(&manager, "shout"), json!({ "text": "hi" })).await,
             "HI",
             "热重载替换了工具实现"
         );
@@ -520,7 +565,7 @@ def read_note(args):
     return Path(\"/work/note.txt\").read_text()
 ";
         manager.write("reader", code).await.expect("write mod");
-        let text = call_mod_tool(&manager.tools()[0], json!({})).await;
+        let text = call_mod_tool(&tool(&manager, "read_note"), json!({})).await;
         assert_eq!(text, "hello from mount", "mod 读到了挂载的宿主文件");
     }
 
@@ -550,7 +595,7 @@ def read_note(args):
     return Path(\"/work/note.txt\").read_text()
 ";
         manager.write("locked", code).await.expect("write mod");
-        let text = call_mod_tool(&manager.tools()[0], json!({})).await;
+        let text = call_mod_tool(&tool(&manager, "read_note"), json!({})).await;
         assert!(
             text.contains("PermissionError") || text.contains("not allowed"),
             "无 fs 权限时应被拒，实际：{text}"

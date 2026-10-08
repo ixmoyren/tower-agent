@@ -179,11 +179,17 @@ impl ModManager {
             kv: Mutex::new(BTreeMap::new()),
             store: Mutex::new(ModStore::from_dirs()),
         });
+        // JIT 运行时以 protected 载荷注册，并在 install 时把作者工具装进工具目录。
+        // 工具句柄用 Weak 指回本管理器，避免强引用环。
+        let foundation = FoundationPlugin {
+            manifest: jit_runtime_manifest(),
+            tools: Mutex::new(crate::author::authoring_tools(Arc::downgrade(&manager))),
+        };
         manager
             .registry
             .lock()
             .expect("registry poisoned")
-            .register_manifest(jit_runtime_manifest())?;
+            .register_plugin(Arc::new(foundation))?;
         manager.resolve_and_apply()?;
         Ok(manager)
     }
@@ -1027,6 +1033,31 @@ struct ModJitPlugin {
     manifest: PluginManifest,
     plugin: Arc<MontyPlugin>,
     specs: Vec<ToolSpec>,
+}
+
+/// JIT 运行时地基插件：`protected`，`install` 时装出 mods 作者工具。
+///
+/// `AgentTool` 非 `Sync`，用 `Mutex` 包一层让它能作为 `StaticPlugin`。
+struct FoundationPlugin {
+    manifest: PluginManifest,
+    tools: Mutex<Vec<AgentTool>>,
+}
+
+impl StaticPlugin for FoundationPlugin {
+    fn manifest(&self) -> PluginManifest {
+        self.manifest.clone()
+    }
+
+    fn install(&self, context: &mut PluginContext) -> Result<(), PluginError> {
+        let tools = self.tools.lock().map_err(|_| PluginError::Install {
+            plugin: self.manifest.name.clone(),
+            message: "foundation tools poisoned".to_string(),
+        })?;
+        for tool in tools.iter() {
+            context.register_tool(tool.clone());
+        }
+        Ok(())
+    }
 }
 
 impl StaticPlugin for ModJitPlugin {
