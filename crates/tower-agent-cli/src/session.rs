@@ -243,7 +243,9 @@ impl Session {
         // 地基（作者工具）不受 `--tools` 过滤影响，否则就没法写 mod 了。
         let tools: Vec<AgentTool> = catalog
             .into_iter()
-            .filter(|tool| filter.allows(tool.name()) || tower_agent_monty::is_reserved_name(tool.name()))
+            .filter(|tool| {
+                filter.allows(tool.name()) || tower_agent_monty::is_reserved_name(tool.name())
+            })
             .collect();
         self.control.set_tools(tools);
     }

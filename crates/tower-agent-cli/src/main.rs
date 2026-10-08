@@ -224,7 +224,7 @@ fn read_stdin_prompt() -> Option<String> {
 
 /// `--print`：跑一轮并把事件打成纯文本。
 fn run_print_blocking(session: &Session, prompt: String) -> std::io::Result<()> {
-    let runtime = single_thread_runtime()?;
+    let runtime = runtime()?;
     runtime.block_on(async {
         session.load_persisted_mods().await;
         session.load_dynamic_plugins();
@@ -244,22 +244,56 @@ fn run_tui_blocking(
     prompt: Option<String>,
     notice: Option<String>,
 ) -> std::io::Result<()> {
-    let runtime = single_thread_runtime()?;
+    let runtime = runtime()?;
     runtime.block_on(run_tui(session, prompt, "tower-agent", notice))
 }
 
-fn single_thread_runtime() -> std::io::Result<tokio::runtime::Runtime> {
-    // 多线程：动态插件的宿主回调会在阻塞线程里 `block_on` 异步派发，需要 worker 继续推进。
+/// 构造 CLI 使用的 tokio runtime。
+///
+/// 用多线程：给「主任务（turn / TUI）」和「动态插件宿主回调的派发任务」留并行头寸，
+/// 避免一段没有 `.await` 的 CPU 工作把派发拖住（通道桥下不会死锁，只是延迟）。
+/// worker 数由 `TPA_WORKERS` 覆盖，默认取 `std::thread::available_parallelism()`。
+fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(worker_count())
         .enable_all()
         .build()
+}
+
+/// worker 线程数：`TPA_WORKERS`（正整数）优先，否则用可用并行度。
+fn worker_count() -> usize {
+    parse_workers(std::env::var("TPA_WORKERS").ok().as_deref()).unwrap_or_else(default_workers)
+}
+
+/// 解析 `TPA_WORKERS`：只接受正整数，其余（含 0、非法值）返回 `None`。
+fn parse_workers(value: Option<&str>) -> Option<usize> {
+    value
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|count| *count > 0)
+}
+
+/// 默认 worker 数：可用并行度（取不到时退化为 1）。
+fn default_workers() -> usize {
+    std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::session::write_event;
+
+    #[test]
+    fn worker_count_parses_overrides() {
+        assert_eq!(parse_workers(Some("4")), Some(4));
+        assert_eq!(parse_workers(Some(" 8 ")), Some(8));
+        assert_eq!(parse_workers(Some("0")), None, "0 不是合法 worker 数");
+        assert_eq!(parse_workers(Some("-1")), None);
+        assert_eq!(parse_workers(Some("abc")), None);
+        assert_eq!(parse_workers(None), None);
+        assert!(default_workers() >= 1);
+    }
 
     #[test]
     fn stdin_prompt_reader_is_available() {

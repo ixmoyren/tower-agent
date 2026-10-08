@@ -470,7 +470,7 @@ mod tests {
             ProviderStackOptions::default(),
             None,
         )
-            .expect("faux 不需要 api key");
+        .expect("faux 不需要 api key");
         assert!(setup.models.has_route("faux", "faux"));
         assert_eq!(setup.model.id, "faux");
         assert_eq!(
@@ -507,7 +507,7 @@ mod tests {
             ProviderStackOptions::default(),
             Some("sk-test"),
         )
-            .expect("带 api key 即可组装");
+        .expect("带 api key 即可组装");
         assert!(setup.models.has_route("openai", "openai-responses"));
         assert_eq!(setup.model.id, "gpt-test");
         assert_eq!(setup.model.api, "openai-responses");
