@@ -8,23 +8,33 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+# 外部依赖：只在 **2 个及以上** crate 使用。
+# 只被单个 crate 使用的依赖放在该 crate 自己的 `[dependencies]` 里（见各 crate）。
 tower = { version = "0.5.3", features = ["util", "timeout", "retry", "limit", "load-shed", "steer", "filter", "buffer"] }
-base64 = "0.23"
-bytes = "1"
-clap = { version = "4.6", features = ["derive"] }
 dirs = "7"
 futures-core = "0.3"
 futures-util = "0.3"
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream", "charset", "json"] }
+rkyv = { version = "0.8", features = ["bytecheck"] }
 schemars = { version = "1", features = ["derive"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+stabby = "72.1.16"
 tempfile = "3.27"
+thiserror = "2"
 tokio = { version = "1", features = ["rt", "sync", "macros", "time", "process", "io-util", "fs"] }
 tokio-util = { version = "0.7", default-features = false }
-serde_json = "1"
-thiserror = "2"
+
+# 内部子 crate：crate 之间互相依赖一律走 `workspace = true`，路径只在这里声明一次。
+tower-agent-core = { path = "crates/tower-agent-core" }
+tower-agent-runtime = { path = "crates/tower-agent-runtime" }
+tower-agent-provider = { path = "crates/tower-agent-provider" }
+tower-agent-tools = { path = "crates/tower-agent-tools" }
+tower-agent-plugins = { path = "crates/tower-agent-plugins" }
+tower-agent-plugin-sdk = { path = "crates/tower-agent-plugin-sdk" }
+tower-agent-tui = { path = "crates/tower-agent-tui" }
+tower-agent-protocol = { path = "crates/tower-agent-protocol" }
+tower-agent-monty = { path = "crates/tower-agent-monty" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -16,11 +16,11 @@ protocol = ["dep:tower-agent-protocol"]
 plugin-sdk = ["dep:tower-agent-plugin-sdk"]
 
 [dependencies]
-tower-agent-core = { path = "../tower-agent-core" }
-tower-agent-runtime = { path = "../tower-agent-runtime" }
-tower-agent-provider = { path = "../tower-agent-provider" }
-tower-agent-tools = { path = "../tower-agent-tools" }
-tower-agent-plugins = { path = "../tower-agent-plugins" }
-tower-agent-tui = { path = "../tower-agent-tui", optional = true }
-tower-agent-protocol = { path = "../tower-agent-protocol", optional = true }
-tower-agent-plugin-sdk = { path = "../tower-agent-plugin-sdk", optional = true }
+tower-agent-core = { workspace = true }
+tower-agent-runtime = { workspace = true }
+tower-agent-provider = { workspace = true }
+tower-agent-tools = { workspace = true }
+tower-agent-plugins = { workspace = true }
+tower-agent-tui = { workspace = true, optional = true }
+tower-agent-protocol = { workspace = true, optional = true }
+tower-agent-plugin-sdk = { workspace = true, optional = true }

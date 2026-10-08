@@ -9,8 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-tower-agent-provider = { path = "../tower-agent-provider" }
-tower-agent-core = { path = "../tower-agent-core" }
+tower-agent-provider = { workspace = true }
+tower-agent-core = { workspace = true }
 tower = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }

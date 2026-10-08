@@ -9,11 +9,11 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-tower-agent-runtime = { path = "../tower-agent-runtime" }
-tower-agent-plugins = { path = "../tower-agent-plugins" }
+tower-agent-runtime = { workspace = true }
+tower-agent-plugins = { workspace = true }
 semver = { workspace = true }
-stabby = { version = "72.1.16", optional = true }
-rkyv = { version = "0.8", features = ["bytecheck"], optional = true }
+stabby = { workspace = true, optional = true }
+rkyv = { workspace = true, optional = true }
 
 [features]
 default = []

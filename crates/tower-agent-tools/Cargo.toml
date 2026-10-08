@@ -9,9 +9,10 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-tower-agent-runtime = { path = "../tower-agent-runtime" }
-tower-agent-provider = { path = "../tower-agent-provider" }
-base64 = { workspace = true }
+tower-agent-runtime = { workspace = true }
+tower-agent-provider = { workspace = true }
+# 只被本 crate 使用：放在这里而不是 workspace。
+base64 = "0.23"
 dirs = { workspace = true }
 futures-util = { workspace = true }
 globset = "0.4"
@@ -27,4 +28,4 @@ unicode-normalization = "0.1"
 
 # 只在类 Unix 平台用于杀掉整个进程组（见 `shell.rs` 的 `kill_process_group`）。
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true }
+rustix = { version = "1", default-features = false, features = ["std", "process"] }

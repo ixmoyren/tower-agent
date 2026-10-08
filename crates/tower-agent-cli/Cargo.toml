@@ -13,18 +13,19 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-tower-agent-runtime = { path = "../tower-agent-runtime" }
-tower-agent-provider = { path = "../tower-agent-provider" }
-clap = { workspace = true }
+tower-agent-core = { workspace = true }
+tower-agent-runtime = { workspace = true }
+tower-agent-provider = { workspace = true }
+tower-agent-plugins = { workspace = true }
+tower-agent-tui = { workspace = true }
+tower-agent-monty = { workspace = true }
+# 只被本 crate 使用。
+clap = { version = "4.6", features = ["derive"] }
 futures-util = { workspace = true }
-tower-agent-plugins = { path = "../tower-agent-plugins" }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
-tower-agent-tui = { path = "../tower-agent-tui" }
-tower-agent-monty = { version = "0.1.0", path = "../tower-agent-monty" }
-tower-agent-core = { version = "0.1.0", path = "../tower-agent-core" }
 
 [dev-dependencies]
-tower-agent-provider = { path = "../tower-agent-provider", features = ["test-util"] }
+tower-agent-provider = { workspace = true, features = ["test-util"] }
 tempfile = { workspace = true }
