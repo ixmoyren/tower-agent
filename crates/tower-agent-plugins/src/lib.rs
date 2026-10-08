@@ -27,7 +27,11 @@ mod static_plugin;
 
 pub use builtin::{DEFAULT_TOOL_NAMES, default_registry, default_tools, resolve_default};
 #[cfg(feature = "dynamic")]
-pub use dynamic::{AbiCapability, AbiManifest, AbiVersion, LoadedPlugin, PluginVTable};
+pub use dynamic::{
+    AbiBuffer, AbiCapability, AbiHostCall, AbiHostResult, AbiKind, AbiManifest, AbiNode,
+    AbiToolCall, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiToolCall, ArchivedAbiToolResult,
+    ArchivedAbiValue, HostDispatch, HostVTable, LoadedPlugin, PluginVTable,
+};
 pub use error::PluginError;
 pub use host::{HostApi, PluginAccess};
 pub use layer::{

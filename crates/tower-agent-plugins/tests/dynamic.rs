@@ -14,7 +14,9 @@
 
 use std::path::PathBuf;
 
-use tower_agent_plugins::{LoadedPlugin, PluginError, PluginState};
+use tower_agent_plugins::{
+    AbiToolCall, AbiValue, ArchivedAbiToolResult, LoadedPlugin, PluginError, PluginState,
+};
 
 fn example_path() -> Option<PathBuf> {
     std::env::var_os("TPA_PLUGIN_EXAMPLE").map(PathBuf::from)
@@ -22,7 +24,7 @@ fn example_path() -> Option<PathBuf> {
 
 #[test]
 fn loading_a_missing_library_is_reported() {
-    let error = unsafe { LoadedPlugin::load("/definitely/not/a/plugin.so") };
+    let error = unsafe { LoadedPlugin::load("/definitely/not/a/plugin.so", |_| None) };
     assert!(matches!(error, Err(PluginError::Load { .. })));
 }
 
@@ -32,10 +34,22 @@ fn loads_calls_and_unloads_the_example_plugin() {
         eprintln!("skipping: set TPA_PLUGIN_EXAMPLE to the example cdylib path");
         return;
     };
-    let plugin = unsafe { LoadedPlugin::load(&path) }.expect("load example plugin");
+    let plugin = unsafe { LoadedPlugin::load(&path, |_| None) }.expect("load example plugin");
     assert_eq!(plugin.manifest().name, "example");
     assert_eq!(plugin.lifecycle().state(), PluginState::Started);
-    assert_eq!(plugin.call("hi").expect("call"), "echo: hi");
+
+    let call = AbiToolCall {
+        id: "c1".into(),
+        tool: "echo".into(),
+        args: AbiValue::from_json(&serde_json::json!({ "text": "hi" })),
+    };
+    let request = rkyv::to_bytes::<rkyv::rancor::Error>(&call).expect("archive request");
+    let response = plugin.call_archived(&request).expect("call");
+    let result = rkyv::access::<ArchivedAbiToolResult, rkyv::rancor::Error>(&response)
+        .expect("access response");
+    assert!(result.ok, "示例插件应成功");
+    assert_eq!(result.content.as_str(), "echo: hi");
+
     plugin.stop().expect("stop");
     plugin.unload().expect("unload");
 }

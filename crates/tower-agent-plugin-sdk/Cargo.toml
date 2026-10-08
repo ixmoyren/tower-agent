@@ -13,8 +13,9 @@ tower-agent-runtime = { path = "../tower-agent-runtime" }
 tower-agent-plugins = { path = "../tower-agent-plugins" }
 semver = { workspace = true }
 stabby = { version = "72.1.16", optional = true }
+rkyv = { version = "0.8", features = ["bytecheck"], optional = true }
 
 [features]
 default = []
 # 动态插件作者需要的 ABI 类型 + `declare_dynamic_plugin!`。
-dynamic = ["tower-agent-plugins/dynamic", "dep:stabby"]
+dynamic = ["tower-agent-plugins/dynamic", "dep:stabby", "dep:rkyv"]

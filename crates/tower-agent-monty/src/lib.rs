@@ -308,17 +308,18 @@ def shout(args):
     #[test]
     fn dynamic_plugin_dir_without_libraries_loads_nothing() {
         let dir = tempfile::tempdir().expect("temp dir");
+        let manager = manager();
         let mut registry = PluginRegistry::new();
         // 空目录：不加载任何插件（注意：`load_from_dir` 需要 unsafe，测试里显式标注）。
         #[allow(unsafe_code)]
-        let loaded =
-            unsafe { crate::dynamic::load_from_dir(&mut registry, dir.path()) }.expect("scan dir");
+        let loaded = unsafe { crate::dynamic::load_from_dir(&mut registry, dir.path(), &manager) }
+            .expect("scan dir");
         assert!(loaded.is_empty());
         // 目录里放一个非库文件也不应被当成插件。
         std::fs::write(dir.path().join("note.txt"), "x").expect("write");
         #[allow(unsafe_code)]
-        let loaded =
-            unsafe { crate::dynamic::load_from_dir(&mut registry, dir.path()) }.expect("scan dir");
+        let loaded = unsafe { crate::dynamic::load_from_dir(&mut registry, dir.path(), &manager) }
+            .expect("scan dir");
         assert!(loaded.is_empty());
     }
 

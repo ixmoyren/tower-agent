@@ -15,12 +15,14 @@ semver = { workspace = true }
 stabby = { version = "72.1.16", optional = true }
 tower-agent-tools = { path = "../tower-agent-tools" }
 tower.workspace = true
+rkyv = { version = "0.8", features = ["bytecheck"], optional = true }
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = ["static"]
 static = []
 # 动态插件（stabby cdylib + libloading）开关；热重载插件见 `tower-agent-monty`。
-dynamic = ["dep:stabby", "dep:libloading"]
+dynamic = ["dep:stabby", "dep:libloading", "dep:rkyv", "dep:serde_json"]
 
 [dev-dependencies]
 futures-util = { workspace = true }

@@ -249,7 +249,9 @@ fn run_tui_blocking(
 }
 
 fn single_thread_runtime() -> std::io::Result<tokio::runtime::Runtime> {
-    tokio::runtime::Builder::new_current_thread()
+    // 多线程：动态插件的宿主回调会在阻塞线程里 `block_on` 异步派发，需要 worker 继续推进。
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()
 }

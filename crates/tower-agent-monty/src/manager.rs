@@ -403,12 +403,12 @@ impl ModManager {
     /// 目录里的库会被 dlopen 并执行，调用方必须保证它们可信。
     #[allow(unsafe_code)]
     pub unsafe fn load_dynamic_plugins(
-        &self,
+        self: &Arc<Self>,
         dir: impl AsRef<Path>,
     ) -> Result<Vec<String>, PluginError> {
         let loaded = {
             let mut registry = self.registry.lock().expect("registry poisoned");
-            unsafe { crate::dynamic::load_from_dir(&mut registry, dir) }?
+            unsafe { crate::dynamic::load_from_dir(&mut registry, dir, self) }?
         };
         if !loaded.is_empty() {
             self.resolve_and_apply()?;
@@ -422,7 +422,9 @@ impl ModManager {
     ///
     /// 同上：库会被加载并执行。
     #[allow(unsafe_code)]
-    pub unsafe fn load_dynamic_plugins_from_config(&self) -> Result<Vec<String>, PluginError> {
+    pub unsafe fn load_dynamic_plugins_from_config(
+        self: &Arc<Self>,
+    ) -> Result<Vec<String>, PluginError> {
         let Some(dir) = dirs::config_dir().map(|dir| dir.join("tower-agent").join("plugins"))
         else {
             return Ok(Vec::new());
@@ -759,7 +761,7 @@ impl ModManager {
     }
 
     /// 派发一次宿主调用（由 [`ModHostAdapter`] 调用）。
-    async fn dispatch(&self, call: HostCall) -> Result<Value, String> {
+    pub(crate) async fn dispatch(&self, call: HostCall) -> Result<Value, String> {
         let permissions = self.permissions(&call.plugin);
         let denied = |what: &str| Err(format!("mod `{}` is not allowed to {what}", call.plugin));
 

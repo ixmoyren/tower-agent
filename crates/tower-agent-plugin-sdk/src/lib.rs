@@ -18,9 +18,14 @@ pub use tower_agent_plugins::{
 };
 pub use tower_agent_runtime::ToolRegistration;
 
+/// 插件作者需要与宿主同一版本的 `rkyv`（归档格式与之绑定）。
+#[cfg(feature = "dynamic")]
+pub use rkyv;
 #[cfg(feature = "dynamic")]
 pub use tower_agent_plugins::dynamic::{
-    AbiCapability, AbiManifest, AbiVersion, LoadedPlugin, PluginVTable,
+    AbiBuffer, AbiCapability, AbiHostCall, AbiHostResult, AbiKind, AbiManifest, AbiNode,
+    AbiToolCall, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiHostResult, ArchivedAbiToolCall,
+    ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, HostVTable, LoadedPlugin, PluginVTable,
 };
 
 /// 导出动态插件的 `__tpa_plugin_entry`（`docs/plugins.md` 第 8.2 节）。

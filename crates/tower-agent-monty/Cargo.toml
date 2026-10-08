@@ -13,6 +13,7 @@ dirs.workspace = true
 futures-util.workspace = true
 monty-fs = "1.1.0"
 monty-types = "1.1.0"
+rkyv = { version = "0.8", features = ["bytecheck"] }
 schemars.workspace = true
 semver = { workspace = true }
 serde.workspace = true
