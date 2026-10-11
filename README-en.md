@@ -143,7 +143,8 @@ tower-agent/
 ├── examples/plugin-example/ # dynamic plugin (cdylib) example
 └── wasm/                    # independent wasm component workspaces
     ├── monty-sandbox/       #   compiles the monty interpreter into a wasm component
-    └── coreutils-wasm/      #   codemode's command layer (uutils multicall, 60 commands)
+    ├── coreutils-wasm/      #   codemode's command layer (uutils multicall, 60 commands)
+    └── codemode-sandbox/    #   codemode's JS sandbox (rquickjs -> wasip2)
 ```
 
 ### Documentation
@@ -165,6 +166,36 @@ cargo clippy --all-features --all-targets
 # Regenerate the embedded monty wasm component (needs cargo-component / wasm-opt / wasm-tools)
 ./wasm/monty-sandbox/generate.sh
 ```
+
+### wasm artifacts (not committed — build them locally)
+
+The wasm components embedded into the binaries are **not tracked by git** (see the `# wasm` block in
+`.gitignore`), so **before the first `cargo build` / `cargo test` in a fresh clone you must generate
+them** — otherwise `include_bytes!` fails with `couldn't read …/assets/*.wasm`.
+
+| Artifact                                             | Embedded by            | How to build                                         |
+|------------------------------------------------------|------------------------|------------------------------------------------------|
+| `crates/tower-agent-monty/assets/monty-sandbox.wasm` | `tower-agent-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
+| `crates/tower-agent-codemode/assets/coreutils.wasm`  | `tower-agent-codemode` | `./wasm/coreutils-wasm/generate.sh`                  |
+| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/codemode-sandbox/generate.sh` |
+
+Toolchain (needed only when building wasm, not for everyday `cargo build`):
+
+```sh
+rustup target add wasm32-wasip2          # all three artifacts
+rustup target add wasm32-wasip1          # monty-sandbox: p1 + wasm-opt + componentize
+cargo install cargo-component --locked   # monty-sandbox + codemode-sandbox
+cargo install wasm-tools --locked        # monty-sandbox (embed/new)
+# wasm-opt (binaryen)                    # monty-sandbox size
+# WASI_SDK (wasi-sdk 24+)               # codemode-sandbox: rquickjs compiles quickjs's C sources
+```
+
+- **coreutils-wasm** is the simplest: only `wasm32-wasip2` is needed; rustc emits the component
+  directly (no wasi-sdk / wasm-opt / wasm-tools).
+- **codemode-sandbox** needs `WASI_SDK`; the crates.io `rquickjs-sys` ships quickjs's C sources, so **no submodule or vendoring is required**.
+- The first build of a lane pulls dependencies from crates.io; afterwards each workspace's
+  `Cargo.lock` pins them, so `--offline` works.
+- Per-workspace details: `wasm/*/README.md`.
 
 ### License
 

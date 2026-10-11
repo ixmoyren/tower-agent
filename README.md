@@ -132,7 +132,8 @@ tower-agent/
 ├── examples/plugin-example/ # 动态插件（cdylib）示例
 └── wasm/                    # 独立的 wasm 组件 workspace
     ├── monty-sandbox/       #   把 monty 解释器编译成 wasm 组件
-    └── coreutils-wasm/      #   codemode 的命令层（uutils multicall，60 命令）
+    ├── coreutils-wasm/      #   codemode 的命令层（uutils multicall，60 命令）
+    └── codemode-sandbox/    #   codemode 的 JS 沙箱（rquickjs → wasip2）
 ```
 
 ### 文档
@@ -157,15 +158,15 @@ cargo clippy --all-features --all-targets
 
 ### wasm 产物（不入库，需本地编译）
 
-内嵌进二进制的 wasm 组件**不进 git**（见 `.gitignore` 的 `# wasm` 段），所以**全新克隆后第一次
+内嵌进二进制的 wasm 组件 **不进 git**（见 `.gitignore` 的 `# wasm` 段），所以 **全新克隆后第一次
 `cargo build` / `cargo test` 之前，必须先把产物编出来**（否则 `include_bytes!` 报
 `couldn't read …/assets/*.wasm`）。三个产物、两条链路：
 
-| 产物 | 谁内嵌 | 怎么编 |
-|------|--------|--------|
-| `crates/tower-agent-monty/assets/monty-sandbox.wasm` | `tower-agent-monty` | `./wasm/monty-sandbox/generate.sh` |
-| `crates/tower-agent-codemode/assets/coreutils.wasm` | `tower-agent-codemode` | `./wasm/coreutils-wasm/generate.sh` |
-| `crates/tower-agent-codemode/assets/codemode.wasm` | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/codemode-sandbox/generate.sh` |
+| 产物                                                 | 谁内嵌                 | 怎么编                                               |
+|------------------------------------------------------|------------------------|------------------------------------------------------|
+| `crates/tower-agent-monty/assets/monty-sandbox.wasm` | `tower-agent-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
+| `crates/tower-agent-codemode/assets/coreutils.wasm`  | `tower-agent-codemode` | `./wasm/coreutils-wasm/generate.sh`                  |
+| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/codemode-sandbox/generate.sh` |
 
 工具链（只在编 wasm 时要用，日常 `cargo build` 不需要）：
 
@@ -180,7 +181,7 @@ cargo install wasm-tools --locked        # monty-sandbox（embed/new）
 
 - **coreutils-wasm** 最简单：只要 `wasm32-wasip2`，rustc 直出组件（不需要 wasi-sdk / wasm-opt / wasm-tools）。
 - **codemode-sandbox** 需要 `WASI_SDK`（本机可在 `~/.cache/wasi-sdk-*`）；crates.io 上的 `rquickjs-sys`
-  自带 quickjs 的 C 源码，所以**不需要子模块或 vendor**。
+  自带 quickjs 的 C 源码，所以 **不需要子模块或 vendor**。
 - 首次构建某条链路要从 crates.io 拉依赖；之后各 workspace 里的 `Cargo.lock` 已固定版本，可加 `--offline`。
 - 细节（接口、上限、重生成流程）见各 workspace 的 README：`wasm/*/README.md`。
 

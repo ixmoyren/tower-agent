@@ -2,7 +2,7 @@
 
 | 项目     | 值                                                                                                                                                                                                                   |
 |----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 状态     | v0.5 草案。已定：**Q1 Q3 Q4 Q5 Q6 Q7 Q8 Q9 Q10** + 组合 **R1 + Q2(a)**（权威表见 §8）。M0.1 实测：命令组件已扩到 **60 util / 11 MB** 零补丁（§3.5）。⏳ 剩下：Q11（并发，不阻塞 M1）、M1 前置的 wasi-sdk（本机没有） |
+| 状态     | v0.6 草案。**Q1–Q11 已定**（含组合 R1 + Q2(a)，权威表见 §8）；M0–M5 + CLI 接线 + M7 第一层已完成，下一阶段见 §9（M6：并发走 ticket + join，不做 p3）
 | 日期     | 2026-10-11                                                                                                                                                                                                           |
 | 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、`crates/tower-agent-wasmtime`、`crates/tower-agent-monty`（同构样板）                                                                                      |
 | 本地引用 | `~/Projects/DelSkayn/rquickjs`、`~/Projects/awslabs/llrt`、`~/Projects/rquickjs/rquickjs-extra`、`~/Projects/rquickjs/rquickjs-serde`                                                                                |
@@ -417,7 +417,7 @@ exec: func(name: string, args: list<string>, opts: exec-opts
 | Q8  | 默认限额         | ✅ **已定：§7.1**                                                                                                |
 | Q9  | sqlite 模块      | ✅ **已定：不要**                                                                                                |
 | Q10 | 持久化           | ✅ **已定：阶段一会话即焚**；全部跑通后再开放保存 / 复用（§9 M7）                                                |
-| Q11 | 并发（新增）     | ⏳ 未定：首版**串行**命令（倾向）；`Promise.all` 式并行需要 p3 / component-model-async + 异步 host import        |
+| Q11 | 并发（新增）     | ✅ 已定：**不走 p3**（rquickjs 的 wasip3 不成熟），做 ticket + join（`execStart`/`execJoin`，留在 p2），见 §9.4 |
 
 ### 8.1 Q5 的硬约束（需要在两条路里选一条）
 
@@ -445,16 +445,12 @@ exec: func(name: string, args: list<string>, opts: exec-opts
 | M1.1   | ✅ 完成：`wasm/coreutils-wasm` 落地（60 util，7.4 MB，`./generate.sh` 一键重建；argv[0] 分发 + `coreutils <util>` 调试形式；冒烟通过，§3.5）                            | —                                   |
 | M1.2   | ✅ 完成：`wasm/codemode-sandbox` 落地（rquickjs + WIT `run`/`exec`，796 KB；`./generate.sh` 一键重建，crates.io rquickjs 无需子模块/vendor）                              | —                                   |
 | M1.3   | ✅ 完成：`crates/tower-agent-codemode` 宿主落地——`bindgen!` 绑定 + 实现 `exec`（起 coreutils 组件、内存 stdio、`argv[0]`=裸命令名）+ 会话根 preopen 成 guest `/`；**6 个冒烟全过** | —   |
-| M2     | ✅ 基本完成：`CodemodeTool`（`AgentTool`：schema、超时、`commands[]` 审计、命令级进度流）+ 产物内嵌（`assets/`，跑测试不再需要 `generate.sh`）；**9 个测试全过**。**剩下两件**：①「会话根」策略（沙箱里能看/能写什么）——与 M4 的只读挂载一起定；②定了之后把 `codemode` 注册进 CLI 的工具 catalog（`crates/tower-agent-cli/src/session.rs`） | M1.3 |
-| M1     | `wasm/codemode-sandbox`：加 `run` 导出 + 最小 API（`exec` 单命令 + guest `fs` 子集）；命令组件 = `wasm/coreutils-wasm`（60 util）；宿主 `crates/tower-agent-codemode`（引擎/池/绑定）+ 冒烟测试 | §8.1 R1、Q2（(a)）、wasi-sdk |
+| M2     | ✅ 完成：`CodemodeTool`（`AgentTool`：schema、超时、`commands[]` 审计、命令级进度流）+ 产物内嵌（`include_bytes!`，测试不再需要 generate.sh） | M1.3 |
 | M3     | ✅ 完成：JS 可见表面——命令函数 + thenable `Cmd` 链式 pipeline、`.result()`/抛异常两种取值、`fs` 门面扩到 `mkdir`/`exists`/`rm`、命令表由宿主注入并加**漂移测试**；**13 个测试全过**（新增 4 个）                                | M2                                  |
-| M4     | ✅ 完成（除 CLI 接线）：挂载策略——会话根可写映射到 guest `/`，额外挂载默认**只读**，JS 侧与命令侧**共用同一套 preopen**；越界路径拒绝（`..` 也不行）。**剩**：把 `codemode` 注册进 CLI catalog + 定「会话根默认挂什么」                              | M3                                  |
-| M5     | ✅ 完成：命令/脚本超时改成**硬取消**（异步链路：`exports: { default: async }` + `func_wrap_async` + `Command::instantiate_async` + `tokio::time::timeout`），`epoch_timeout` 退居次要兜底。**剩**：cwasm 预热 / 实例池化（测试 16 个跑 ~90 s，先量清是编译还是实例化） | M4                                  |
-| M3     | JS API 层：命令函数与 thenable 链式 pipeline、`fs` 门面、`exec`、`rquickjs-serde` 结构化返回；工具描述与范例                                                                                                             | M1、Q3                              |
-| M4     | 按需升级 VFS：宿主 `wasi:filesystem`（(b)/(c)）、只读挂载、路径越界拒绝（Q2 已定 (a)，这里只是「何时升级」）                                                                                                             | M3、Q2                              |
-| M5     | 资源与超时：命令侧 epoch/fuel（改 `tower-agent-wasmtime`）、配额、cwasm 预热与池化、每会话实例复用                                                                                                                       | M2                                  |
-| M6     | 按需：并发（Q11 → p3/component-model-async）、新增命令组件（rg / sd）                                                                                                                                                    | Q11                                 |
-| M7     | 持久化（Q10 阶段二）：会话产物与脚本的保存 / 复用（位置复用 `ModStore`）；把那时的「即焚」降级成可选项                                                                                                                   | M5                                  |
+| M4     | ✅ 完成：挂载策略（会话根可写映射 `/`、额外挂载默认只读、JS 与命令共用同一套 preopen、越界拒绝）+ **CLI 接线**（见 §9.1） | M3 |
+| M5     | ✅ 完成：超时改**硬取消**（异步链路）+ epoch 兜底；JIT 缓存不再静默降级；命令引擎进程内共享（套件 96 s → 22 s，见 §9.2） | M4 |
+| M6     | 📋 下一阶段：并发——**不走 p3**，做 ticket + join（`execStart`/`execJoin`，见 §9.4）；另加命令组件 rg / sd | M5 |
+| M7     | 🟡 第一层完成：命名会话根跨进程复用（默认即焚）+ 列出/清理（`--codemode-sessions` / `--codemode-session-clear`，见 §9.3） | M5 |
 
 M5 补记：**超时已改成「硬取消」（异步链路）**
 
@@ -526,6 +522,27 @@ XDG_CACHE_HOME=/tmp/cm-cache cargo test -p tower-agent-codemode --offline --test
 
 会话名会被校验成「一层普通名字」，`/`、`..` 之类一律拒绝（`session_name_is_valid`），所以清理不会跑到基目录外面；`tests/sessions.rs` 守着列表、清理与这条越界防护（不碰真实 config，全在临时目录里做）。
 
+### 9.4 M6 调研：并发要不要 p3
+
+**wasmtime 49 的 p3 状态（本机源码核对）**：`wasmtime-wasi` 49 有 `p3` feature（开出来是 `wasmtime/component-model-async` + `wasmtime/component-model-bytes`）；wasmtime 49 本身有 `component-model-async` feature、`Config::wasm_component_model_async`、`func_wrap_concurrent`，p3 的 bindings 也在。**我们当前没开**：workspace 的 wasmtime features 只有 `async`，wasmtime-wasi 只开 `p2`。
+
+**rquickjs 的硬约束**：支持矩阵是 `wasm32-wasip1` / `wasm32-wasip2` / `wasm32-unknown-unknown`，**没有 `wasm32-wasip3`** → 「JS guest 直接跑在 p3」目前不可行（除非上游加目标，或把 JS 挪出 guest）。
+
+**但「并发」不等于「必须 p3」。** 脚本真正想要的并行是**命令级并行**，不用等 p3，在现在的 p2 + 同步 host import 上就能做到——把 `exec` 拆成两步：
+
+```js
+const t1 = execStart("cat", ["/a"]);   // 立刻返回 ticket，宿主后台已开跑
+const t2 = execStart("cat", ["/b"]);   // 两条命令真正并行
+const [a, b] = [execJoin(t1), execJoin(t2)].map((r) => r);  // 或 parallel([t1, t2])
+```
+
+- 宿主侧天然可行：`ExecService` 无状态（每次调用新建 `Store`、共享编译好的引擎 `Arc`），所以并发调用是安全的；每命令仍有自己的 deadline（异步取消那条链不变）。
+- 要新做的东西：① ticket → 结果/错误表（脚本结束时未 join 的要能回收）；② `commands[]` 审计与进度事件按 ticket 标注；③ 同一会话根的并发写竞态由脚本自负（可在文档里点明）。
+
+**什么时候才真需要 p3**：流式 stdio（边跑边喂/边读，而不是内存缓冲）、结构化并发的取消传播、以及 Go 组件（其运行时要 wasip3）。这些都与「脚本里跑并行命令」正交。
+
+**结论（已定）**：并发**不走 p3**——rquickjs 的 wasip3 目标不成熟（明确不做），而脚本要的并行是命令级并行，用 ticket + join 留在 p2 就能拿到。p3 只在将来真要「流式 stdio / Go 组件」时另议，那时 JS 大概率要挪回宿主。
+
 ## 10. 风险与缓解
 
 | 风险                                                  | 影响                               | 缓解                                                                     |
@@ -533,7 +550,7 @@ XDG_CACHE_HOME=/tmp/cm-cache cargo test -p tower-agent-codemode --offline --test
 | rquickjs 的 wasip2 路径                              | ✅ 已实测跑通（§3.1，1.26 MB）     | 但**深递归会 trap**：限额取 64 KiB（可捕获）+ 宿主把 trap 当脚本失败并丢弃实例 |
 | 构建要 wasi-sdk（curl 下载）                          | 离线/CI 失败                       | 预置 `WASI_SDK=<path>`（本机已有 34）或 vendor 一份；另需初始化 quickjs-ng 子模块 |
 | 构建要 wasi-sdk（curl 下载）                          | 离线/CI 失败                       | 预置 `WASI_SDK=<path>` 或 vendor 一份；写进构建文档                      |
-| guest 里的 tokio 不含 `fs`/`process`                  | 异步/并发受限；`fs` 必须自写       | 首版同步 import；`fs` 按 §8.1 R1 自写；并发按 Q11 决定是否上 p3          |
+| guest 里的 tokio 不含 `fs`/`process`               | 异步/并发受限；`fs` 必须自写       | 首版同步 import；`fs` 按 §8.1 R1 自写；并发按 Q11：ticket + join（p2），不上 p3 |
 | API 全靠自研，模型可能写不顺                          | 一次往返失败率升高                 | 工具描述里放 API 摘要 + 范例；`exec` 作降级路径；错误信息带行号与片段    |
 | rquickjs 是 C 引擎，但**在 wasm 里**                  | 边界强，但引擎自身 bug 会 trap     | 命令实例池 + 复用；trap 归一化成「脚本执行失败」而不是宿主错误           |
 | 组件体积（rquickjs + 60 util，`wasm-opt` 对组件无效） | 内嵌体积增大                       | `opt-level="z"` + lto + strip（11 MB → 7.4 MB）；真要瘦身就把 util 拆成「核心集/扩展集」 |
