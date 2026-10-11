@@ -3251,12 +3251,14 @@ dependencies = [
  "dirs",
  "futures-core",
  "futures-util",
+ "semver",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tower",
  "tower-agent-core",
+ "tower-agent-plugins",
  "tower-agent-provider",
  "tower-agent-wasmtime",
  "wasmtime",
@@ -3411,7 +3413,9 @@ name = "tower-agent-wasmtime"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "semver",
  "thiserror 2.0.21",
+ "tower-agent-plugins",
  "wasmtime",
  "wasmtime-wasi",
 ]

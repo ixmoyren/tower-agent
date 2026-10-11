@@ -10,7 +10,9 @@ workspace = true
 
 [dependencies]
 dirs = { workspace = true }
+semver = { workspace = true }
 tower-agent-core = { workspace = true }
+tower-agent-plugins = { workspace = true }
 tower-agent-wasmtime = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }

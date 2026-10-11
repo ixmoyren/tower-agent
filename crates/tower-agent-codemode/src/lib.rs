@@ -11,6 +11,7 @@
 //! （例如 JS 深递归、脚本超时）只影响那一次调用，不需要额外的「丢弃实例」逻辑。
 
 mod exec;
+mod plugin;
 mod tool;
 
 use std::{
@@ -30,6 +31,8 @@ pub use self::component::exports::tower_agent::codemode::sandbox::{
 use self::component::tower_agent::codemode::host::{ExecOpts, ExecResult};
 /// 命令层后端（宿主实现的那一半）。
 pub use exec::ExecService;
+/// codemode 的静态插件形态（名字与能力受保护）。
+pub use plugin::{CodemodePlugin, PLUGIN_NAME};
 /// 暴露给 agent 的 codemode 工具（`AgentTool`）。
 pub use tool::{CodemodeTool, SessionRoot, TOOL_NAME, tool, tool_description, tool_parameters};
 

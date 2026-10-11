@@ -14,6 +14,7 @@
 
 mod engine;
 mod host;
+mod plugin;
 mod pool;
 mod sandbox;
 
@@ -21,6 +22,8 @@ pub use engine::{
     DEFAULT_MAX_WASM_STACK, DEFAULT_MEMORY_LIMIT, SandboxEngine, SandboxError, SandboxOptions,
 };
 pub use host::HostState;
+/// `tower-agent-wasmtime` 的静态插件占位（名字与能力受保护）。
+pub use plugin::{CAPABILITY, PLUGIN_NAME, WasmtimePlugin};
 pub use pool::SandboxPool;
 pub use sandbox::Sandbox;
 

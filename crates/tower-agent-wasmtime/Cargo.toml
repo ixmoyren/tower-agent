@@ -10,6 +10,8 @@ workspace = true
 
 [dependencies]
 dirs = { workspace = true }
+semver = { workspace = true }
 thiserror = { workspace = true }
+tower-agent-plugins = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }

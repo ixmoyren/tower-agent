@@ -231,6 +231,21 @@ pub unsafe fn load_from_dir(
         if !seen.insert(name.clone()) {
             continue;
         }
+        // 受保护的静态插件（monty 自己的地基、以及 wasmtime / codemode 这类宿主能力）
+        // **永不被遮蔽**：动态插件拿同名来顶替能力 → 像 JIT 那条路一样**响亮报错**，
+        // 而不是静默进入 `Resolution::shadows()`。
+        if registry
+            .protected_names()
+            .iter()
+            .any(|protected| protected == &name)
+        {
+            return Err(PluginError::Install {
+                plugin: name.clone(),
+                message: format!(
+                    "plugin name `{name}` is reserved by a protected static plugin and cannot be shadowed"
+                ),
+            });
+        }
         registry.register_plugin(Arc::new(LoadedPluginPayload {
             loaded: Arc::new(plugin),
             manifest,
