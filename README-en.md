@@ -139,9 +139,11 @@ provider with credentials in the environment is used.
 ```text
 tower-agent/
 ├── crates/                  # workspace crates (see the architecture table above)
-├── docs/                    # design docs (design / architecture / plugins / sandbox)
+├── docs/                    # design docs (design / architecture / plugins / codemode)
 ├── examples/plugin-example/ # dynamic plugin (cdylib) example
-└── wasm/monty-sandbox/      # compiles the monty interpreter into a wasm component
+└── wasm/                    # independent wasm component workspaces
+    ├── monty-sandbox/       #   compiles the monty interpreter into a wasm component
+    └── coreutils-wasm/      #   codemode's command layer (uutils multicall, 60 commands)
 ```
 
 ### Documentation
@@ -149,7 +151,7 @@ tower-agent/
 - [`docs/design.md`](docs/design.md): overall design — mapping tower concepts to pi, migration path.
 - [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md): target architecture and migration plan.
 - [`docs/plugins.md`](docs/plugins.md): the plugin/extension system (static / dynamic / hot-reload).
-- [`docs/brush-sandbox.md`](docs/brush-sandbox.md): research on bash sandboxing / coderun mode.
+- [`docs/codemode.md`](docs/codemode.md): codemode mode (rquickjs + wasmtime + uutils — script and commands both run inside the wasm sandbox).
 - [`docs/architecture-review.md`](docs/architecture-review.md): current-state review.
 - [`wasm/monty-sandbox/README.md`](wasm/monty-sandbox/README.md): wasm component interface and regeneration.
 

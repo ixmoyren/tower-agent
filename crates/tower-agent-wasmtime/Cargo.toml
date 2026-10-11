@@ -12,5 +12,4 @@ workspace = true
 dirs = { workspace = true }
 thiserror = { workspace = true }
 wasmtime = { workspace = true }
-# 只被本 crate 使用。
-wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
+wasmtime-wasi = { workspace = true }

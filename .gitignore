@@ -4,3 +4,10 @@
 # IntelliJ IDEA
 .idea
 *.iml
+
+# wasm
+crates/tower-agent-codemode/assets/codemode.wasm
+crates/tower-agent-codemode/assets/coreutils.wasm
+crates/tower-agent-monty/assets/monty-sandbox.wasm
+
+wasm/monty-sandbox/adapters/wasi_snapshot_preview1.reactor.wasm

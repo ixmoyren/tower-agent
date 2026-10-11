@@ -1,0 +1,25 @@
+[package]
+name = "codemode-sandbox"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88.0"
+description = "codemode 的 JS 沙箱组件：rquickjs 跑脚本，命令层经 host import 出去。"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rquickjs = { version = "0.14", default-features = false, features = ["full-async-wasi"] }
+serde_json = "1"
+wit-bindgen-rt = { version = "0.44.0", features = ["bitflags"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+
+# 独立 workspace：只以 wasm32-wasip2 为目标构建，不进主 workspace。
+[workspace]

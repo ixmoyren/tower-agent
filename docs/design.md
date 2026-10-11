@@ -11,7 +11,7 @@
 
 行为对齐仍然以 pi 参考实现为准，工作流见 skill `rust-pi-agent-rewrite`；本文只规定结构，不改变行为。
 
-> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、monty 热重载插件）。
+> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、monty 热重载插件）、[`codemode.md`](./codemode.md)（codemode 模式：rquickjs + wasmtime + uutils，v0.1 草案，待决策）。
 
 ---
 

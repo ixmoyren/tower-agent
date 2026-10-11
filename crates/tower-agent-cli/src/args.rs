@@ -47,6 +47,46 @@ pub struct CliArgs {
     #[arg(long = "list-tools", help = "List the built-in tools, then exit.")]
     pub list_tools: bool,
 
+    /// 打开 codemode：在 wasm 沙箱里跑 JavaScript（coreutils 命令 + 会话目录文件）。
+    #[arg(
+        long = "codemode",
+        help = "Enable the codemode tool (JavaScript + coreutils inside a wasm sandbox)."
+    )]
+    pub codemode: bool,
+
+    /// codemode 的命名会话：目录固定在 `<config>/tower-agent/codemode/<name>`，跨进程复用。
+    #[arg(
+        long = "codemode-session",
+        value_name = "name",
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Persistent codemode session name (reuses <config>/tower-agent/codemode/<name>)."
+    )]
+    pub codemode_session: Option<String>,
+
+    /// 额外挂载，可重复：`<dir>[:<guest>][:ro|rw]`（缺省 guest=/work、只读）。
+    #[arg(
+        long = "codemode-mount",
+        value_name = "dir[:guest][:ro|rw]",
+        help = "Extra codemode mount (repeatable): <dir>[:<guest>][:ro|rw]."
+    )]
+    pub codemode_mounts: Vec<String>,
+
+    /// 列出已持久化的 codemode 会话，然后退出。
+    #[arg(
+        long = "codemode-sessions",
+        help = "List persistent codemode sessions, then exit."
+    )]
+    pub codemode_sessions: bool,
+
+    /// 删掉一个持久化的 codemode 会话（连同里面的产物），然后退出。
+    #[arg(
+        long = "codemode-session-clear",
+        value_name = "name",
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Remove a persistent codemode session (and its artifacts), then exit."
+    )]
+    pub codemode_session_clear: Option<String>,
+
     /// 选择 provider：anthropic / openai / openai-responses / google（缺省时按环境里的凭据挑）。
     #[arg(
         long,

@@ -79,6 +79,37 @@ impl Session {
         Self::with_model(cwd, stream, default_model())
     }
 
+    /// 打开 codemode（`--codemode`）：构造工具并加进地基工具集，下一轮 turn 生效。
+    ///
+    /// 布局是「工作区只读挂到 `/work` + 会话根」；`session` 给了名字就把会话根**持久化**在
+    /// `<config>/tower-agent/codemode/<name>`（跨进程复用），否则用临时目录（会话即焚）。
+    pub fn enable_codemode(
+        &self,
+        workspace: &Path,
+        session: Option<&str>,
+        mounts: &[String],
+    ) -> Result<(), String> {
+        let parsed = mounts
+            .iter()
+            .map(|spec| tower_agent_codemode::Mount::parse(spec))
+            .collect::<Result<Vec<_>, _>>()?;
+        let root = match session {
+            Some(name) => tower_agent_codemode::SessionRoot::Persistent(
+                tower_agent_codemode::default_session_dir(name)
+                    .ok_or_else(|| "拿不到配置目录".to_owned())?,
+            ),
+            None => tower_agent_codemode::SessionRoot::Ephemeral,
+        };
+        let tool = tower_agent_codemode::CodemodeTool::for_workspace_with(workspace, root, &parsed)
+            .map_err(|error| error.to_string())?;
+        self.base_tools
+            .lock()
+            .expect("base tools poisoned")
+            .push(tool.into_agent_tool());
+        self.refresh_tools();
+        Ok(())
+    }
+
     /// 用显式模型构造会话。
     pub fn with_model(cwd: impl AsRef<Path>, stream: BoxStreamService, model: Model) -> Self {
         let cwd = cwd.as_ref().to_path_buf();

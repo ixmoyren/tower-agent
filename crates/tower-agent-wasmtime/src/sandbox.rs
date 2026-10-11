@@ -7,7 +7,7 @@ use crate::{HostState, SandboxEngine, SandboxError};
 /// 一个沙箱实例：`Store<HostState>` + 组件实例 `I`。
 ///
 /// `I` 是调用方用 `bindgen!` 生成的 world 类型。这样「拥有 `Store`、按共享引擎实例化、
-/// 与 [`crate::SandboxPool`] 池化」这些通用部分只实现一次；具体解释器（monty、brush…）
+/// 与 [`crate::SandboxPool`] 池化」这些通用部分只实现一次；具体解释器（如 monty）
 /// 只需要包一层薄 newtype 暴露自己的协议方法。
 pub struct Sandbox<I> {
     store: Store<HostState>,
@@ -22,7 +22,8 @@ impl<I> Sandbox<I> {
         make: impl FnOnce(&mut Store<HostState>) -> Result<I, wasmtime::Error>,
     ) -> Result<Self, SandboxError> {
         let mut store = engine.new_store();
-        let instance = make(&mut store).map_err(|error| SandboxError::Instance(error.to_string()))?;
+        let instance =
+            make(&mut store).map_err(|error| SandboxError::Instance(error.to_string()))?;
         Ok(Self { store, instance })
     }
 

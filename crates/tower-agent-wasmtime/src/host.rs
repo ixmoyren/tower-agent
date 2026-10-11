@@ -23,9 +23,7 @@ impl HostState {
         Self {
             ctx: WasiCtxBuilder::new().build(),
             table: ResourceTable::new(),
-            limits: StoreLimitsBuilder::new()
-                .memory_size(memory_limit)
-                .build(),
+            limits: StoreLimitsBuilder::new().memory_size(memory_limit).build(),
         }
     }
 }

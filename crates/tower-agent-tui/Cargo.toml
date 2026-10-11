@@ -12,7 +12,6 @@ workspace = true
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-core = { workspace = true }
-# 只被本 crate 使用。
 ratatui = { version = "0.30", default-features = false, features = ["all-widgets", "termina", "layout-cache", "macros"] }
 ratatui-textarea = { git = "https://github.com/ixmoyren/ratatui-textarea", default-features = false, features = ["termina"] }
 unicode-width = "0.2"

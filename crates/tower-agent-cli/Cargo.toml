@@ -19,7 +19,7 @@ tower-agent-provider = { workspace = true }
 tower-agent-plugins = { workspace = true }
 tower-agent-tui = { workspace = true }
 tower-agent-monty = { workspace = true }
-# 只被本 crate 使用。
+tower-agent-codemode = { workspace = true }
 clap = { version = "4.6", features = ["derive"] }
 futures-util = { workspace = true }
 serde_json = { workspace = true }

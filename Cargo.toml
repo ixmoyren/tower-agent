@@ -24,7 +24,8 @@ tempfile = "3.27"
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "sync", "macros", "time", "process", "io-util", "fs"] }
 tokio-util = { version = "0.7", default-features = false }
-wasmtime = { version = "49", default-features = false, features = ["cranelift", "component-model", "cache", "runtime", "std", "parallel-compilation"] }
+wasmtime = { version = "49", default-features = false, features = ["cranelift", "component-model", "cache", "runtime", "std", "parallel-compilation", "async"] }
+wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
 
 # 内部子 crate：crate 之间互相依赖一律走 `workspace = true`，路径只在这里声明一次。
 tower-agent-core = { path = "crates/tower-agent-core" }
@@ -37,6 +38,7 @@ tower-agent-tui = { path = "crates/tower-agent-tui" }
 tower-agent-protocol = { path = "crates/tower-agent-protocol" }
 tower-agent-monty = { path = "crates/tower-agent-monty" }
 tower-agent-wasmtime = { path = "crates/tower-agent-wasmtime" }
+tower-agent-codemode = { path = "crates/tower-agent-codemode" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

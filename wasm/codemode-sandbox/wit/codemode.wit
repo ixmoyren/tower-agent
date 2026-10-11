@@ -1,0 +1,53 @@
+/// codemode 沙箱：宿主调用 `run` 跑一段 JS；脚本要用命令时，组件把请求
+/// `exec` 回宿主（宿主起 `wasm/coreutils-wasm` 那份 multicall 组件，内存 stdio）。
+package tower-agent:codemode@0.1.0;
+
+/// 命令层：宿主实现。参数/输出都是字节，避免把宿主类型塞进沙箱。
+interface host {
+  record exec-opts {
+    stdin: option<list<u8>>,
+    cwd: option<string>,
+    timeout-ms: option<u32>,
+  }
+  record exec-result {
+    code: s32,
+    stdout: list<u8>,
+    stderr: list<u8>,
+  }
+
+  /// 跑一个命令。`name` 是裸命令名（`cat`），宿主据此设 `argv[0]`。
+  exec: func(name: string, args: list<string>, opts: exec-opts)
+    -> result<exec-result, string>;
+}
+
+/// 沙箱导出：跑脚本。
+interface sandbox {
+  record run-opts {
+    cwd: option<string>,
+    timeout-ms: option<u32>,
+    /// 可用的命令名（宿主提供；脚本里会被生成成函数）。
+    utils: list<string>,
+  }
+  record command-log {
+    name: string,
+    args: list<string>,
+    code: s32,
+  }
+  record run-result {
+    /// 脚本的 `return` 值（JSON；`undefined` → none）。脚本自己 return 的会原样带回。
+    value: option<string>,
+    /// `console.log` 收集到的输出（每行一条）。
+    stdout: string,
+    /// 执行过的命令流水（审计；上限见组件内 `MAX_COMMAND_LOG`）。
+    commands: list<command-log>,
+    /// 输出超限被截断。
+    truncated: bool,
+  }
+
+  run: func(code: string, opts: run-opts) -> result<run-result, string>;
+}
+
+world codemode {
+  import host;
+  export sandbox;
+}

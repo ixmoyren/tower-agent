@@ -33,7 +33,7 @@ impl<T> ProviderService for T
 where
     T: tower::Service<StreamRequest, Response = AssistantEventStream, Error = PiError>
     + Send
-    + 'static,
+    + 'static
 {}
 
 /// 类型擦除的 provider 服务（design D5：运行时集合存放不同实现）。

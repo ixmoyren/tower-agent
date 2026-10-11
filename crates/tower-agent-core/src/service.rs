@@ -81,5 +81,5 @@ where
     + Clone
     + Sized
     + Send
-    + 'static,
+    + 'static
 {}

@@ -61,11 +61,7 @@ where
         let engine = Arc::new((self.engine)()?);
         // 并发下可能有人抢先 `set`；失败就用已存在的那份。
         let _ = self.shared.set(Arc::clone(&engine));
-        Ok(self
-            .shared
-            .get()
-            .map(Arc::clone)
-            .unwrap_or(engine))
+        Ok(self.shared.get().map(Arc::clone).unwrap_or(engine))
     }
 
     /// 预热：编译引擎并预先创建 `instances` 个实例放进池子。
@@ -80,12 +76,7 @@ where
 
     /// 取一个实例（池空则新建）。
     pub fn acquire(&self) -> Result<T, SandboxError> {
-        if let Some(item) = self
-            .idle
-            .lock()
-            .map_err(|_| SandboxError::Poisoned)?
-            .pop()
-        {
+        if let Some(item) = self.idle.lock().map_err(|_| SandboxError::Poisoned)?.pop() {
             return Ok(item);
         }
         let engine = self.engine()?;

@@ -17,7 +17,9 @@ mod host;
 mod pool;
 mod sandbox;
 
-pub use engine::{DEFAULT_MEMORY_LIMIT, SandboxEngine, SandboxError, SandboxOptions};
+pub use engine::{
+    DEFAULT_MAX_WASM_STACK, DEFAULT_MEMORY_LIMIT, SandboxEngine, SandboxError, SandboxOptions,
+};
 pub use host::HostState;
 pub use pool::SandboxPool;
 pub use sandbox::Sandbox;
@@ -40,11 +42,19 @@ mod tests {
         );
 
         assert_eq!(pool.idle_count(), 0);
-        assert_eq!(created.load(std::sync::atomic::Ordering::SeqCst), 0, "引擎应按需创建");
+        assert_eq!(
+            created.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "引擎应按需创建"
+        );
 
         pool.warmup(2).expect("warmup");
         assert_eq!(pool.idle_count(), 2);
-        assert_eq!(created.load(std::sync::atomic::Ordering::SeqCst), 1, "引擎只建一次");
+        assert_eq!(
+            created.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "引擎只建一次"
+        );
 
         let first = pool.acquire().expect("acquire");
         assert_eq!(pool.idle_count(), 1);
