@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use tower::ServiceExt as _;
 use tower_agent_core::UiState;
 use tower_agent_monty::ModManager;
+use tower_agent_plugins::StaticPlugin as _;
 use tower_agent_provider::{
     BoxStreamService, Message, Model, ModelThinkingLevel, UserContent, UserMessage,
 };
@@ -83,6 +84,10 @@ impl Session {
     ///
     /// 布局是「工作区只读挂到 `/work` + 会话根」；`session` 给了名字就把会话根**持久化**在
     /// `<config>/tower-agent/codemode/<name>`（跨进程复用），否则用临时目录（会话即焚）。
+    ///
+    /// 启用 mods 时把 codemode 作为**受保护静态插件**注册进统一注册表（名字 `codemode`、
+    /// 能力 `tool.codemode` 因此进 `protected_*`，动态 / JIT 插件不能顶替）；未启用 mods
+    /// 时退化成直接追加到地基工具集。
     pub fn enable_codemode(
         &self,
         workspace: &Path,
@@ -100,12 +105,22 @@ impl Session {
             ),
             None => tower_agent_codemode::SessionRoot::Ephemeral,
         };
-        let tool = tower_agent_codemode::CodemodeTool::for_workspace_with(workspace, root, &parsed)
-            .map_err(|error| error.to_string())?;
-        self.base_tools
-            .lock()
-            .expect("base tools poisoned")
-            .push(tool.into_agent_tool());
+        let plugin = tower_agent_codemode::CodemodePlugin::new(workspace, root).with_mounts(parsed);
+        match &self.mods {
+            Some(mods) => mods
+                .register_static_plugin(Arc::new(plugin))
+                .map_err(|error| error.to_string())?,
+            None => {
+                let mut context = tower_agent_plugins::PluginContext::new();
+                plugin
+                    .install(&mut context)
+                    .map_err(|error| error.to_string())?;
+                self.base_tools
+                    .lock()
+                    .expect("base tools poisoned")
+                    .extend(context.tools().iter().cloned());
+            }
+        }
         self.refresh_tools();
         Ok(())
     }

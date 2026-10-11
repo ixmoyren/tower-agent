@@ -4,9 +4,10 @@
 //! 纳入统一解析」——名字与能力都标成 **protected**，于是动态（dylib）与 JIT（monty mods）
 //! 插件拿同名来顶替能力时会被拒绝（JIT 与动态两条路都已按名字响亮报错）。
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Mutex};
 
 use semver::Version;
+use tower_agent_core::AgentTool;
 use tower_agent_plugins::{
     CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
 };
@@ -21,6 +22,11 @@ pub struct CodemodePlugin {
     cwd: PathBuf,
     session: SessionRoot,
     mounts: Vec<Mount>,
+    /// 编译好的工具（`CodemodeTool::new` 会同步编译两个 wasm 组件，很贵）。
+    ///
+    /// 注册表每次 `resolve` 都会调用 `install`，所以这里只编译一次、之后 clone；
+    /// `AgentTool` 非 `Sync`，用 `Mutex` 包一层让它能进 `StaticPlugin`。
+    tool: Mutex<Option<AgentTool>>,
 }
 
 impl CodemodePlugin {
@@ -31,6 +37,7 @@ impl CodemodePlugin {
             cwd: cwd.into(),
             session,
             mounts: Vec::new(),
+            tool: Mutex::new(None),
         }
     }
 
@@ -51,12 +58,25 @@ impl StaticPlugin for CodemodePlugin {
     }
 
     fn install(&self, context: &mut PluginContext) -> Result<(), PluginError> {
-        let tool = CodemodeTool::for_workspace_with(&self.cwd, self.session.clone(), &self.mounts)
-            .map_err(|error: CodemodeError| PluginError::Install {
-                plugin: PLUGIN_NAME.to_owned(),
-                message: error.to_string(),
-            })?;
-        context.register_tool(tool.into_agent_tool());
+        let mut cached = self.tool.lock().map_err(|_| PluginError::Install {
+            plugin: PLUGIN_NAME.to_owned(),
+            message: "codemode plugin mutex poisoned".to_owned(),
+        })?;
+        if cached.is_none() {
+            let tool =
+                CodemodeTool::for_workspace_with(&self.cwd, self.session.clone(), &self.mounts)
+                    .map_err(|error: CodemodeError| PluginError::Install {
+                        plugin: PLUGIN_NAME.to_owned(),
+                        message: error.to_string(),
+                    })?
+                    .into_agent_tool();
+            *cached = Some(tool);
+        }
+        let tool = cached.as_ref().ok_or_else(|| PluginError::Install {
+            plugin: PLUGIN_NAME.to_owned(),
+            message: "codemode tool missing after build".to_owned(),
+        })?;
+        context.register_tool(tool.clone());
         Ok(())
     }
 }

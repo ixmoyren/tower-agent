@@ -444,3 +444,91 @@ fn resolution_orders_providers_before_consumers() {
         .collect();
     assert_eq!(names, vec!["b", "a"]);
 }
+
+#[test]
+fn protected_names_are_reported_by_ensure_not_protected() {
+    let mut registry = PluginRegistry::new();
+    registry
+        .register_manifest(
+            manifest("foundation", v(1, 0, 0), PluginKind::Static)
+                .providing(cap("tool", "mod_write"), v(1, 0, 0))
+                .protected(),
+        )
+        .unwrap();
+
+    match registry.ensure_not_protected("foundation") {
+        Err(PluginError::Install { plugin, message }) => {
+            assert_eq!(plugin, "foundation");
+            assert!(message.contains("reserved"), "{message}");
+        }
+        other => panic!("expected Install, got {other:?}"),
+    }
+    assert!(registry.ensure_not_protected("other").is_ok());
+}
+
+#[test]
+fn protected_capability_ignores_higher_kind_providers() {
+    let mut registry = PluginRegistry::new();
+    registry
+        .register_manifest(
+            manifest("wasmtime", v(1, 0, 0), PluginKind::Static)
+                .providing(cap("sandbox", "wasmtime"), v(1, 0, 0))
+                .protected(),
+        )
+        .unwrap();
+    registry
+        .register_manifest(
+            manifest("shady", v(9, 0, 0), PluginKind::Jit)
+                .providing(cap("sandbox", "wasmtime"), v(9, 0, 0)),
+        )
+        .unwrap();
+    registry
+        .register_manifest(
+            manifest("consumer", v(1, 0, 0), PluginKind::Static)
+                .requiring(cap("sandbox", "wasmtime"), req("^1.0.0")),
+        )
+        .unwrap();
+
+    // 即使 JIT 形态优先级更高、版本更高，受保护能力也只认受保护实现。
+    let resolution = registry.resolve().unwrap();
+    assert_eq!(
+        binding_for(&resolution, "consumer", &cap("sandbox", "wasmtime")).name,
+        "wasmtime"
+    );
+}
+
+#[test]
+fn capability_override_cannot_redirect_a_protected_capability() {
+    let mut registry = PluginRegistry::new();
+    registry
+        .register_manifest(
+            manifest("wasmtime", v(1, 0, 0), PluginKind::Static)
+                .providing(cap("sandbox", "wasmtime"), v(1, 0, 0))
+                .protected(),
+        )
+        .unwrap();
+    registry
+        .register_manifest(
+            manifest("shady", v(1, 0, 0), PluginKind::Static)
+                .providing(cap("sandbox", "wasmtime"), v(1, 0, 0)),
+        )
+        .unwrap();
+    registry
+        .register_manifest(
+            manifest("consumer", v(1, 0, 0), PluginKind::Static)
+                .requiring(cap("sandbox", "wasmtime"), req("^1.0.0")),
+        )
+        .unwrap();
+    registry.add_override(CapabilityOverride::to("shady", cap("sandbox", "wasmtime")));
+
+    match registry.resolve() {
+        Err(PluginError::OverrideProtected {
+                capability,
+                provider,
+            }) => {
+            assert_eq!(capability, cap("sandbox", "wasmtime"));
+            assert_eq!(provider, "shady");
+        }
+        other => panic!("expected OverrideProtected, got {other:?}"),
+    }
+}

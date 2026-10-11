@@ -360,3 +360,46 @@ pub enum PluginError {
 6. **内置工具与 provider 中间件**：内置 tool（`read` / `shell` / …） **各自是一个静态插件，且每个都是 tower Layer**；provider 中间件（`retry` / `timeout` / `observe`） **不插件化**，由 `tower-agent-cli::provider` 直接编排。
 
 仍待实现的细节（不阻塞立项）：权限提示的 UI 形态、`CapabilityOverride` 的配置来源（配置文件 / CLI / 运行时命令）。
+
+## 16. codemode / wasmtime 插件化：已完成与待办
+
+目标（2026-10-12 定）：`tower-agent-wasmtime` 与 `tower-agent-codemode` **都是静态插件**，
+并且与 `tower-agent-monty` 一样 **不允许被动态插件与 JIT 插件用同名方式覆盖能力**；
+静态插件后续再与 **cargo feature** 联动，用 feature 决定「tower-agent 提供哪些能力」。
+
+### 16.1 已完成
+
+- **机制本来就有**：`PluginManifest.protected` + `PluginRegistry::{protected_names, protected_capabilities}`；
+  `resolve()` 的规则是「受保护的插件永不被遮蔽：protected 组内取胜者，其余（含同名 JIT/动态）进 `Resolution::shadows()`」。
+- **JIT 那条路早已响亮报错**（`manager::check_shadowing`，两处 JIT 入口），命中保护名或保留名即 `PluginError::Install`。
+- **动态那条路补上了同名拒绝**：`dynamic::load_from_dir` 在注册前走 `registry.ensure_not_protected(name)`，
+  命中即 `PluginError::Install { … "reserved by a protected static plugin and cannot be shadowed" }`——
+  不再静默进入 shadow（与 JIT 行为一致）。
+- **两个插件形态定义好了**（`CodemodePlugin`：静态 / `protected` / `provides("tool","codemode")` / `install` 注册工具；
+  `WasmtimePlugin`：静态 / `protected` / `provides("sandbox","wasmtime")` / 空安装）。已确认新增依赖不成环。
+
+### 16.2 待办（按顺序；落地后勾选）
+
+- [x] **1. 登记进注册表**：`ModManager::register_static_plugin(&self, Arc<dyn StaticPlugin>)`
+  （`registry.register_static` + `resolve_and_apply`，解析失败回滚候选）已落地；
+  `WasmtimePlugin` 在 `ModManager::new` **常驻**注册（占名 `wasmtime` + 能力 `sandbox.wasmtime`），
+  `CodemodePlugin` 由 CLI `Session::enable_codemode` **注册插件**（不再 `base_tools.push(tool)`；
+  未启用 mods 时退化为直接追加工具）。名字/能力因此都进 `protected_*`。
+  —— 这条同时修掉了一个真实缺口：mods 默认启用时工具目录来自 `mods.tools()`，旧的
+  `base_tools.push` 根本不会生效，`--codemode` 会静默失灵。
+- [x] **2. 抽出可测的检查**：`PluginRegistry::ensure_not_protected(name)` 成为唯一规则实现，
+  `dynamic::load_from_dir` 与 JIT 的 `check_shadowing` 都调它（不再两处漂移）；
+  `tests/resolution.rs` 覆盖「保护名 → Err / 普通名 → Ok」，monty 侧补 `register_static_plugin` +
+  常驻 wasmtime 的用例。
+- [x] **3. 能力级覆盖的口子**：`resolve()` 现在把「受保护插件提供的能力」收敛到受保护实现——
+  `select_providers` 对受保护能力只考虑受保护提供者（JIT 形态优先级 / 更高版本不再能顶掉），
+  `CapabilityOverride` 指向非受保护实现时返回新错误 `PluginError::OverrideProtected`
+  （与「未知实现」的 `OverrideTargetMissing` 区分）；`tests/resolution.rs` 补三条断言。
+- [ ] **4. 静态插件与 cargo feature 联动**（设计已定、未实现）：把 `tower-agent-codemode` /
+  `tower-agent-wasmtime` 在聚合 crate 里改成 **optional** 依赖，例如
+  `[features] default = ["sandbox-wasmtime", "codemode"]`、`sandbox-wasmtime = ["dep:tower-agent-wasmtime"]`、
+  `codemode = ["dep:tower-agent-codemode"]`，注册处用 `#[cfg(feature = "…")]` 包住；
+  此后 `--codemode` 只剩「会话根策略」这一层含义，能力是否编进来由 feature 决定。见 §11。
+  —— 落地前需先定「注册点在哪个 crate」：目前 `WasmtimePlugin` 在 `tower-agent-monty` 里常驻注册，
+  而 monty 把 `tower-agent-wasmtime` 当硬依赖（沙箱本体），单靠 feature 摘不掉；`tower-agent`
+  门面 crate 目前也不依赖这两个 crate，直接加 optional 依赖只是空转，需要先有真正的组装层。

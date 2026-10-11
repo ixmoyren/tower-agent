@@ -59,8 +59,8 @@ pub fn jit_runtime_manifest() -> PluginManifest {
         Version::new(1, 0, 0),
         PluginKind::Static,
     )
-    .protected()
-    .providing(CapabilityId::new("jit", "run"), Version::new(1, 0, 0));
+        .protected()
+        .providing(CapabilityId::new("jit", "run"), Version::new(1, 0, 0));
     for name in crate::author::AUTHORING_TOOL_NAMES {
         manifest = manifest.providing(CapabilityId::new("tool", name), Version::new(1, 0, 0));
     }
@@ -179,6 +179,13 @@ impl ModManager {
             kv: Mutex::new(BTreeMap::new()),
             store: Mutex::new(ModStore::from_dirs()),
         });
+        // wasmtime 沙箱是 monty 与 codemode 共用的宿主能力：常驻注册，把名字
+        // `wasmtime` 与能力 `sandbox.wasmtime` 占成 protected，动态/JIT 插件不能顶替。
+        manager
+            .registry
+            .lock()
+            .expect("registry poisoned")
+            .register_plugin(Arc::new(tower_agent_wasmtime::WasmtimePlugin::new()))?;
         // JIT 运行时以 protected 载荷注册，并在 install 时把作者工具装进工具目录。
         // 工具句柄用 Weak 指回本管理器，避免强引用环。
         let foundation = FoundationPlugin {
@@ -192,6 +199,26 @@ impl ModManager {
             .register_plugin(Arc::new(foundation))?;
         manager.resolve_and_apply()?;
         Ok(manager)
+    }
+
+    /// 注册一个静态插件（宿主能力 / 地基），并立刻重新解析安装。
+    ///
+    /// 与直接操作 [`PluginRegistry`] 不同，这里会立即回写工具目录，因此插件的工具与
+    /// **受保护的名字 / 能力**随即对后续 JIT / 动态插件生效；解析失败会回滚候选。
+    pub fn register_static_plugin(&self, plugin: Arc<dyn StaticPlugin>) -> Result<(), PluginError> {
+        let name = plugin.manifest().name;
+        self.registry
+            .lock()
+            .expect("registry poisoned")
+            .register_static(plugin)?;
+        if let Err(error) = self.resolve_and_apply() {
+            self.registry
+                .lock()
+                .expect("registry poisoned")
+                .remove(&name);
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// 共享的 UI 状态（前端据此渲染 mod 贡献）。
@@ -638,18 +665,18 @@ impl ModManager {
     /// - 插件名 / 工具名命中保留名（`mod_write` 等）→ 阻断；
     /// - 工具名与**另一个 mod** 提供的工具重名 → 阻断（JIT 不能遮蔽 JIT 的基础设施）。
     fn check_shadowing(&self, name: &str) -> Result<(), PluginError> {
-        let (protected_tools, protected_plugins) = {
+        let protected_tools: BTreeSet<String> = {
             let registry = self.registry.lock().expect("registry poisoned");
-            let tools: BTreeSet<String> = registry
+            // 受保护插件名（JIT 运行时地基 + wasmtime / codemode 等宿主能力）统一走注册表规则。
+            registry.ensure_not_protected(name)?;
+            registry
                 .protected_capabilities()
                 .into_iter()
                 .filter(|capability| capability.namespace == "tool")
                 .map(|capability| capability.name)
-                .collect();
-            let plugins: BTreeSet<String> = registry.protected_names().into_iter().collect();
-            (tools, plugins)
+                .collect()
         };
-        if protected_plugins.contains(name) || is_reserved_name(name) {
+        if is_reserved_name(name) {
             return Err(PluginError::Install {
                 plugin: name.to_string(),
                 message: format!(
@@ -859,7 +886,7 @@ impl ModManager {
                     monty_types::ExcType::RuntimeError,
                     Some(format!("invalid os-call payload: {error}")),
                 ))
-                .to_string();
+                    .to_string();
             }
         };
         let outcome = self

@@ -52,6 +52,13 @@ pub enum PluginError {
         /// 覆盖指定的插件名。
         provider: String,
     },
+    /// 受保护的能力不能被能力级覆盖转向非受保护实现。
+    OverrideProtected {
+        /// 被覆盖的能力。
+        capability: CapabilityId,
+        /// 覆盖指定的插件名。
+        provider: String,
+    },
     /// 插件清单要求的宿主 ABI 与当前宿主不兼容（major 不一致）。
     AbiMismatch {
         /// 插件。
@@ -133,6 +140,13 @@ impl fmt::Display for PluginError {
             } => write!(
                 f,
                 "capability override for `{capability}` points at unknown provider `{provider}`"
+            ),
+            Self::OverrideProtected {
+                capability,
+                provider,
+            } => write!(
+                f,
+                "capability `{capability}` is protected and cannot be overridden to `{provider}`"
             ),
             Self::AbiMismatch {
                 plugin,

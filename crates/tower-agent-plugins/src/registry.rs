@@ -178,10 +178,10 @@ impl PluginRegistry {
             Version::new(1, 0, 0),
             crate::PluginKind::Static,
         )
-        .providing(
-            CapabilityId::new("tool", tool.name()),
-            Version::new(1, 0, 0),
-        );
+            .providing(
+                CapabilityId::new("tool", tool.name()),
+                Version::new(1, 0, 0),
+            );
         self.register_static(Arc::new(ToolPlugin {
             manifest,
             tool: std::sync::Mutex::new(tool),
@@ -217,6 +217,27 @@ impl PluginRegistry {
             .collect()
     }
 
+    /// 若 `name` 已被受保护插件占用则报错。
+    ///
+    /// 受保护的静态插件（JIT 运行时地基、`wasmtime` / `codemode` 这类宿主能力）
+    /// **永不被遮蔽**：动态与 JIT 加载器在注册前统一走这里，规则只有一处，避免
+    /// 「JIT 与动态两条路各自漂移」。
+    pub fn ensure_not_protected(&self, name: &str) -> Result<(), PluginError> {
+        if self
+            .candidates
+            .iter()
+            .any(|candidate| candidate.manifest.protected && candidate.manifest.name == name)
+        {
+            return Err(PluginError::Install {
+                plugin: name.to_string(),
+                message: format!(
+                    "plugin name `{name}` is reserved by a protected static plugin and cannot be shadowed"
+                ),
+            });
+        }
+        Ok(())
+    }
+
     /// 注册一个只有清单的实现（动态 / JIT 在 M1 之外；测试与后续加载器用）。
     pub fn register_manifest(&mut self, manifest: PluginManifest) -> Result<(), PluginError> {
         manifest.validate()?;
@@ -249,6 +270,14 @@ impl PluginRegistry {
                 });
             }
         }
+
+        // 受保护插件提供的能力：解析时只认受保护实现，且覆盖不能把它转向别的实现。
+        let protected_capabilities: BTreeSet<CapabilityId> = candidates
+            .iter()
+            .filter(|candidate| candidate.manifest.protected)
+            .flat_map(|candidate| candidate.manifest.provides.iter())
+            .map(|provided| provided.id.clone())
+            .collect();
 
         // 1. 同名覆盖：取最高形态；静态单实例，动态/JIT 按 major 各留一份。
         let mut by_name: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
@@ -380,6 +409,7 @@ impl PluginRegistry {
                 &providers,
                 candidates,
                 &self.overrides,
+                &protected_capabilities,
             )?;
             for (consumer, dependency) in dependencies {
                 let pick = chosen.iter().copied().find(|&provider| {
@@ -499,29 +529,48 @@ fn select_providers(
     providers: &BTreeMap<CapabilityId, Vec<usize>>,
     candidates: &[Candidate],
     overrides: &[CapabilityOverride],
+    protected_capabilities: &BTreeSet<CapabilityId>,
 ) -> Result<Vec<usize>, PluginError> {
-    let available: &[usize] = providers.get(capability).map_or(&[], Vec::as_slice);
+    let all: &[usize] = providers.get(capability).map_or(&[], Vec::as_slice);
+    // 受保护能力只认受保护实现：形态优先级（JIT > 静态）不能顶掉保护。
+    let is_protected = protected_capabilities.contains(capability);
+    let available: Vec<usize> = all
+        .iter()
+        .copied()
+        .filter(|&index| !is_protected || candidates[index].manifest.protected)
+        .collect();
 
     // 能力级覆盖：显式绑定到指定实现。
     if let Some(capability_override) = overrides.iter().find(|item| &item.capability == capability)
     {
+        let matches = |index: usize| {
+            let manifest = &candidates[index].manifest;
+            manifest.name == capability_override.provider
+                && capability_override
+                .version
+                .as_ref()
+                .is_none_or(|version| &manifest.version == version)
+                && capability_override
+                .kind
+                .is_none_or(|kind| manifest.kind == kind)
+        };
         let target = available
             .iter()
             .copied()
-            .find(|&index| {
-                let manifest = &candidates[index].manifest;
-                manifest.name == capability_override.provider
-                    && capability_override
-                        .version
-                        .as_ref()
-                        .is_none_or(|version| &manifest.version == version)
-                    && capability_override
-                        .kind
-                        .is_none_or(|kind| manifest.kind == kind)
-            })
-            .ok_or_else(|| PluginError::OverrideTargetMissing {
-                capability: capability.clone(),
-                provider: capability_override.provider.clone(),
+            .find(|&index| matches(index))
+            .ok_or_else(|| {
+                // 目标存在但不受保护（受保护能力不允许转向）→ 与「未知实现」区分开。
+                if is_protected && all.iter().copied().any(matches) {
+                    PluginError::OverrideProtected {
+                        capability: capability.clone(),
+                        provider: capability_override.provider.clone(),
+                    }
+                } else {
+                    PluginError::OverrideTargetMissing {
+                        capability: capability.clone(),
+                        provider: capability_override.provider.clone(),
+                    }
+                }
             })?;
         let conflicts: Vec<String> = dependencies
             .iter()

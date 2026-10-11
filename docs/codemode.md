@@ -485,6 +485,12 @@ tower-agent --codemode --codemode-mount /data:/data:ro   # 额外只读挂载；
 
 **刻意没动 `default_tools`**：它被很多测试用到，而构造 codemode 要编译组件——放进默认列表会让每个用默认工具的测试都变慢；所以 codemode 只在开关打开时才构造。
 
+> **插件化（已接线）**：codemode 是一个 **静态插件**（`CodemodePlugin`：`protected` + `provides tool.codemode`），
+> 与 `tower-agent-wasmtime` 的 `WasmtimePlugin`（`protected` + 能力 `sandbox.wasmtime`）一起不允许被
+> 动态/JIT 插件同名覆盖。`--codemode` 现在通过 `ModManager::register_static_plugin` 注册，
+> 名字与能力都进 `protected_*`；wasmtime 由 `ModManager::new` 常驻注册。
+> 当前完成度与 **剩余待办**（cargo feature 联动）见 [`plugins.md` §16](./plugins.md)。
+
 另外要把「产物怎么随包走」的既定答案用上：两个组件已经内嵌在 `tower-agent-codemode`（`include_bytes!`），所以接线不需要额外的文件分发。
 
 ### 9.2 耗时测量与结论（M5 收尾）
