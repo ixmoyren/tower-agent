@@ -25,7 +25,5 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tower = { workspace = true }
 unicode-normalization = "0.1"
-
-# 只在类 Unix 平台用于杀掉整个进程组（见 `shell.rs` 的 `kill_process_group`）。
-[target.'cfg(unix)'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
+brush-core = { git = "https://github.com/reubeno/brush", version = "0.5.0" }
+brush-builtins = { git = "https://github.com/reubeno/brush", version = "0.2.0" }

@@ -15,7 +15,7 @@
 //!   （`test-util` feature）里，不进这个二进制。
 //!
 //! 七个内置工具（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）在独立的
-//! `tools` crate 中；`shell` 在 Windows 上是 PowerShell，其余系统是 bash。
+//! `tools` crate 中；`shell` 内嵌 brush（bash 兼容），跨平台行为一致。
 //!
 //! 扩展（`coding-agent` 的 extensions/MCP/compaction）尚未移植。
 

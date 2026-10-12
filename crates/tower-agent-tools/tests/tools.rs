@@ -85,7 +85,7 @@ async fn default_tools_expose_one_unified_shell_tool() {
     assert_eq!(
         names,
         vec!["read", "shell", "edit", "write", "grep", "find", "ls"],
-        "bash 与 powershell 合并成一个 shell 工具"
+        "内置工具里只有一个统一的 shell 工具"
     );
     assert_eq!(names.as_slice(), DEFAULT_TOOL_NAMES.as_slice());
 }
@@ -236,7 +236,7 @@ async fn shell_tool_is_registered_with_pi_metadata() {
     let tools = default_tools(dir.path());
     let shell = tools.iter().find(|tool| tool.name() == "shell").unwrap();
     assert_eq!(shell.display_label(), "shell");
-    // 描述文案点明底层 shell：非 Windows 是 bash，Windows 是 PowerShell。
+    // 描述文案点明这是一个 bash 兼容的 shell。
     let description = shell.tool_description();
     assert!(description.starts_with("Execute a "), "got: {description}");
     assert!(description.contains("command"), "got: {description}");
@@ -424,6 +424,41 @@ async fn shell_streams_output_and_reports_exit_codes() {
         "got: {}",
         first_text(last)
     );
+}
+
+#[tokio::test]
+async fn shell_state_persists_but_working_directory_is_pinned() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir(dir.path().join("sub")).expect("mkdir sub");
+    let shell = tower_agent_tools::create_shell_tool(dir.path());
+
+    // 记下 workspace 根：每条命令都应从这里起步。
+    let results = run_tool(&shell, serde_json::json!({ "command": "pwd" })).await;
+    let root = first_text(results.last().unwrap()).trim().to_owned();
+    assert!(!root.is_empty(), "pwd 应有输出");
+
+    // 变量跨调用保留（shell 会话是持久的）。
+    let results = run_tool(
+        &shell,
+        serde_json::json!({ "command": "export GREETING=hi" }),
+    )
+    .await;
+    assert!(!results.last().unwrap().is_error);
+    let results = run_tool(
+        &shell,
+        serde_json::json!({ "command": "printf '%s\\n' \"$GREETING\"" }),
+    )
+    .await;
+    assert_eq!(first_text(results.last().unwrap()).trim(), "hi");
+
+    // `cd` 在**同一条命令**里生效。
+    let results = run_tool(&shell, serde_json::json!({ "command": "cd sub && pwd" })).await;
+    let inside = first_text(results.last().unwrap()).trim().to_owned();
+    assert!(inside.ends_with("sub"), "got: {inside}");
+
+    // 下一条命令被钉回 workspace，不漂移。
+    let results = run_tool(&shell, serde_json::json!({ "command": "pwd" })).await;
+    assert_eq!(first_text(results.last().unwrap()).trim(), root);
 }
 
 #[tokio::test]

@@ -29,8 +29,9 @@ used directly as a library.
   endpoints), OpenAI Responses, Google Generative AI, and DeepSeek, behind a unified
   `Models` router with catalog refresh.
 - **Seven built-in tools**: `read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`.
-  Each tool is itself a composable tower `Layer` (`shell` uses PowerShell on Windows and
-  bash elsewhere).
+  Each tool is itself a composable tower `Layer` (`shell` embeds
+  [brush](https://github.com/reubeno/brush), a bash-compatible Rust shell, and interprets
+  commands in-process for consistent cross-platform behavior).
 - **Three plugin forms**: static (compile-time tower `Layer`), dynamic (stabby `cdylib`
   loaded/unloaded at runtime), and hot-reload (monty scripts running inside a wasmtime
   sandbox) — spanning the whole spectrum from zero-overhead built-ins to hot-loaded mods.

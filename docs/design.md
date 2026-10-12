@@ -232,15 +232,14 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 
 尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
-`tools` crate 已落地的内置工具（`crates/tower-agent-tools`）：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`（`shell` 是 bash 与 PowerShell 合并后的统一工具：Windows 上用 PowerShell，其余系统用 bash，底层由 `cfg_select!` 选择），以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
+`tools` crate 已落地的内置工具（`crates/tower-agent-tools`）：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)（`brush-core` + `brush-builtins`，bash 兼容的 Rust shell），在进程内解释执行，Windows / macOS / Linux 行为一致），以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
 
 与 pi 的实现差异（都是"进程内实现替代外部二进制"或环境能力所限）：
 
 - `read` 不做图片自动缩放（离线缺图像处理能力），图片按 MIME 嗅探后原样作为附件。
-- `shell`（非 Windows 下的 bash 后端）不注入 `PI_*` 会话环境变量（`ToolCallRequest` 不携带会话上下文）、进程组杀死只在类 Unix 平台启用、输出累加器是 pi 有界版本的简化版。
+- `shell` 不注入 `PI_*` 会话环境变量（`ToolCallRequest` 不携带会话上下文），输出累加器是 pi 有界版本的简化版。同一个工具复用一条持久 shell 会话：变量 / 函数 / 别名跨命令保留，但每条命令开始前把工作目录钉回 workspace，`cd` 只影响当前命令（避免 cwd 漂移、与其它锚在 workspace 的工具分歧）；超时 / 取消 / `exit` 会作废整条会话并拆掉它专属的 runtime，连带收掉 `cmd &` 留下的后台子进程。
 - `find` 不调用外部 `fd`，改用 `ignore` + `globset` 在进程内实现相同语义（`*` 不跨分隔符、无 `/` 的模式按文件名匹配、`**/` 前缀规则、尊重 `.gitignore` 且含隐藏文件、非 git 仓库内也应用 `.gitignore`）。
 - `grep` 不调用外部 `rg`，改用 `regex` + `ignore` 实现相同输出形状与截断/提示文案，并跳过二进制文件。
-- `shell` 在 Windows 上用 PowerShell：找不到 `pwsh`/`powershell` 时每次调用返回错误结果。
 
 `tui` 已落地的内容（`crates/tower-agent-tui`，基于 `ratatui` 0.30）：
 
@@ -326,7 +325,7 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/tower-agent-provider/tests/conformance.rs` + `crates/tower-agent-provider/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
 4. 再按 `agent` → `tools` → `tui` → `tower-agent-cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
     1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/tower-agent-runtime`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
-    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/tower-agent-tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `shell` / `read` / `write` / `edit` / `ls` / `find` / `grep`；`shell` 用 `cfg_select!` 把 bash 与 PowerShell 合并成一个工具，Windows → powershell、其余 → bash），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
+    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/tower-agent-tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `shell` / `read` / `write` / `edit` / `ls` / `find` / `grep`；`shell` 内嵌 brush（`brush-core` + `brush-builtins`）在进程内解释 bash 兼容语法，不再依赖外部 shell 可执行文件），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
     3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tower-agent-tui`（`model` / `render` / `app` / `editor` / `backend`）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件， **`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。 **纯库、无二进制**（与 pi `packages/tui` 一致）；可运行的 TUI 入口在 `tower-agent-cli`。测试：25 个 lib 单元（含 12 个编辑器用例）+ 7 个
        `TestBackend`
        端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。

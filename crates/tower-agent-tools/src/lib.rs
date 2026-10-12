@@ -8,8 +8,7 @@
 //! [`ToolNotFound`] 基础服务上得到该工具的可执行服务，于是每个 tool 都是可组合的 tower 单元。
 //!
 //! 七个内置工具：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`。
-//! `shell` 是 bash 与 PowerShell 合并后的统一工具：Windows 用 PowerShell，其余系统用 bash
-//! （底层 shell 用 `cfg_select!` 按操作系统选择）。
+//! `shell` 底层是**内嵌的 brush**（bash 兼容），在进程内解释执行，跨平台行为一致。
 
 mod edit;
 mod find;

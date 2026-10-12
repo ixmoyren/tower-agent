@@ -1,20 +1,38 @@
 //! `shell` 工具：统一的 shell 执行工具（对应 pi `coding-agent` 的 `core/tools/bash.ts` +
-//! `output-accumulator.ts` 与 `core/tools/powershell.ts`）。
+//! `output-accumulator.ts`）。
 //!
-//! 底层 shell 用 `cfg_select!` 按操作系统选择：Windows 用 PowerShell，其余系统用 bash。
-//! 命令在 `bash -c` / `pwsh -c` 中执行，stdout/stderr 合并流式收集；展示输出按尾截断
-//! （默认 2000 行 / 50KB），一旦截断就把完整输出落到临时文件并在结果里给出路径。部分结果
-//! 通过 [`ToolResultStream`] 的中间项推送（对应 pi 的节流 `onUpdate`，间隔 100ms）。
+//! 底层是**内嵌的 brush**（`brush-core` + `brush-builtins`，bash 兼容的 Rust 实现）：命令在
+//! **当前进程内**解释执行，不再依赖外部的 `bash` / `pwsh` 可执行文件，因此 Windows / macOS /
+//! Linux 行为一致。stdout/stderr 经 OS 管道合并流式收集；展示输出按尾截断（默认 2000 行 /
+//! 50KB），一旦截断就把完整输出落到临时文件并在结果里给出路径。部分结果通过
+//! [`ToolResultStream`] 的中间项推送（对应 pi 的节流 `onUpdate`，间隔 100ms）。
 //!
 //! 与 pi 的差别（见 design.md 第 9 节第 4.ii 步）：
-//! - bash 与 PowerShell 合并为一个 `shell` 工具（Windows → powershell，其余 → bash），
-//!   不再分别注册两个工具。
+//! - 不再区分 bash / PowerShell，也没有 PowerShell 分支（PI 的 `powershell.ts` 不再对应）。
 //! - 不注入 `PI_*` 会话环境变量（`ToolCallRequest` 不携带会话上下文）。
-//! - 进程组杀死只在类 Unix 平台启用；其他平台退化为只杀直接子进程。
+//! - 同一个工具复用一条**持久 shell 会话**：变量 / 函数 / 别名跨命令保留。**工作目录不保留**
+//!   ——每条命令开始前都把 shell 的 cwd 钉回 workspace，`cd` 只影响当前这条命令：既留下了
+//!   shell 状态，又不会让 cwd 漂到别处、与 read / write / grep 这些锚在 workspace 的工具分歧。
+//! - 超时 / 取消 / `exit` 会作废整条会话（专属线程 + 独立 runtime 一起拆掉），连带经
+//!   `kill_external_commands_on_drop` 收掉 `cmd &` 留下的后台子进程；下一条命令重建会话。
 
-use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    io::{self, Read as _},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
-use tokio::{io::AsyncReadExt as _, process::Command, sync::mpsc, time::Instant};
+use brush_builtins::{BuiltinSet, ShellBuilderExt as _};
+use brush_core::{
+    ProfileLoadBehavior, RcLoadBehavior, Shell, SourceInfo,
+    openfiles::{self, OpenFile, OpenFiles},
+};
+use tokio::{
+    sync::{Mutex, mpsc, oneshot},
+    time::Instant,
+};
 use tokio_util::sync::CancellationToken;
 use tower::{Layer, Service};
 use tower_agent_provider::Arguments;
@@ -35,85 +53,64 @@ const UPDATE_THROTTLE: Duration = Duration::from_millis(100);
 const STRUCTURED_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 /// `timeout` 参数（秒）的上限（pi `MAX_TIMEOUT_MS / 1000`）。
 const MAX_TIMEOUT_SECONDS: f64 = 2_147_483.647;
-/// PowerShell 的 UTF-8 输出设置（pi `UTF8_OUTPUT_PREFIX`）。
-#[cfg(windows)]
-const POWERSHELL_UTF8_PREFIX: &str =
-    "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}\n";
+/// 截断时完整输出落盘用的临时文件前缀。
+const TEMP_PREFIX: &str = "brush-shell";
+/// 命令结束后等待输出管道排空的上限（避免残留孙进程吊着写端）。
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+/// 正常完成后的排空预算：此时 shell 已把写端换回空设备，管道里只剩已写入的缓冲；
+/// 只有 `cmd &` 这类后台进程还攥着写端，没必要为它等满 [`DRAIN_TIMEOUT`]。
+const POST_COMMAND_DRAIN: Duration = Duration::from_millis(500);
+
+/// 发往会话线程的一条命令。
+struct SessionRequest {
+    /// 要执行的 shell 命令。
+    command: String,
+    /// 本次命令的 stdout / stderr 写端（每命令一根新管道）。
+    stdout: io::PipeWriter,
+    stderr: io::PipeWriter,
+    /// 取消本次命令的信号（超时 / 用户中断）。
+    cancel: oneshot::Receiver<()>,
+    /// 命令终态回执。
+    done: oneshot::Sender<SessionOutcome>,
+}
+
+/// 一条命令在会话里的终态。
+enum SessionOutcome {
+    /// 命令跑完，携带退出码；会话继续可用。
+    Completed(i32),
+    /// `exit`（或 `errexit`）让 shell 退出，携带退出码；会话随之结束。
+    Exited(i32),
+    /// 本次执行报错（解析 / 执行）；会话仍可用。
+    Error(String),
+    /// 被取消；会话随收尾一起作废。
+    Cancelled,
+}
+
+/// 一个持久 shell 会话的句柄。
+#[derive(Clone)]
+struct SessionHandle {
+    tx: mpsc::Sender<SessionRequest>,
+}
 
 /// `shell` 工具的选项。
 #[derive(Debug, Clone, Default)]
 pub struct ShellToolOptions {
     /// 每次执行前追加的命令前缀（例如 shell 初始化）。
     pub command_prefix: Option<String>,
-    /// 指定 bash 可执行文件（仅在非 Windows 上有意义），默认 `bash`。
-    pub shell_path: Option<String>,
 }
 
-/// 执行 shell 命令的工具。
+/// 执行 shell 命令的工具（内嵌 brush，bash 兼容）。
+///
+/// 同一个工具（克隆之间共享）**复用一条持久 shell 会话**：环境变量、导出的变量、函数与
+/// 别名等跨命令保留。**工作目录不保留**——每条命令开始前都把 shell 的 cwd 钉回工具的
+/// `cwd`（workspace），因此 `cd` 只影响当前这一条命令，不会漂到别的目录、也不会让 shell
+/// 与 read / write / grep 这些锚在 workspace 的工具产生分歧。
 #[derive(Clone)]
 pub struct ShellTool {
     cwd: Arc<Path>,
-    spec: ShellSpec,
     command_prefix: Option<String>,
-}
-
-/// 一个 shell 后端的静态配置：bash 与 PowerShell 共用同一套执行逻辑。
-#[derive(Debug, Clone)]
-struct ShellSpec {
-    /// 人类可读的 shell 名（`bash` / `PowerShell`），用于描述与错误文案。
-    label: &'static str,
-    shell: String,
-    temp_prefix: &'static str,
-    /// 每次执行前固定注入的脚本片段（PowerShell 用来设置 UTF-8 输出编码）。
-    init_script: Option<&'static str>,
-    description: String,
-}
-
-impl ShellSpec {
-    /// 描述文案与 pi 的 `createShellToolDefinition` 一致：`Execute a {shell_name} command ...`。
-    fn new(
-        label: &'static str,
-        shell: String,
-        temp_prefix: &'static str,
-        init_script: Option<&'static str>,
-    ) -> Self {
-        let description = format!(
-            "Execute a {label} command in the current working directory. Returns stdout and stderr. \
-            Output is truncated to last {} lines or {}KB (whichever is hit first). If truncated, \
-            full output is saved to a temp file. Optionally provide a timeout in seconds.",
-            DEFAULT_MAX_LINES,
-            DEFAULT_MAX_BYTES / 1024
-        );
-        Self {
-            label,
-            shell,
-            temp_prefix,
-            init_script,
-            description,
-        }
-    }
-
-    /// 按操作系统选择默认 shell：Windows 用 PowerShell，其余系统用 bash。
-    fn from_path(_path: Option<String>) -> Self {
-        cfg_select! {
-            windows => {
-                let shell = find_on_path(&["pwsh", "pwsh.exe", "powershell.exe", "powershell"])
-                    .unwrap_or_else(|| "pwsh".into());
-                Self::new(
-                    "PowerShell",
-                    shell,
-                    "pi-powershell",
-                    Some(POWERSHELL_UTF8_PREFIX),
-                )
-            }
-            _ => Self::new(
-                "bash",
-                _path.unwrap_or_else(|| "bash".into()),
-                "pi-bash",
-                None,
-            ),
-        }
-    }
+    /// 持久会话；惰性创建，超时 / `exit` 后作废，下一条命令重建。
+    session: Arc<Mutex<Option<SessionHandle>>>,
 }
 
 impl ShellTool {
@@ -125,12 +122,12 @@ impl ShellTool {
         Self::with_options(cwd, ShellToolOptions::default())
     }
 
-    /// 用工作目录与选项构造。底层 shell 按操作系统选择（Windows → PowerShell，其余 → bash）。
+    /// 用工作目录与选项构造。
     pub fn with_options(cwd: impl AsRef<Path>, options: ShellToolOptions) -> Self {
         Self {
             cwd: Arc::from(cwd.as_ref()),
-            spec: ShellSpec::from_path(options.shell_path),
             command_prefix: options.command_prefix,
+            session: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -139,12 +136,21 @@ impl ShellTool {
         Self::NAME
     }
 
-    /// 发给模型的工具描述（与 pi 一致）。
+    /// 发给模型的工具描述。
     pub fn description(&self) -> String {
-        self.spec.description.clone()
+        format!(
+            "Execute a bash-compatible shell command in the current working directory. Shell \
+            state (variables, functions, aliases) persists across calls, but every command \
+            starts in the working directory (`cd` only affects the current command). Returns \
+            stdout and stderr. Output is truncated to last {} lines or {}KB (whichever is hit \
+            first). If truncated, full output is saved to a temp file. Optionally provide a \
+            timeout in seconds.",
+            DEFAULT_MAX_LINES,
+            DEFAULT_MAX_BYTES / 1024
+        )
     }
 
-    /// 参数的 JSON Schema（bash 与 PowerShell 相同）。
+    /// 参数的 JSON Schema。
     pub fn parameters() -> tower_agent_provider::JsonValue {
         serde_json::json!({
             "type": "object",
@@ -170,25 +176,16 @@ impl ShellTool {
                 return;
             }
         };
-        // 顺序与 pi 一致：先注入工具自身的初始化脚本（PowerShell 的 UTF-8 设置），
-        // 再拼接调用方配置的命令前缀，最后才是命令本体。
-        let mut prefixes: Vec<&str> = Vec::new();
-        if let Some(init) = self.spec.init_script {
-            prefixes.push(init);
-        }
-        if let Some(prefix) = self.command_prefix.as_deref() {
-            prefixes.push(prefix);
-        }
-        let command = match prefixes.is_empty() {
-            true => command,
-            false => format!("{}\n{command}", prefixes.join("\n")),
+        // 调用方配置的命令前缀按行前置到命令本体。
+        let command = match self.command_prefix.as_deref() {
+            Some(prefix) => format!("{prefix}\n{command}"),
+            None => command,
         };
         if tokio::fs::metadata(&self.cwd).await.is_err() {
             let _ = updates
                 .send(error_result(format!(
-                    "Working directory does not exist: {}\nCannot execute {} commands.",
-                    self.cwd.display(),
-                    self.spec.label
+                    "Working directory does not exist: {}\nCannot execute shell commands.",
+                    self.cwd.display()
                 )))
                 .await;
             return;
@@ -202,67 +199,117 @@ impl ShellTool {
             })
             .await;
 
-        let mut spawn = Command::new(&self.spec.shell);
-        spawn
-            .arg("-c")
-            .arg(&command)
-            .current_dir(&self.cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        // `process_group` 只在类 Unix 平台存在；Windows 上退化为只杀直接子进程。
-        #[cfg(unix)]
-        spawn.process_group(0);
-        let mut child = match spawn.spawn() {
-            Ok(child) => child,
+        // 同一条会话上的命令必须串行；锁在整个命令期间持有（超时 / 取消会作废会话）。
+        let mut session = self.session.lock().await;
+        if session.is_none() {
+            match spawn_session(self.cwd.to_path_buf()) {
+                Ok(handle) => *session = Some(handle),
+                Err(error) => {
+                    let _ = updates
+                        .send(error_result(format!(
+                            "Failed to start shell session: {error}"
+                        )))
+                        .await;
+                    return;
+                }
+            }
+        }
+
+        // stdout/stderr 各接一根 OS 管道：内建命令与外部命令都写这里；阻塞读线程把
+        // chunk 送回本任务，合并进累加器（顺序与旧实现一致）。
+        let (stdout_reader, stdout_writer) = match io::pipe() {
+            Ok(pipe) => pipe,
             Err(error) => {
                 let _ = updates
-                    .send(error_result(format!("Failed to spawn command: {error}")))
+                    .send(error_result(format!(
+                        "Failed to create output pipe: {error}"
+                    )))
                     .await;
                 return;
             }
         };
-        let pgid = child.id().map(|id| id as i32);
-        let mut stdout = child.stdout.take();
-        let mut stderr = child.stderr.take();
-        let mut out_buf = vec![0u8; 8192];
-        let mut err_buf = vec![0u8; 8192];
-        let mut stdout_open = stdout.is_some();
-        let mut stderr_open = stderr.is_some();
+        let (stderr_reader, stderr_writer) = match io::pipe() {
+            Ok(pipe) => pipe,
+            Err(error) => {
+                let _ = updates
+                    .send(error_result(format!(
+                        "Failed to create output pipe: {error}"
+                    )))
+                    .await;
+                return;
+            }
+        };
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
+        spawn_pipe_reader(stdout_reader, tx.clone());
+        spawn_pipe_reader(stderr_reader, tx.clone());
+        drop(tx);
 
-        let mut accumulator = OutputAccumulator::new(self.spec.temp_prefix);
+        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+        let (done_tx, mut done_rx) = oneshot::channel::<SessionOutcome>();
+        let request = SessionRequest {
+            command,
+            stdout: stdout_writer,
+            stderr: stderr_writer,
+            cancel: cancel_rx,
+            done: done_tx,
+        };
+        let sender = session.as_ref().expect("session ensured above").tx.clone();
+        if let Err(error) = sender.send(request).await {
+            // 会话线程已经退出（例如上一条命令让 shell `exit` 了）：丢掉这次请求，
+            // 句柄作废，下一次调用重建。
+            drop(error.0);
+            *session = None;
+            let _ = updates
+                .send(error_result(
+                    "Shell session is no longer available".to_owned(),
+                ))
+                .await;
+            return;
+        }
+
+        let mut accumulator = OutputAccumulator::new(TEMP_PREFIX);
         let started = Instant::now();
         let deadline = timeout.map(|seconds| started + Duration::from_secs_f64(seconds));
         let mut last_update = started;
         let mut terminated: Option<String> = None;
+        let mut exit_code: i32 = 0;
+        let mut rx_open = true;
+        let mut done_received = false;
+        let mut session_dead = false;
 
-        while stdout_open || stderr_open {
+        loop {
             tokio::select! {
-                result = read_chunk(&mut stdout, &mut out_buf), if stdout_open => {
-                    match result {
-                        Some(Ok(0)) => stdout_open = false,
-                        Some(Ok(count)) => accumulator.append(&out_buf[..count]),
-                        Some(Err(error)) => {
-                            terminated = Some(format!("Failed to read command output: {error}"));
-                            break;
-                        }
-                        None => stdout_open = false,
+                chunk = rx.recv(), if rx_open => {
+                    match chunk {
+                        Some(chunk) => accumulator.append(&chunk),
+                        None => rx_open = false,
                     }
                 }
-                result = read_chunk(&mut stderr, &mut err_buf), if stderr_open => {
-                    match result {
-                        Some(Ok(0)) => stderr_open = false,
-                        Some(Ok(count)) => accumulator.append(&err_buf[..count]),
-                        Some(Err(error)) => {
-                            terminated = Some(format!("Failed to read command output: {error}"));
-                            break;
+                outcome = &mut done_rx => {
+                    done_received = true;
+                    match outcome {
+                        Ok(SessionOutcome::Completed(code)) => exit_code = code,
+                        Ok(SessionOutcome::Exited(code)) => {
+                            exit_code = code;
+                            session_dead = true;
                         }
-                        None => stderr_open = false,
+                        Ok(SessionOutcome::Error(message)) => terminated = Some(message),
+                        Ok(SessionOutcome::Cancelled) => {
+                            terminated = Some("Command aborted".into());
+                            session_dead = true;
+                        }
+                        Err(_) => {
+                            terminated = Some("Shell session exited unexpectedly".into());
+                            session_dead = true;
+                        }
                     }
+                    break;
                 }
                 () = sleep_until(deadline) => {
-                    terminated = Some(format!("Command timed out after {} seconds", timeout.unwrap_or_default()));
+                    terminated = Some(format!(
+                        "Command timed out after {} seconds",
+                        timeout.unwrap_or_default()
+                    ));
                     break;
                 }
                 () = wait_for_cancel(&signal) => {
@@ -280,12 +327,29 @@ impl ShellTool {
             }
         }
 
-        if terminated.is_some()
-            && let Some(pgid) = pgid
-        {
-            kill_process_group(pgid);
+        if terminated.is_some() && !done_received {
+            // 被打断的命令可能把会话留在未知状态：作废整个会话（会话线程会拆掉
+            // runtime，连带收掉 `cmd &` 留下的后台子进程）。
+            let _ = cancel_tx.send(());
+            let _ = tokio::time::timeout(DRAIN_TIMEOUT, &mut done_rx).await;
+            session_dead = true;
         }
-        let status = child.wait().await;
+        if session_dead {
+            *session = None;
+        }
+        // 写端随会话 / shell 拆除而关闭；读线程随之读到 EOF。给排空一个上限，
+        // 万一还有残留进程吊着写端，也不拖住本轮结果。
+        let drain = async {
+            while let Some(chunk) = rx.recv().await {
+                accumulator.append(&chunk);
+            }
+        };
+        let drain_budget = if terminated.is_some() {
+            DRAIN_TIMEOUT
+        } else {
+            POST_COMMAND_DRAIN
+        };
+        let _ = tokio::time::timeout(drain_budget, drain).await;
         accumulator.finish();
         let snapshot = accumulator.snapshot();
         let (mut text, details) = format_output(&snapshot, &mut accumulator);
@@ -297,18 +361,6 @@ impl ShellTool {
             return;
         }
 
-        let exit_code = match status {
-            Ok(status) => exit_code_of(&status),
-            Err(error) => {
-                let _ = updates
-                    .send(error_result(append_status(
-                        &text,
-                        &format!("Failed to wait for command: {error}"),
-                    )))
-                    .await;
-                return;
-            }
-        };
         let wall_time = started.elapsed();
         let structured = structured_content(&snapshot, &mut accumulator, exit_code, wall_time);
         if exit_code == 0 {
@@ -355,14 +407,153 @@ impl Service<ToolCallRequest> for ShellTool {
     }
 }
 
-async fn read_chunk<S>(stream: &mut Option<S>, buffer: &mut [u8]) -> Option<std::io::Result<usize>>
-where
-    S: tokio::io::AsyncRead + Unpin,
-{
-    match stream.as_mut() {
-        Some(stream) => Some(stream.read(buffer).await),
-        None => None,
-    }
+/// 起一条持久 shell 会话：专属 OS 线程 + 独立 runtime 持有一个 brush `Shell`，
+/// 通过 channel 逐条接收命令。
+///
+/// 用独立 runtime 是为了超时 / 取消时能**整块拆掉**它——brush 里 `cmd &` 跑在
+/// detached 的 tokio 任务里（句柄摸不到进程），只有丢弃 runtime 才会触发
+/// `kill_external_commands_on_drop` 收掉它们的子进程。
+fn spawn_session(cwd: PathBuf) -> Result<SessionHandle, std::io::Error> {
+    let (tx, mut rx) = mpsc::channel::<SessionRequest>(1);
+    std::thread::Builder::new()
+        .name("brush-shell-session".to_owned())
+        .spawn(move || {
+            let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+            else {
+                // runtime 都建不起来：让在等的请求立刻收到错误，别干等。
+                while let Some(request) = rx.blocking_recv() {
+                    let _ = request.done.send(SessionOutcome::Error(
+                        "Failed to start shell runtime".to_owned(),
+                    ));
+                }
+                return;
+            };
+
+            runtime.block_on(async move {
+                let mut shell: Option<Shell> = None;
+                while let Some(request) = rx.recv().await {
+                    let SessionRequest {
+                        command,
+                        stdout,
+                        stderr,
+                        cancel,
+                        done,
+                    } = request;
+                    if shell.is_none() {
+                        match build_shell(&cwd).await {
+                            Ok(built) => shell = Some(built),
+                            Err(error) => {
+                                let _ = done.send(SessionOutcome::Error(format!(
+                                    "Failed to start shell: {error}"
+                                )));
+                                continue;
+                            }
+                        }
+                    }
+                    let shell = shell.as_mut().expect("shell built above");
+                    // 每条命令：换成本次的输出管道，并把工作目录钉回 workspace。
+                    shell
+                        .open_files_mut()
+                        .set_fd(OpenFiles::STDOUT_FD, OpenFile::from(stdout));
+                    shell
+                        .open_files_mut()
+                        .set_fd(OpenFiles::STDERR_FD, OpenFile::from(stderr));
+                    if let Err(error) = shell.set_working_dir(&cwd) {
+                        let _ = done.send(SessionOutcome::Error(format!(
+                            "Failed to reset working directory: {error}"
+                        )));
+                        continue;
+                    }
+
+                    let params = shell.default_exec_params();
+                    let source_info = SourceInfo::default();
+                    let outcome = tokio::select! {
+                        result = shell.run_string(command, &source_info, &params) => {
+                            match result {
+                                Ok(result) => {
+                                    let code = i32::from(u8::from(result.exit_code));
+                                    if result.is_exit() {
+                                        SessionOutcome::Exited(code)
+                                    } else {
+                                        SessionOutcome::Completed(code)
+                                    }
+                                }
+                                Err(error) => SessionOutcome::Error(format!("Shell error: {error}")),
+                            }
+                        }
+                        _ = cancel => SessionOutcome::Cancelled,
+                    };
+                    // 把本次命令的写端换回空设备：调用方的读线程会立刻读到 EOF，
+                    // 不必等下一次命令覆盖 fd（否则每条命令都要空等排空超时）。
+                    if let Ok(null) = openfiles::null() {
+                        shell
+                            .open_files_mut()
+                            .set_fd(OpenFiles::STDOUT_FD, null);
+                    }
+                    if let Ok(null) = openfiles::null() {
+                        shell
+                            .open_files_mut()
+                            .set_fd(OpenFiles::STDERR_FD, null);
+                    }
+                    let stop = matches!(
+                        outcome,
+                        SessionOutcome::Exited(_) | SessionOutcome::Cancelled
+                    );
+                    let _ = done.send(outcome);
+                    if stop {
+                        break;
+                    }
+                }
+            });
+            // 拆掉 runtime：收掉本次会话留下的后台子进程（kill_on_drop）。
+            drop(runtime);
+        })?;
+    Ok(SessionHandle { tx })
+}
+
+/// 建一个 brush shell：工作目录 = 工具的 cwd，三个标准 fd 先指向空设备（每条命令再
+/// 换成本次的输出管道）。不加载用户的 profile / rc，保证行为可预测。
+async fn build_shell(cwd: &Path) -> Result<Shell, brush_core::Error> {
+    let mut fds = HashMap::new();
+    fds.insert(OpenFiles::STDIN_FD, openfiles::null()?);
+    fds.insert(OpenFiles::STDOUT_FD, openfiles::null()?);
+    fds.insert(OpenFiles::STDERR_FD, openfiles::null()?);
+    Shell::builder()
+        .working_dir(cwd.to_path_buf())
+        .fds(fds)
+        .profile(ProfileLoadBehavior::Skip)
+        .rc(RcLoadBehavior::Skip)
+        .kill_external_commands_on_drop(true)
+        .default_builtins(BuiltinSet::BashMode)
+        .build()
+        .await
+}
+
+/// 在独立线程里把管道内容按 chunk 送回执行任务。
+///
+/// 用普通线程而不是 `spawn_blocking`：读端会一直阻塞到写端关闭，不该占用调用方
+/// runtime 的阻塞线程池。
+fn spawn_pipe_reader(mut reader: io::PipeReader, tx: mpsc::Sender<Vec<u8>>) {
+    let _ = std::thread::Builder::new()
+        .name("brush-shell-pipe".to_owned())
+        .spawn(move || {
+            let mut buffer = vec![0u8; 8192];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        if tx.blocking_send(buffer[..count].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                }
+            }
+        });
 }
 
 async fn sleep_until(deadline: Option<Instant>) {
@@ -393,33 +584,6 @@ fn parse_shell_args(args: &Arguments) -> Result<(String, Option<f64>), String> {
         }
     }
     Ok((command, timeout))
-}
-
-fn kill_process_group(_pgid: i32) {
-    cfg_select! {
-        unix => {
-            use rustix::process::{Pid, Signal, kill_process_group};
-            // `kill(-pgid, SIGKILL)`：杀掉整棵进程树，而不只是直接子进程。
-            if let Some(pid) = Pid::from_raw(_pgid) {
-                let _ = kill_process_group(pid, Signal::KILL);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn exit_code_of(status: &std::process::ExitStatus) -> i32 {
-    if let Some(code) = status.code() {
-        return code;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt as _;
-        if let Some(signal) = status.signal() {
-            return 128 + signal;
-        }
-    }
-    1
 }
 
 fn partial_result(snapshot: &Snapshot) -> AgentToolResult {
@@ -776,7 +940,7 @@ fn decode_stream(pending: &mut Vec<u8>, data: &[u8], out: &mut String) {
     }
 }
 
-/// 构造统一的 `shell` 工具（Windows 上是 PowerShell，其余系统是 bash）。
+/// 构造内置 `shell` 工具（内嵌 brush，跨平台行为一致）。
 pub fn create_shell_tool(cwd: impl AsRef<Path>) -> tower_agent_runtime::AgentTool {
     let tool = ShellTool::new(cwd);
     tower_agent_runtime::AgentTool::new(ShellTool::NAME, tool.layer(ToolNotFound))
@@ -797,21 +961,6 @@ fn shell_output_schema() -> tower_agent_provider::JsonValue {
             "wall_time_seconds": { "type": "number" }
         }
     })
-}
-
-/// 在 `PATH` 上查找第一个存在的可执行文件（用于在 Windows 上挑选 PowerShell 可执行文件名）。
-#[cfg(windows)]
-fn find_on_path(names: &[&str]) -> Option<String> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        for name in names {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().into_owned());
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]

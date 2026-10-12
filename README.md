@@ -25,7 +25,8 @@
 - **多 provider**：Anthropic Messages、OpenAI Chat Completions（含兼容端点）、
   OpenAI Responses、Google Generative AI、DeepSeek；统一的 `Models` 路由与目录刷新。
 - **七个内置工具**：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`，
-  每个工具本身就是一个可组合的 tower `Layer`（`shell` 在 Windows 用 PowerShell，其余用 bash）。
+  每个工具本身就是一个可组合的 tower `Layer`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)
+  ——bash 兼容的 Rust shell，在进程内解释执行，跨平台行为一致）。
 - **三种插件形态**：静态（编译期 tower `Layer`）、动态（stabby `cdylib`，运行时加载 / 卸载）、
   热重载（monty 脚本，跑在 wasmtime 沙箱里），覆盖从「零开销内置」到「热加载 mods」的整条光谱。
 - **mods 模式**：让 LLM 自己编写、热重载、卸载 monty 脚本，从而动态扩展宿主能力、注册工具、贡献 UI。

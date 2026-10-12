@@ -27,7 +27,7 @@ const BUILTIN_VERSION: Version = Version::new(1, 0, 0);
 
 /// 内置工具名，顺序沿用 pi `allToolNames`（拆出来的第二个 shell 已合并）。
 ///
-/// `shell` 在 Windows 上是 PowerShell，其余系统上是 bash。
+/// `shell` 内嵌 brush（bash 兼容），跨平台行为一致。
 pub static DEFAULT_TOOL_NAMES: [&str; 7] = [
     tower_agent_tools::ReadTool::NAME,
     tower_agent_tools::ShellTool::NAME,
