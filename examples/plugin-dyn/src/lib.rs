@@ -1,6 +1,6 @@
 //! 示例动态插件（`cdylib`）：声明 `tool.echo` 能力，演示 rkyv 归档载荷 + 宿主回调。
 //!
-//! 构建：`cargo build --manifest-path examples/plugin-example/Cargo.toml`
+//! 构建：`cargo build --manifest-path examples/plugin-dyn/Cargo.toml`
 //! 产物：`target/debug/libtpa_plugin_example.so`（Linux）。
 
 use std::{
@@ -33,8 +33,8 @@ extern "C" fn example_manifest() -> AbiManifest {
             patch: 0,
         },
     }]
-    .into_iter()
-    .collect();
+        .into_iter()
+        .collect();
     AbiManifest {
         name: String::from("example"),
         version: AbiVersion {
@@ -119,7 +119,7 @@ fn host_call(function: &str, args: AbiValue) -> Option<AbiValue> {
     let request = tower_agent_plugin_sdk::rkyv::to_bytes::<
         tower_agent_plugin_sdk::rkyv::rancor::Error,
     >(&call)
-    .ok()?;
+        .ok()?;
     let buffer = unsafe { ((*host).call)((*host).ctx, request.as_ptr(), request.len()) };
     if buffer.ptr.is_null() {
         return None;
@@ -129,7 +129,7 @@ fn host_call(function: &str, args: AbiValue) -> Option<AbiValue> {
         tower_agent_plugin_sdk::ArchivedAbiHostResult,
         tower_agent_plugin_sdk::rkyv::rancor::Error,
     >(bytes)
-    .ok()?;
+        .ok()?;
     match reply {
         tower_agent_plugin_sdk::ArchivedAbiHostResult::Ok(value) => {
             Some(AbiValue::from_archived(value))

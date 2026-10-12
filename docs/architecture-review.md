@@ -71,7 +71,7 @@ examples/
 3. **有状态 Agent vs axum 多请求**。`Agent` 内含 transcript 与队列，`AgentService` 目前是「同一实例的顺序服务」。axum 场景通常需要每请求无状态或从共享状态派生。
 4. **cli/tui 的调用边界**。若强行让 TUI 走 `Service`，会与「TUI 是事件流订阅、不是请求-响应」的既有决策冲突（design.md 4.1/D1）。
 5. **插件 ABI 与依赖耦合**。`plugins-sdk` 依赖 `plugins`，`plugins` 依赖 `agent/tools/ai`，导致一个最小动态插件会拖入整棵 host 依赖树；作为通用 tower-agent 的插件生态这不理想（建议独立的 `plugins-abi` crate）。
-6. **当前本地构建阻塞**：`crates/plugin-dyn-echo/`、`crates/plugin-sandbox/` 空目录使 `cargo metadata` 失败（见 §0）。`examples/plugin-example` 是唯一被跟踪的示例插件。
+6. **当前本地构建阻塞**：`crates/plugin-dyn-echo/`、`crates/plugin-sandbox/` 空目录使 `cargo metadata` 失败（见 §0）。`../examples/plugin-dyn` 是唯一被跟踪的示例插件。
 
 ## 4. 需要你确认的问题
 

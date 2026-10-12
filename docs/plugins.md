@@ -75,7 +75,7 @@
 - 卸载安全：宿主以 `Arc<LoadedPlugin>` 持有模块，调用带引用计数； **存在 in-flight 调用时拒绝卸载**（`stop` 后等待归零）。
 - 大插件落在这里：`sandbox`（进程/权限隔离）、`memory`、`persist`（会话/向量/文件持久化）、`codemode`。
 
-> 实现状态（M2 已落地）：`plugins` 的 `dynamic` feature（=`dep:stabby` + `dep:libloading`）提供 `LoadedPlugin::load` / `call` / `stop` / `unload`，`#[repr(C)]` 的 `PluginVTable`（`manifest` / `init` / `call` / `shutdown`）与 stabby 的 ABI 稳定清单（`AbiManifest` / `AbiCapability` / `AbiVersion`）做 SDK ABI major 校验；`plugins-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。示例插件在 `examples/plugin-example`（独立 workspace 的 cdylib）。
+> 实现状态（M2 已落地）：`plugins` 的 `dynamic` feature（=`dep:stabby` + `dep:libloading`）提供 `LoadedPlugin::load` / `call` / `stop` / `unload`，`#[repr(C)]` 的 `PluginVTable`（`manifest` / `init` / `call` / `shutdown`）与 stabby 的 ABI 稳定清单（`AbiManifest` / `AbiCapability` / `AbiVersion`）做 SDK ABI major 校验；`plugins-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。示例插件在 `../examples/plugin-dyn`（独立 workspace 的 cdylib）。
 
 ### 4.3 热重载插件（monty）
 
@@ -93,9 +93,9 @@
 >
 > 沙箱侧还提供： **实例池**（`SandboxPool`，一次运行借出、跑完归还）+ **预热**（`ModManager::warmup` / `spawn_warmup` 后台编译组件、预建实例）、 **文件系统挂载**（`ModManager::mount*` 用 `monty-fs` 的 `MountTable` 在宿主侧服务 OS 调用：`ReadOnly` / `OverlayMemory` / `ReadWrite`）与 **每-mod 权限**（`ModPermissions`：`tools` / `register_tools` / `ui` / `state` / `fs`，在派发与 OS 处理时强制）。CLI 默认把工作目录只读挂到 `/work`。
 >
-> **三形态同表（解析规则一致）**：mod 以 `PluginKind::Jit` 载荷注册进**同一个 `PluginRegistry`**（内置工具是同一注册表里的静态插件），因此覆盖优先级（静态 < 动态 < JIT）、能力级覆盖、依赖图/拓扑排序、版本收敛与被遮蔽记录（`ModManager::shadows`）对三形态统一生效——同名 JIT mod 会遮蔽同名静态插件。工具目录的唯一来源是「解析 + 安装」的结果（`ModManager::tools`），`HostApi` 同步获得同一份工具集；`--tools` / `--exclude-tools` / `--no-tools` 以 `ToolFilter` 作用在该目录之上。
+> **三形态同表（解析规则一致）**：mod 以 `PluginKind::Jit` 载荷注册进 **同一个 `PluginRegistry`**（内置工具是同一注册表里的静态插件），因此覆盖优先级（静态 < 动态 < JIT）、能力级覆盖、依赖图/拓扑排序、版本收敛与被遮蔽记录（`ModManager::shadows`）对三形态统一生效——同名 JIT mod 会遮蔽同名静态插件。工具目录的唯一来源是「解析 + 安装」的结果（`ModManager::tools`），`HostApi` 同步获得同一份工具集；`--tools` / `--exclude-tools` / `--no-tools` 以 `ToolFilter` 作用在该目录之上。
 >
-> **`protected` 标记与遮蔽规则**：`PluginManifest.protected` 的实现**永不被遮蔽**——JIT 运行时（agent-monty）就以一张 protected 插件清单注册（提供 `tool.mod_*` 与 `jit.run`），任何试图用同名插件/同名工具遮蔽它的 mod 会被 `ModManager` **阻断**并回滚。除它之外：JIT 可以遮蔽静态与动态插件，**JIT 之间也允许**，规则是「后写覆盖先写」，工具目录按名去重并登记 `ModManager::shadowed_tools()`。
+> **`protected` 标记与遮蔽规则**：`PluginManifest.protected` 的实现 **永不被遮蔽**——JIT 运行时（agent-monty）就以一张 protected 插件清单注册（提供 `tool.mod_*` 与 `jit.run`），任何试图用同名插件/同名工具遮蔽它的 mod 会被 `ModManager` **阻断**并回滚。除它之外：JIT 可以遮蔽静态与动态插件， **JIT 之间也允许**，规则是「后写覆盖先写」，工具目录按名去重并登记 `ModManager::shadowed_tools()`。
 >
 > **持久化（`dirs`）**：mod 默认只活在会话内，源码同时写到 `dirs::cache_dir()/tower-agent/mods`（临时，不算保存）；`mod_persist` 把它复制到 `dirs::config_dir()/tower-agent/mods`（跨会话保留，启动时自动加载），`mod_discard` 卸载并从 config/cache 删除。动态插件从 `dirs::config_dir()/tower-agent/plugins` 加载（`.so`/`.dll`/`.dylib`，其 `tool.<name>` 能力被包装成工具，因此可被更高优先级的 JIT mod 遮蔽）。
 
@@ -331,7 +331,7 @@ pub enum PluginError {
 - **单元**：插件级覆盖优先级、 **能力级覆盖**、shadow 记录、环检测、同 major 收敛、跨 major 并存、静态单实例、静态→动态拒绝。
 - **静态插件**：每个内置工具都是一个独立静态插件，经注册表解析后工具集合与迁移前等价。
 - **权限**：首次调用触发运行时提示、决定按会话缓存、无人值守模式拒绝。
-- **动态**：`dynamic` feature 下编译示例 `cdylib`（`examples/plugin-example`），验证加载、调用、`UnloadBusy`、卸载。端到端用例读 `TPA_PLUGIN_EXAMPLE` 指向产物；未设置时跳过（避免与 `cargo test` 抢 target 锁）：
+- **动态**：`dynamic` feature 下编译示例 `cdylib`（`../examples/plugin-dyn`），验证加载、调用、`UnloadBusy`、卸载。端到端用例读 `TPA_PLUGIN_EXAMPLE` 指向产物；未设置时跳过（避免与 `cargo test` 抢 target 锁）：
 
   ```text
   cargo build --manifest-path examples/plugin-example/Cargo.toml
@@ -346,7 +346,7 @@ pub enum PluginError {
 | 里程碑 | 内容                                                                                                                                                                 |
 |--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | M1 ✅  | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移；生命周期 / 宿主 API / 权限 / 错误已落地 |
-| M2 ✅  | `plugins-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `examples/plugin-example` 示例 cdylib + 端到端测试                         |
+| M2 ✅  | `plugins-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `../examples/plugin-dyn` 示例 cdylib + 端到端测试                          |
 | M3 ✅  | `tower-agent-monty`（monty + monty-pool）：宿主函数回调、原子换绑热加载与失败回滚                                                                                    |
 | M4     | 大型动态插件：沙箱 / 记忆 / 持久化 / codemode；cc `mods` 模式接入                                                                                                    |
 
@@ -366,7 +366,7 @@ pub enum PluginError {
 目标（2026-10-12 定）：`tower-agent-wasmtime` 与 `tower-agent-codemode` **都是静态插件**，
 并且与 `tower-agent-monty` 一样 **不允许被动态插件与 JIT 插件用同名方式覆盖能力**；
 静态插件与 **cargo feature** 联动，用 feature 决定「tower-agent 提供哪些能力」；
-插件集合由**组装层**（`tower-agent::assembly`）统一给出，**不在任何会话装配里硬编码**。
+插件集合由 **组装层**（`tower-agent::assembly`）统一给出， **不在任何会话装配里硬编码**。
 
 ### 16.1 已完成
 
@@ -389,7 +389,7 @@ pub enum PluginError {
 
 - [x] **1. 组装层 + 登记进注册表**：宿主静态插件集合由 `tower-agent::assembly::HostPlugins`
   给出（内置工具 + `wasmtime`〔feature `sandbox-wasmtime`〕+ codemode〔feature `codemode`，
-  `with_codemode(session, mounts)`〕）——**与会话无关**，CLI / axum / 测试同一入口。
+  `with_codemode(session, mounts)`〕）—— **与会话无关**，CLI / axum / 测试同一入口。
   `ModManager::new` 只再叠加自己的 JIT 运行时地基，不再自己塞 wasmtime；
   `ModManager::register_static_plugin(&self, Arc<dyn StaticPlugin>)` 保留，供运行时追加插件
   （CLI 的 `--codemode` 走它；未启用 mods 时退化为直接追加工具）。

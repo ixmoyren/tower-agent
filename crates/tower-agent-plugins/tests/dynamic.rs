@@ -3,8 +3,8 @@
 //! 端到端用例需要先构建示例插件：
 //!
 //! ```text
-//! cargo build --manifest-path examples/plugin-example/Cargo.toml
-//! TPA_PLUGIN_EXAMPLE=examples/plugin-example/target/debug/libtpa_plugin_example.so \
+//! cargo build --manifest-path examples/plugin-dyn/Cargo.toml
+//! TPA_PLUGIN_EXAMPLE=examples/plugin-dyn/target/debug/libtpa_plugin_example.so \
 //!   cargo test -p plugins --features dynamic --test dynamic
 //! ```
 //!
