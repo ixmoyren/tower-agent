@@ -523,9 +523,9 @@ fn capability_override_cannot_redirect_a_protected_capability() {
 
     match registry.resolve() {
         Err(PluginError::OverrideProtected {
-                capability,
-                provider,
-            }) => {
+            capability,
+            provider,
+        }) => {
             assert_eq!(capability, cap("sandbox", "wasmtime"));
             assert_eq!(provider, "shady");
         }

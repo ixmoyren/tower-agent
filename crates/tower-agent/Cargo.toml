@@ -9,11 +9,16 @@ license.workspace = true
 workspace = true
 
 [features]
-default = []
+default = ["sandbox-wasmtime", "codemode"]
 # 可选前端/协议/插件 SDK。
 tui = ["dep:tower-agent-tui"]
 protocol = ["dep:tower-agent-protocol"]
 plugin-sdk = ["dep:tower-agent-plugin-sdk"]
+# 宿主插件能力：由 feature 决定「tower-agent 提供哪些插件」。
+sandbox-wasmtime = ["dep:tower-agent-wasmtime"]
+codemode = ["dep:tower-agent-codemode", "sandbox-wasmtime"]
+# JIT mods 宿主（monty）。非默认：它把整个 monty + wasmtime 沙箱带进来。
+mods = ["dep:tower-agent-monty", "sandbox-wasmtime"]
 
 [dependencies]
 tower-agent-core = { workspace = true }
@@ -21,6 +26,9 @@ tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-tools = { workspace = true }
 tower-agent-plugins = { workspace = true }
+tower-agent-wasmtime = { workspace = true, optional = true }
+tower-agent-codemode = { workspace = true, optional = true }
+tower-agent-monty = { workspace = true, optional = true }
 tower-agent-tui = { workspace = true, optional = true }
 tower-agent-protocol = { workspace = true, optional = true }
 tower-agent-plugin-sdk = { workspace = true, optional = true }

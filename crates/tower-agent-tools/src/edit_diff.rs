@@ -472,7 +472,7 @@ mod tests {
             &[edit("abc", "X"), edit("bcd", "Y")],
             "f.txt",
         )
-            .unwrap_err();
+        .unwrap_err();
         assert!(error.contains("overlap"), "got: {error}");
     }
 
@@ -490,7 +490,7 @@ mod tests {
             &[edit("line one\nline two", "replaced")],
             "f.txt",
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(new, "replaced\n");
     }
 
@@ -501,7 +501,7 @@ mod tests {
             &[edit("\"hi\"", "\"yo\"")],
             "f.txt",
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(new, "say \"yo\"\n");
     }
 
@@ -512,7 +512,7 @@ mod tests {
             &[edit("alpha", "ALPHA"), edit("gamma", "GAMMA")],
             "f.txt",
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(new, "ALPHA\nbeta\nGAMMA\n");
     }
 }

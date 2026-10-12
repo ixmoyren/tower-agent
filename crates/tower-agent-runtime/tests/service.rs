@@ -26,7 +26,7 @@ async fn stateless_service_does_not_share_a_transcript() {
         text_script(&model, "one"),
         text_script(&model, "two"),
     ])))
-        .with_model(model);
+    .with_model(model);
 
     let first = service.clone().oneshot(request("hi")).await.unwrap();
     let second = service.oneshot(request("hi")).await.unwrap();
@@ -44,8 +44,8 @@ async fn session_store_accumulates_the_transcript() {
         text_script(&model, "one"),
         text_script(&model, "two"),
     ])))
-        .with_model(model)
-        .with_sessions(store.clone());
+    .with_model(model)
+    .with_sessions(store.clone());
 
     let first = service
         .clone()
@@ -77,7 +77,7 @@ async fn streaming_service_emits_the_event_protocol() {
         AgentService::new(boxed_stream(ScriptedStreamService::new(vec![text_script(
             &model, "hi",
         )])))
-            .with_model(model),
+        .with_model(model),
     );
 
     let mut stream = service.oneshot(request("hello")).await.unwrap();
@@ -103,7 +103,7 @@ async fn pool_serves_requests_up_to_its_concurrency() {
         text_script(&model, "a"),
         text_script(&model, "b"),
     ])))
-        .with_model(model);
+    .with_model(model);
     let pool = AgentPool::new(service, 2);
     assert_eq!(pool.max_concurrency(), 2);
 

@@ -72,7 +72,7 @@ impl HttpError {
 
 /// 响应体：分块的字节流。
 pub type ByteStream =
-std::pin::Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>> + Send + 'static>>;
+    std::pin::Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>> + Send + 'static>>;
 
 /// 一次 HTTP 响应。
 pub struct HttpResponse {

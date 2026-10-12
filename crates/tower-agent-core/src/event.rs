@@ -223,7 +223,7 @@ mod tests {
                 tools_removed: Vec::new(),
                 timestamp: 0,
             }))
-                .role(),
+            .role(),
             Some("system")
         );
         assert_eq!(

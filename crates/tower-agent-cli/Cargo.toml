@@ -12,18 +12,26 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+default = ["mods", "codemode"]
+# JIT mods 宿主（monty）；关掉后二进制只剩内置工具。
+mods = ["tower-agent/mods", "dep:tower-agent-monty"]
+# codemode（`--codemode` 与 `--codemode-sessions*`）。
+codemode = ["dep:tower-agent-codemode"]
+
 [dependencies]
+tower-agent = { workspace = true, default-features = false, optional = true }
 tower-agent-core = { workspace = true }
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-plugins = { workspace = true }
 tower-agent-tui = { workspace = true }
-tower-agent-monty = { workspace = true }
-tower-agent-codemode = { workspace = true }
+tower-agent-monty = { workspace = true, optional = true }
+tower-agent-codemode = { workspace = true, optional = true }
 clap = { version = "4.6", features = ["derive"] }
 futures-util = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 tower = { workspace = true }
 
 [dev-dependencies]

@@ -75,9 +75,9 @@ pub struct BeforeToolCallService<S, F> {
 impl<S, F> Service<ToolCallRequest> for BeforeToolCallService<S, F>
 where
     S: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>
-    + Clone
-    + Send
-    + 'static,
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
     F: Fn(ToolCallRequest) -> ToolCallDecision + Clone + Send + 'static,
 {
@@ -139,9 +139,9 @@ pub struct AfterToolResultService<S, F> {
 impl<S, F> Service<ToolCallRequest> for AfterToolResultService<S, F>
 where
     S: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>
-    + Clone
-    + Send
-    + 'static,
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
     F: Fn(&ToolCallRequest, AgentToolResult) -> AgentToolResult + Clone + Send + 'static,
 {

@@ -66,7 +66,7 @@ async fn maps_a_parts_stream_to_gold_standard_events() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -122,7 +122,7 @@ async fn maps_thought_parts_to_thinking_blocks() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     // 类型切换时先闭合旧块再开新块（与 pi 一致）。
     assert_eq!(
@@ -170,7 +170,7 @@ async fn function_calls_arrive_whole_and_force_tool_use() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -301,7 +301,7 @@ async fn errors_follow_the_same_contract() {
             .await
             .expect("4xx 编码进流"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["error"]);
 
     // 5xx 交给 retry 层。
@@ -339,7 +339,7 @@ async fn safety_finish_reasons_become_errors() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
     assert_eq!(
         kinds(&events),
         vec!["text_start", "text_delta", "text_end", "error"]

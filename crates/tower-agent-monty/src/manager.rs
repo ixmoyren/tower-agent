@@ -59,8 +59,8 @@ pub fn jit_runtime_manifest() -> PluginManifest {
         Version::new(1, 0, 0),
         PluginKind::Static,
     )
-        .protected()
-        .providing(CapabilityId::new("jit", "run"), Version::new(1, 0, 0));
+    .protected()
+    .providing(CapabilityId::new("jit", "run"), Version::new(1, 0, 0));
     for name in crate::author::AUTHORING_TOOL_NAMES {
         manifest = manifest.providing(CapabilityId::new("tool", name), Version::new(1, 0, 0));
     }
@@ -159,8 +159,10 @@ impl std::fmt::Debug for ModManager {
 }
 
 impl ModManager {
-    /// 用共享 UI 状态与初始注册表（通常含内置静态插件）构造，并立刻解析一次。
+    /// 用共享 UI 状态与初始注册表构造，并立刻解析一次。
     ///
+    /// 初始注册表由**宿主组装层**提供（`tower_agent::assembly::HostPlugins`）：内置工具 +
+    /// `wasmtime` / `codemode` 这类宿主能力；`ModManager` 只再叠加自己的 JIT 运行时地基。
     /// `HostApi` 的工具表由解析结果填充，因此宿主能力与工具目录同源。
     pub fn new(ui: UiState, registry: PluginRegistry) -> Result<Arc<Self>, PluginError> {
         let manager = Arc::new(Self {
@@ -179,13 +181,6 @@ impl ModManager {
             kv: Mutex::new(BTreeMap::new()),
             store: Mutex::new(ModStore::from_dirs()),
         });
-        // wasmtime 沙箱是 monty 与 codemode 共用的宿主能力：常驻注册，把名字
-        // `wasmtime` 与能力 `sandbox.wasmtime` 占成 protected，动态/JIT 插件不能顶替。
-        manager
-            .registry
-            .lock()
-            .expect("registry poisoned")
-            .register_plugin(Arc::new(tower_agent_wasmtime::WasmtimePlugin::new()))?;
         // JIT 运行时以 protected 载荷注册，并在 install 时把作者工具装进工具目录。
         // 工具句柄用 Weak 指回本管理器，避免强引用环。
         let foundation = FoundationPlugin {
@@ -886,7 +881,7 @@ impl ModManager {
                     monty_types::ExcType::RuntimeError,
                     Some(format!("invalid os-call payload: {error}")),
                 ))
-                    .to_string();
+                .to_string();
             }
         };
         let outcome = self

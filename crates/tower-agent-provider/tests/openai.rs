@@ -55,7 +55,7 @@ async fn maps_a_text_stream_to_gold_standard_events() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -113,7 +113,7 @@ async fn streams_tool_calls_and_reports_tool_use() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -152,7 +152,7 @@ async fn maps_reasoning_content_to_thinking() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -240,7 +240,7 @@ async fn http_error_becomes_an_error_event_and_5xx_is_retryable() {
             .await
             .expect("4xx 编码进流"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["error"]);
 
     let transport = ScriptedTransport::new(vec![ScriptedResponse::text(503, "unavailable")]);
@@ -265,7 +265,7 @@ async fn missing_finish_reason_is_an_error() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
     assert_eq!(
         kinds(&events),
         vec!["text_start", "text_delta", "text_end", "error"]

@@ -34,7 +34,7 @@ pub struct Models {
 
 /// 模型目录来源：拉取某个 provider 的全部模型。
 pub type ModelSource =
-Arc<dyn Fn() -> BoxFuture<'static, Result<Vec<Model>, PiError>> + Send + Sync>;
+    Arc<dyn Fn() -> BoxFuture<'static, Result<Vec<Model>, PiError>> + Send + Sync>;
 
 /// `refresh` 的选项（pi `ModelsRefreshOptions`）。
 #[derive(Clone, Default)]

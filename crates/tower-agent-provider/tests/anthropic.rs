@@ -119,7 +119,7 @@ async fn assembles_events_split_across_body_chunks() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
     assert_eq!(
         kinds(&events),
         vec![
@@ -228,7 +228,7 @@ async fn streams_tool_calls_with_partial_json() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -288,7 +288,7 @@ async fn maps_thinking_blocks() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -395,7 +395,7 @@ async fn http_error_becomes_an_error_event_in_the_stream() {
             .await
             .expect("4xx 编码进流而不是 Service 错误"),
     )
-        .await;
+    .await;
 
     assert_eq!(kinds(&events), vec!["error"]);
     let AssistantMessageEvent::Error { error, .. } = &events[0] else {
@@ -457,7 +457,7 @@ async fn sse_error_event_becomes_an_error_event() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(kinds(&events), vec!["start", "error"]);
     let AssistantMessageEvent::Error { error, .. } = events.last().unwrap() else {
@@ -491,7 +491,7 @@ async fn stream_without_a_stop_reason_is_an_error() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(kinds(&events), vec!["start", "text_start", "error"]);
     let AssistantMessageEvent::Error { error, .. } = events.last().unwrap() else {
@@ -534,7 +534,7 @@ async fn maps_max_tokens_and_refusal_stop_reasons() {
                 .await
                 .expect("established"),
         )
-            .await
+        .await
     }
 
     let events = run("max_tokens", None).await;

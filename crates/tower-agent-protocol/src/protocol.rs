@@ -434,7 +434,7 @@ impl ServerMessage {
                 strict(value, &["type", "version", "serverId"], "hello")?;
                 match entries.get("version") {
                     Some(JsonValue::Number(number))
-                    if number.as_u64() == Some(PROTOCOL_VERSION) => {}
+                        if number.as_u64() == Some(PROTOCOL_VERSION) => {}
                     _ => {
                         return Err(ProtocolValidationError::new(format!(
                             "`version` must be {PROTOCOL_VERSION}"

@@ -740,21 +740,21 @@ fn convert_messages(messages: &[Message]) -> Result<Vec<JsonValue>, PiError> {
                 // 连续的 tool_result 合成同一条 user 消息（Anthropic 要求）。
                 match converted.last_mut() {
                     Some(JsonValue::Object(last))
-                    if last.get("role").and_then(JsonValue::as_str) == Some("user")
-                        && last
-                        .get("content")
-                        .and_then(JsonValue::as_array)
-                        .is_some_and(|content| {
-                            content.iter().all(|block| {
-                                block.get("type").and_then(JsonValue::as_str)
-                                    == Some("tool_result")
-                            })
-                        }) =>
-                        {
-                            if let Some(JsonValue::Array(content)) = last.get_mut("content") {
-                                content.push(block);
-                            }
+                        if last.get("role").and_then(JsonValue::as_str) == Some("user")
+                            && last
+                                .get("content")
+                                .and_then(JsonValue::as_array)
+                                .is_some_and(|content| {
+                                    content.iter().all(|block| {
+                                        block.get("type").and_then(JsonValue::as_str)
+                                            == Some("tool_result")
+                                    })
+                                }) =>
+                    {
+                        if let Some(JsonValue::Array(content)) = last.get_mut("content") {
+                            content.push(block);
                         }
+                    }
                     _ => converted.push(json!({ "role": "user", "content": [block] })),
                 }
             }

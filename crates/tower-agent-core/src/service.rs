@@ -64,7 +64,7 @@ pub type BoxAgentService = BoxCloneService<AgentRequest, AgentResponse, AgentErr
 
 /// 把具体 agent 服务装箱成 [`BoxAgentService`]。
 pub trait AgentServiceExt:
-Service<AgentRequest, Response = AgentResponse, Error = AgentError> + Clone + Sized + Send + 'static
+    Service<AgentRequest, Response = AgentResponse, Error = AgentError> + Clone + Sized + Send + 'static
 {
     /// 装箱为类型擦除的 agent 服务。
     fn boxed_agent(self) -> BoxAgentService
@@ -75,11 +75,11 @@ Service<AgentRequest, Response = AgentResponse, Error = AgentError> + Clone + Si
     }
 }
 
-impl<T> AgentServiceExt for T
-where
+impl<T> AgentServiceExt for T where
     T: Service<AgentRequest, Response = AgentResponse, Error = AgentError>
-    + Clone
-    + Sized
-    + Send
-    + 'static
-{}
+        + Clone
+        + Sized
+        + Send
+        + 'static
+{
+}

@@ -94,9 +94,9 @@ pub fn tower_agent_layer<L>(layer: L) -> Box<dyn AgentLayer>
 where
     L: Layer<BoxAgentService> + Clone + Send + Sync + 'static,
     L::Service: Service<AgentRequest, Response = AgentResponse, Error = AgentError>
-    + Clone
-    + Send
-    + 'static,
+        + Clone
+        + Send
+        + 'static,
     <L::Service as Service<AgentRequest>>::Future: Send + 'static,
 {
     let layer = Arc::new(layer);
@@ -108,9 +108,9 @@ pub fn tower_tool_layer<L>(layer: L) -> Box<dyn ToolLayer>
 where
     L: Layer<BoxToolService> + Clone + Send + Sync + 'static,
     L::Service: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>
-    + Clone
-    + Send
-    + 'static,
+        + Clone
+        + Send
+        + 'static,
     <L::Service as Service<ToolCallRequest>>::Future: Send + 'static,
 {
     let layer = Arc::new(layer);

@@ -51,12 +51,12 @@ fn encode_message(
             ..CborOptions::default()
         },
     )
-        .map_err(|error| {
-            ProtocolValidationError::new(format!(
-                "Unable to encode {kind} protocol message: {}",
-                bounded_message(error.message())
-            ))
-        })?;
+    .map_err(|error| {
+        ProtocolValidationError::new(format!(
+            "Unable to encode {kind} protocol message: {}",
+            bounded_message(error.message())
+        ))
+    })?;
     encode_frame(&cbor).map_err(|error| {
         ProtocolValidationError::new(format!(
             "Unable to encode {kind} protocol message: {}",

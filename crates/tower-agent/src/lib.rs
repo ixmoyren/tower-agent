@@ -18,6 +18,10 @@ pub use tower_agent_provider as provider;
 pub use tower_agent_runtime as runtime;
 pub use tower_agent_tools as tools;
 
+pub mod assembly;
+
+#[cfg(feature = "mods")]
+pub use tower_agent_monty as monty;
 #[cfg(feature = "plugin-sdk")]
 pub use tower_agent_plugin_sdk as plugin_sdk;
 #[cfg(feature = "protocol")]

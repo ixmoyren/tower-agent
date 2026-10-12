@@ -88,7 +88,7 @@ async fn maps_typed_text_events_to_gold_standard_events() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -168,7 +168,7 @@ async fn merges_function_call_deltas_by_output_index() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -240,7 +240,7 @@ async fn maps_reasoning_summary_to_thinking() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
 
     assert_eq!(
         kinds(&events),
@@ -339,7 +339,7 @@ async fn failed_and_incomplete_events_become_errors() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["error"]);
     let AssistantMessageEvent::Error { error, .. } = &events[0] else {
         panic!("expected error");
@@ -352,7 +352,7 @@ async fn failed_and_incomplete_events_become_errors() {
         "status": "incomplete",
         "incomplete_details": { "reason": "max_output_tokens" },
     }))
-        .replace("response.completed", "response.incomplete");
+    .replace("response.completed", "response.incomplete");
     let transport = ScriptedTransport::new(vec![ScriptedResponse::ok(sse)]);
     let provider = provider_with(transport);
     let events = collect(
@@ -361,7 +361,7 @@ async fn failed_and_incomplete_events_become_errors() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
     let message = events
         .last()
         .and_then(AssistantMessageEvent::terminal_message)
@@ -382,7 +382,7 @@ async fn errors_follow_the_same_contract() {
             .await
             .expect("4xx 编码进流"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["error"]);
 
     let transport = ScriptedTransport::new(vec![ScriptedResponse::text(500, "boom")]);

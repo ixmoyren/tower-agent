@@ -51,9 +51,9 @@ impl ToolRegistration {
                 _params: PhantomData,
             },
         )
-            .label(name)
-            .description(description)
-            .parameters(parameters)
+        .label(name)
+        .description(description)
+        .parameters(parameters)
     }
 }
 

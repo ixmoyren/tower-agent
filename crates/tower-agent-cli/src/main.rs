@@ -146,14 +146,17 @@ fn main() -> ExitCode {
         setup.stream_fn(),
         setup.model.clone(),
     ));
-    if args.codemode
-        && let Err(error) = session.enable_codemode(
+    if args.codemode {
+        #[cfg(feature = "codemode")]
+        if let Err(error) = session.enable_codemode(
             &cwd,
             args.codemode_session.as_deref(),
             &args.codemode_mounts,
-        )
-    {
-        eprintln!("codemode 未启用：{error}");
+        ) {
+            eprintln!("codemode 未启用：{error}");
+        }
+        #[cfg(not(feature = "codemode"))]
+        eprintln!("codemode 未启用：本构建未包含 codemode（缺少 `codemode` feature）。");
     }
     // 还没有 provider 时在 TUI 里先给一句提示，告诉用户用 `/login` 配置。
     let tui_notice = (setup.model.provider == "unconfigured").then(|| {
@@ -191,40 +194,57 @@ fn main() -> ExitCode {
 }
 
 fn print_sessions() -> ExitCode {
-    let Some(root) = tower_agent_codemode::sessions_root() else {
-        eprintln!("拿不到配置目录，无法列出会话。");
-        return ExitCode::FAILURE;
-    };
-    let sessions = tower_agent_codemode::list_sessions_in(&root);
-    println!(
-        "codemode 会话（{} 个，{})：",
-        sessions.len(),
-        root.display()
-    );
-    for (name, path) in sessions {
-        println!("  {:<16} {}", name, path.display());
+    #[cfg(feature = "codemode")]
+    {
+        let Some(root) = tower_agent_codemode::sessions_root() else {
+            eprintln!("拿不到配置目录，无法列出会话。");
+            return ExitCode::FAILURE;
+        };
+        let sessions = tower_agent_codemode::list_sessions_in(&root);
+        println!(
+            "codemode 会话（{} 个，{})：",
+            sessions.len(),
+            root.display()
+        );
+        for (name, path) in sessions {
+            println!("  {:<16} {}", name, path.display());
+        }
+        ExitCode::SUCCESS
     }
-    ExitCode::SUCCESS
+    #[cfg(not(feature = "codemode"))]
+    {
+        eprintln!("本构建未包含 codemode（缺少 `codemode` feature）。");
+        ExitCode::FAILURE
+    }
 }
 
 fn clear_session(name: &str) -> ExitCode {
-    let Some(root) = tower_agent_codemode::sessions_root() else {
-        eprintln!("拿不到配置目录，无法清理会话。");
-        return ExitCode::FAILURE;
-    };
-    match tower_agent_codemode::clear_session_in(&root, name) {
-        Ok(true) => {
-            println!("已删除 codemode 会话 `{name}`。");
-            ExitCode::SUCCESS
+    #[cfg(feature = "codemode")]
+    {
+        let Some(root) = tower_agent_codemode::sessions_root() else {
+            eprintln!("拿不到配置目录，无法清理会话。");
+            return ExitCode::FAILURE;
+        };
+        match tower_agent_codemode::clear_session_in(&root, name) {
+            Ok(true) => {
+                println!("已删除 codemode 会话 `{name}`。");
+                ExitCode::SUCCESS
+            }
+            Ok(false) => {
+                println!("codemode 会话 `{name}` 不存在（无需清理）。");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("清理会话 `{name}` 失败：{error}");
+                ExitCode::FAILURE
+            }
         }
-        Ok(false) => {
-            println!("codemode 会话 `{name}` 不存在（无需清理）。");
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            eprintln!("清理会话 `{name}` 失败：{error}");
-            ExitCode::FAILURE
-        }
+    }
+    #[cfg(not(feature = "codemode"))]
+    {
+        let _ = name;
+        eprintln!("本构建未包含 codemode（缺少 `codemode` feature）。");
+        ExitCode::FAILURE
     }
 }
 
@@ -243,15 +263,20 @@ fn print_tools(codemode: bool) {
     // codemode 只在 `--codemode` 打开时才进工具集；这里只列名字与描述，**不构造工具**
     // （构造要编译 7.4 MB 组件，为了列个名字不值）。
     if codemode {
-        println!(
-            "  {:<12} {}",
-            tower_agent_codemode::TOOL_NAME,
-            tower_agent_codemode::tool_description()
-                .lines()
-                .next()
-                .unwrap_or_default()
-        );
-        println!("  （--codemode-session <name> 可把会话根持久化到 config 目录）");
+        #[cfg(feature = "codemode")]
+        {
+            println!(
+                "  {:<12} {}",
+                tower_agent_codemode::TOOL_NAME,
+                tower_agent_codemode::tool_description()
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+            );
+            println!("  （--codemode-session <name> 可把会话根持久化到 config 目录）");
+        }
+        #[cfg(not(feature = "codemode"))]
+        println!("  （本构建未包含 codemode，`--codemode` 无效）");
     }
 }
 

@@ -109,8 +109,8 @@ impl GrepTool {
             Ok(limit) => limit.unwrap_or(DEFAULT_LIMIT),
             Err(message) => return error_result(message),
         }
-            // pi: `Math.max(1, limit ?? DEFAULT_LIMIT)`
-            .max(1);
+        // pi: `Math.max(1, limit ?? DEFAULT_LIMIT)`
+        .max(1);
 
         if cancelled(signal) {
             return error_result("Operation aborted");

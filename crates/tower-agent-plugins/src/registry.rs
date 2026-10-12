@@ -178,10 +178,10 @@ impl PluginRegistry {
             Version::new(1, 0, 0),
             crate::PluginKind::Static,
         )
-            .providing(
-                CapabilityId::new("tool", tool.name()),
-                Version::new(1, 0, 0),
-            );
+        .providing(
+            CapabilityId::new("tool", tool.name()),
+            Version::new(1, 0, 0),
+        );
         self.register_static(Arc::new(ToolPlugin {
             manifest,
             tool: std::sync::Mutex::new(tool),
@@ -547,12 +547,12 @@ fn select_providers(
             let manifest = &candidates[index].manifest;
             manifest.name == capability_override.provider
                 && capability_override
-                .version
-                .as_ref()
-                .is_none_or(|version| &manifest.version == version)
+                    .version
+                    .as_ref()
+                    .is_none_or(|version| &manifest.version == version)
                 && capability_override
-                .kind
-                .is_none_or(|kind| manifest.kind == kind)
+                    .kind
+                    .is_none_or(|kind| manifest.kind == kind)
         };
         let target = available
             .iter()

@@ -50,12 +50,12 @@ impl StaticPlugin for LoadedPluginPayload {
                     plugin: self.manifest.name.clone(),
                 },
             )
-                .label(name.clone())
-                .description(format!(
-                    "dynamic plugin `{}` capability `tool.{name}`",
-                    self.manifest.name
-                ))
-                .parameters(serde_json::json!({ "type": "object" }));
+            .label(name.clone())
+            .description(format!(
+                "dynamic plugin `{}` capability `tool.{name}`",
+                self.manifest.name
+            ))
+            .parameters(serde_json::json!({ "type": "object" }));
             context.register_tool(tool);
         }
         Ok(())

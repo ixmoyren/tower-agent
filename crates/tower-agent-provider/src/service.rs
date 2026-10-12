@@ -9,13 +9,14 @@ use crate::{AssistantEventStream, PiError, StreamRequest};
 /// 这是 pi `StreamFunction` 的 Rust 对应物。`Service` 只覆盖 `call` 返回的那个
 /// future；响应流本身的超时、取消与背压由 stream-aware 层或编排层处理。
 pub trait StreamService:
-Service<StreamRequest, Response = AssistantEventStream, Error = PiError> + Send + 'static
-{}
+    Service<StreamRequest, Response = AssistantEventStream, Error = PiError> + Send + 'static
+{
+}
 
-impl<T> StreamService for T
-where
-    T: Service<StreamRequest, Response = AssistantEventStream, Error = PiError> + Send + 'static,
-{}
+impl<T> StreamService for T where
+    T: Service<StreamRequest, Response = AssistantEventStream, Error = PiError> + Send + 'static
+{
+}
 
 /// 类型擦除后的 provider 流服务。
 ///

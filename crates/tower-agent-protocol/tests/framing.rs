@@ -64,7 +64,7 @@ fn rejects_frames_over_the_configured_limit() {
     let mut decoder = FrameDecoder::new(FrameDecoderOptions {
         max_frame_length: Some(4),
     })
-        .expect("decoder");
+    .expect("decoder");
     let error = decoder.push(&wire).expect_err("frame too large");
     assert!(
         error.message().contains("exceeds configured limit"),

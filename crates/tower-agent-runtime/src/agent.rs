@@ -272,7 +272,8 @@ fn reduce(core: &Arc<Mutex<Core>>, event: &AgentEvent) {
         AgentEvent::AgentEnd { .. } => {
             core.streaming_message = None;
         }
-        AgentEvent::AgentStart | AgentEvent::TurnStart | AgentEvent::ToolExecutionUpdate { .. } => {}
+        AgentEvent::AgentStart | AgentEvent::TurnStart | AgentEvent::ToolExecutionUpdate { .. } => {
+        }
     }
 }
 
@@ -611,8 +612,8 @@ impl Agent {
                 &signal,
                 stream_fn.clone(),
             )
-                .await
-                .map(|_| ()),
+            .await
+            .map(|_| ()),
             RunMode::Continue => {
                 agent_loop::run_agent_loop_continue(context, config, &sink, &signal, stream_fn)
                     .await
@@ -653,20 +654,20 @@ impl Agent {
         sink.emit(AgentEvent::MessageStart {
             message: agent_message.clone(),
         })
-            .await;
+        .await;
         sink.emit(AgentEvent::MessageEnd {
             message: agent_message.clone(),
         })
-            .await;
+        .await;
         sink.emit(AgentEvent::TurnEnd {
             message: agent_message.clone(),
             tool_results: Vec::new(),
         })
-            .await;
+        .await;
         sink.emit(AgentEvent::AgentEnd {
             messages: vec![agent_message],
         })
-            .await;
+        .await;
     }
 
     /// 设置/替换 system prompt（`None` 表示移除）。

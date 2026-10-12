@@ -26,15 +26,16 @@ use crate::{AssistantEventStream, PiError, StreamRequest};
 
 /// provider 流服务。
 pub trait ProviderService:
-tower::Service<StreamRequest, Response = AssistantEventStream, Error = PiError> + Send + 'static
-{}
+    tower::Service<StreamRequest, Response = AssistantEventStream, Error = PiError> + Send + 'static
+{
+}
 
-impl<T> ProviderService for T
-where
+impl<T> ProviderService for T where
     T: tower::Service<StreamRequest, Response = AssistantEventStream, Error = PiError>
-    + Send
-    + 'static
-{}
+        + Send
+        + 'static
+{
+}
 
 /// 类型擦除的 provider 服务（design D5：运行时集合存放不同实现）。
 pub type BoxProviderService = BoxCloneService<StreamRequest, AssistantEventStream, PiError>;

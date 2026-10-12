@@ -641,7 +641,7 @@ impl StreamState {
                     .filter(|text| !text.is_empty());
                 if let Some(text) = summary.or(content)
                     && let Some(BlockState::Thinking(current)) =
-                    self.blocks.get_mut(slot.content_index)
+                        self.blocks.get_mut(slot.content_index)
                 {
                     *current = text;
                 }

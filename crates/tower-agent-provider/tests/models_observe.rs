@@ -38,9 +38,9 @@ fn openai_model() -> tower_agent_provider::Model {
 }
 
 const ANTHROPIC_OK: &str = concat!(
-"data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
-"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
-"data: {\"type\":\"message_stop\"}\n\n",
+    "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
+    "data: {\"type\":\"message_stop\"}\n\n",
 );
 
 #[tokio::test]
@@ -86,7 +86,7 @@ async fn routes_by_provider_and_api() {
             .await
             .expect("routed to anthropic"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["start", "done"]);
     assert_eq!(anthropic.request_count(), 1);
     assert_eq!(
@@ -112,7 +112,7 @@ async fn routes_by_provider_and_api() {
             .await
             .expect("routed to google"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["done"]);
     assert_eq!(google.request_count(), 1);
     assert_eq!(
@@ -208,7 +208,7 @@ async fn on_response_sees_status_and_headers() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["start", "done"]);
     assert_eq!(
         seen.lock().expect("seen").clone(),
@@ -238,7 +238,7 @@ async fn observe_and_retry_layers_compose() {
             .await
             .expect("established"),
     )
-        .await;
+    .await;
     assert_eq!(kinds(&events), vec!["start", "done"]);
     assert_eq!(transport.request_count(), 2, "第一次 500，第二次成功");
     assert_eq!(

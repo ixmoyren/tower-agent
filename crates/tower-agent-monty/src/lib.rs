@@ -232,17 +232,6 @@ def evil(args):
     }
 
     #[tokio::test]
-    async fn wasmtime_plugin_is_resident_and_protected() {
-        let manager = manager();
-        // wasmtime 由 ModManager 常驻注册：同名 mod 不能顶替沙箱能力。
-        let error = manager
-            .write("wasmtime", "value = 1\n")
-            .await
-            .expect_err("must be blocked");
-        assert!(error.to_string().contains("reserved"), "{error}");
-    }
-
-    #[tokio::test]
     async fn register_static_plugin_protects_name_and_capability() {
         struct HostCap;
 
@@ -254,11 +243,11 @@ def evil(args):
                     version.clone(),
                     tower_agent_plugins::PluginKind::Static,
                 )
-                    .providing(
-                        tower_agent_plugins::CapabilityId::new("tool", "hostcap"),
-                        version,
-                    )
-                    .protected()
+                .providing(
+                    tower_agent_plugins::CapabilityId::new("tool", "hostcap"),
+                    version,
+                )
+                .protected()
             }
 
             fn install(
@@ -453,7 +442,7 @@ def shout(args):
             Arc::new(RecordingHost),
             pool(),
         )
-            .expect("load monty plugin");
+        .expect("load monty plugin");
         plugin.activate().await.expect("activate");
         let result = plugin
             .call_function("upper", &json!("hi"))
@@ -478,7 +467,7 @@ def shout(args):
             Arc::new(Greet),
             pool(),
         )
-            .expect("load monty plugin");
+        .expect("load monty plugin");
         plugin.activate().await.expect("activate");
         let result = plugin
             .call_function("greet", &json!("world"))
@@ -495,7 +484,7 @@ def shout(args):
             Arc::new(RecordingHost),
             pool(),
         )
-            .expect("load monty plugin");
+        .expect("load monty plugin");
         let error = plugin.activate().await.expect_err("must be bounded");
         let message = error.to_string();
         assert!(

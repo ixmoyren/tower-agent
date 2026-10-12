@@ -39,6 +39,7 @@ tower-agent-protocol = { path = "crates/tower-agent-protocol" }
 tower-agent-monty = { path = "crates/tower-agent-monty" }
 tower-agent-wasmtime = { path = "crates/tower-agent-wasmtime" }
 tower-agent-codemode = { path = "crates/tower-agent-codemode" }
+tower-agent = { path = "crates/tower-agent" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

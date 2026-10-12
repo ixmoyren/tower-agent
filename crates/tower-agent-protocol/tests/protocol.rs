@@ -91,7 +91,7 @@ fn validates_server_ids_as_canonical_uuid_v4() {
                 "target": { "serverId": value },
                 "call": {},
             }))
-                .is_err(),
+            .is_err(),
             "request with serverId {value} should fail"
         );
     }
@@ -116,7 +116,7 @@ fn keeps_routed_payloads_opaque_and_strict() {
             "target": { "serverId": SERVER_ID, "extra": 1 },
             "call": {},
         }))
-            .is_err()
+        .is_err()
     );
 
     // session 目标必须三个字段齐全。
@@ -127,7 +127,7 @@ fn keeps_routed_payloads_opaque_and_strict() {
             "target": { "serverId": SERVER_ID, "sessionId": "session-1" },
             "call": {},
         }))
-            .is_err()
+        .is_err()
     );
 }
 
@@ -241,7 +241,7 @@ fn server_hello_must_use_the_current_version_and_a_uuid() {
         parse_server_json(
             json!({ "type": "hello", "version": 8, "serverId": SERVER_ID, "extra": 1 })
         )
-            .is_err()
+        .is_err()
     );
 }
 

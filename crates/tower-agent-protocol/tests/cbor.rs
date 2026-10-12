@@ -191,7 +191,7 @@ fn enforces_depth_byte_and_container_limits() {
             &CborValue::Array(vec![CborValue::Null, CborValue::Null]),
             options
         )
-            .is_err()
+        .is_err()
     );
 }
 

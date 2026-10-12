@@ -3215,7 +3215,9 @@ dependencies = [
 name = "tower-agent"
 version = "0.1.0"
 dependencies = [
+ "tower-agent-codemode",
  "tower-agent-core",
+ "tower-agent-monty",
  "tower-agent-plugin-sdk",
  "tower-agent-plugins",
  "tower-agent-protocol",
@@ -3223,6 +3225,7 @@ dependencies = [
  "tower-agent-runtime",
  "tower-agent-tools",
  "tower-agent-tui",
+ "tower-agent-wasmtime",
 ]
 
 [[package]]
@@ -3235,6 +3238,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower",
+ "tower-agent",
  "tower-agent-codemode",
  "tower-agent-core",
  "tower-agent-monty",

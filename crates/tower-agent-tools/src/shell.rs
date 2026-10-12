@@ -832,19 +832,19 @@ mod tests {
             parse_shell_args(&object(
                 serde_json::json!({ "command": "ls", "timeout": 5 })
             ))
-                .is_ok()
+            .is_ok()
         );
         assert!(
             parse_shell_args(&object(
                 serde_json::json!({ "command": "ls", "timeout": 0 })
             ))
-                .is_err()
+            .is_err()
         );
         assert!(
             parse_shell_args(&object(
                 serde_json::json!({ "command": "ls", "timeout": -1 })
             ))
-                .is_err()
+            .is_err()
         );
     }
 

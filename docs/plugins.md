@@ -365,7 +365,8 @@ pub enum PluginError {
 
 目标（2026-10-12 定）：`tower-agent-wasmtime` 与 `tower-agent-codemode` **都是静态插件**，
 并且与 `tower-agent-monty` 一样 **不允许被动态插件与 JIT 插件用同名方式覆盖能力**；
-静态插件后续再与 **cargo feature** 联动，用 feature 决定「tower-agent 提供哪些能力」。
+静态插件与 **cargo feature** 联动，用 feature 决定「tower-agent 提供哪些能力」；
+插件集合由**组装层**（`tower-agent::assembly`）统一给出，**不在任何会话装配里硬编码**。
 
 ### 16.1 已完成
 
@@ -377,29 +378,42 @@ pub enum PluginError {
   不再静默进入 shadow（与 JIT 行为一致）。
 - **两个插件形态定义好了**（`CodemodePlugin`：静态 / `protected` / `provides("tool","codemode")` / `install` 注册工具；
   `WasmtimePlugin`：静态 / `protected` / `provides("sandbox","wasmtime")` / 空安装）。已确认新增依赖不成环。
+- **组装层落位（2026-10-12 追加）**：宿主静态插件集合收敛到 `tower-agent::assembly::HostPlugins`
+  （门面 crate，依赖 `tower-agent` 的 axum 等宿主同样能用）；`ModManager` 不再自己塞 wasmtime。
+- **能力矩阵 feature 化（2026-10-12 追加）**：`tower-agent` 门面 `[features]` =
+  `sandbox-wasmtime`（wasmtime 占位插件）/ `codemode`（codemode 插件）/ `mods`（monty JIT 宿主），
+  组装层按 feature 决定注册哪些静态插件；`tower-agent-cli` 同样有 `mods` / `codemode` feature
+  （默认都开），关掉后二进制只剩内置工具。两端 `--no-default-features` 都已验证编译。
 
 ### 16.2 待办（按顺序；落地后勾选）
 
-- [x] **1. 登记进注册表**：`ModManager::register_static_plugin(&self, Arc<dyn StaticPlugin>)`
-  （`registry.register_static` + `resolve_and_apply`，解析失败回滚候选）已落地；
-  `WasmtimePlugin` 在 `ModManager::new` **常驻**注册（占名 `wasmtime` + 能力 `sandbox.wasmtime`），
-  `CodemodePlugin` 由 CLI `Session::enable_codemode` **注册插件**（不再 `base_tools.push(tool)`；
-  未启用 mods 时退化为直接追加工具）。名字/能力因此都进 `protected_*`。
+- [x] **1. 组装层 + 登记进注册表**：宿主静态插件集合由 `tower-agent::assembly::HostPlugins`
+  给出（内置工具 + `wasmtime`〔feature `sandbox-wasmtime`〕+ codemode〔feature `codemode`，
+  `with_codemode(session, mounts)`〕）——**与会话无关**，CLI / axum / 测试同一入口。
+  `ModManager::new` 只再叠加自己的 JIT 运行时地基，不再自己塞 wasmtime；
+  `ModManager::register_static_plugin(&self, Arc<dyn StaticPlugin>)` 保留，供运行时追加插件
+  （CLI 的 `--codemode` 走它；未启用 mods 时退化为直接追加工具）。
   —— 这条同时修掉了一个真实缺口：mods 默认启用时工具目录来自 `mods.tools()`，旧的
   `base_tools.push` 根本不会生效，`--codemode` 会静默失灵。
 - [x] **2. 抽出可测的检查**：`PluginRegistry::ensure_not_protected(name)` 成为唯一规则实现，
   `dynamic::load_from_dir` 与 JIT 的 `check_shadowing` 都调它（不再两处漂移）；
-  `tests/resolution.rs` 覆盖「保护名 → Err / 普通名 → Ok」，monty 侧补 `register_static_plugin` +
-  常驻 wasmtime 的用例。
+  `tests/resolution.rs` 覆盖「保护名 → Err / 普通名 → Ok」，monty 侧补 `register_static_plugin` 用例，
+  `tower-agent/tests/assembly.rs` 覆盖组装层（内置工具 + wasmtime/codemode 受保护）。
 - [x] **3. 能力级覆盖的口子**：`resolve()` 现在把「受保护插件提供的能力」收敛到受保护实现——
   `select_providers` 对受保护能力只考虑受保护提供者（JIT 形态优先级 / 更高版本不再能顶掉），
   `CapabilityOverride` 指向非受保护实现时返回新错误 `PluginError::OverrideProtected`
   （与「未知实现」的 `OverrideTargetMissing` 区分）；`tests/resolution.rs` 补三条断言。
-- [ ] **4. 静态插件与 cargo feature 联动**（设计已定、未实现）：把 `tower-agent-codemode` /
-  `tower-agent-wasmtime` 在聚合 crate 里改成 **optional** 依赖，例如
+- [x] **4. 静态插件与 cargo feature 联动**：`tower-agent` 门面加 optional 依赖 +
   `[features] default = ["sandbox-wasmtime", "codemode"]`、`sandbox-wasmtime = ["dep:tower-agent-wasmtime"]`、
-  `codemode = ["dep:tower-agent-codemode"]`，注册处用 `#[cfg(feature = "…")]` 包住；
-  此后 `--codemode` 只剩「会话根策略」这一层含义，能力是否编进来由 feature 决定。见 §11。
-  —— 落地前需先定「注册点在哪个 crate」：目前 `WasmtimePlugin` 在 `tower-agent-monty` 里常驻注册，
-  而 monty 把 `tower-agent-wasmtime` 当硬依赖（沙箱本体），单靠 feature 摘不掉；`tower-agent`
-  门面 crate 目前也不依赖这两个 crate，直接加 optional 依赖只是空转，需要先有真正的组装层。
+  `codemode = ["dep:tower-agent-codemode", "sandbox-wasmtime"]`；组装层用 `#[cfg(feature = "…")]`
+  决定注册哪些插件，`--no-default-features` 下只剩内置工具（已验证编译）。见 §11。
+- [x] **5. mods（monty）也 feature 化**：`tower-agent` 加 `mods = ["dep:tower-agent-monty", "sandbox-wasmtime"]`
+  可选依赖；组装层 `HostPlugins::mods(ui)` 在插件集合之上建 `ModManager`，monty 只再叠加自己的
+  运行时地基。关掉 `mods` 时 monty 连它的 wasmtime 沙箱实现一起不编进来——「monty 硬依赖
+  wasmtime」只剩在 monty 内部成立（要 mods 就必须有沙箱），对宿主不再构成约束。
+- [x] **6. CLI 二进制的 feature 化**：`tower-agent-cli` 加 `[features] default = ["mods", "codemode"]`，
+  `mods` / `codemode` 分别把 `tower-agent-monty` / `tower-agent-codemode` 变成 optional 依赖；
+  `session` 与 `main` 里所有 mods / codemode 触点都 `#[cfg]` 包住——无 mods 时回退到 `base_tools`、
+  作者工具的保留名判定恒假、TUI 不挂 mods 面板；无 codemode 时 `--codemode*` 明确报「本构建未包含」。
+  `tokio` 补 `rt-multi-thread`（少了 monty 的隐式 feature 后，`main` 的多线程 runtime 才成立）。
+  `cargo check/test -p tower-agent-cli --no-default-features` 已验证（只剩内置工具）。

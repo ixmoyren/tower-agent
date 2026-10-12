@@ -87,7 +87,7 @@ pub type ConvertToLlm = Arc<dyn Fn(Vec<AgentMessage>) -> BoxFut<Vec<Message>> + 
 ///
 /// 契约：不得抛错；返回原消息或另一个安全回退值。
 pub type TransformContext =
-Arc<dyn Fn(Vec<AgentMessage>, CancellationToken) -> BoxFut<Vec<AgentMessage>> + Send + Sync>;
+    Arc<dyn Fn(Vec<AgentMessage>, CancellationToken) -> BoxFut<Vec<AgentMessage>> + Send + Sync>;
 
 /// 取回要注入当前 run 的 steer 消息（pi `getSteeringMessages`）。
 pub type SteeringSource = Arc<dyn Fn() -> BoxFut<Vec<AgentMessage>> + Send + Sync>;
@@ -97,11 +97,11 @@ pub type FollowUpSource = Arc<dyn Fn() -> BoxFut<Vec<AgentMessage>> + Send + Syn
 
 /// 工具执行前的钩子（pi `beforeToolCall`）。
 pub type BeforeToolCall =
-Arc<dyn Fn(BeforeToolCallContext) -> BoxFut<Option<BeforeToolCallResult>> + Send + Sync>;
+    Arc<dyn Fn(BeforeToolCallContext) -> BoxFut<Option<BeforeToolCallResult>> + Send + Sync>;
 
 /// 工具执行后的钩子（pi `afterToolCall`）。
 pub type AfterToolCall =
-Arc<dyn Fn(AfterToolCallContext) -> BoxFut<Option<AfterToolCallResult>> + Send + Sync>;
+    Arc<dyn Fn(AfterToolCallContext) -> BoxFut<Option<AfterToolCallResult>> + Send + Sync>;
 
 /// 一个 turn 定稿后的回调（pi `finishTurn`）。
 pub type FinishTurn = Arc<dyn Fn(AgentTurnContext) -> BoxFut<Option<TurnDecision>> + Send + Sync>;
@@ -282,7 +282,7 @@ pub async fn run_agent_loop<S: EventSink>(
         signal,
         stream_fn,
     )
-        .await
+    .await
 }
 
 /// 从当前上下文继续一次 run，不新增 prompt 消息（pi `agentLoopContinue`）。
@@ -360,16 +360,16 @@ async fn run_loop<S: EventSink>(
                     current.clone(),
                     &new_messages,
                 )
-                    .await;
+                .await;
                 sink.emit(AgentEvent::TurnEnd {
                     message: assistant,
                     tool_results: Vec::new(),
                 })
-                    .await;
+                .await;
                 sink.emit(AgentEvent::AgentEnd {
                     messages: new_messages.clone(),
                 })
-                    .await;
+                .await;
                 return Ok(new_messages);
             }
 
@@ -388,7 +388,7 @@ async fn run_loop<S: EventSink>(
                         signal,
                         sink,
                     )
-                        .await?
+                    .await?
                 };
                 tool_results.extend(batch.messages);
                 has_more_tool_calls = !batch.terminate;
@@ -406,19 +406,19 @@ async fn run_loop<S: EventSink>(
                 current.clone(),
                 &new_messages,
             )
-                .await;
+            .await;
             sink.emit(AgentEvent::TurnEnd {
                 message: assistant,
                 tool_results,
             })
-                .await;
+            .await;
             has_completed_turn = true;
 
             if decision == Some(TurnDecision::End) {
                 sink.emit(AgentEvent::AgentEnd {
                     messages: new_messages.clone(),
                 })
-                    .await;
+                .await;
                 return Ok(new_messages);
             }
 
@@ -445,7 +445,7 @@ async fn run_loop<S: EventSink>(
     sink.emit(AgentEvent::AgentEnd {
         messages: new_messages.clone(),
     })
-        .await;
+    .await;
     Ok(new_messages)
 }
 
@@ -463,7 +463,7 @@ async fn await_finish_turn(
         context,
         new_messages: new_messages.to_vec(),
     })
-        .await
+    .await
 }
 
 async fn poll_steering(config: &LoopConfig, signal: &CancellationToken) -> Vec<AgentMessage> {
@@ -486,11 +486,11 @@ async fn emit_message_lifecycle<S: EventSink>(sink: &S, message: &AgentMessage) 
     sink.emit(AgentEvent::MessageStart {
         message: message.clone(),
     })
-        .await;
+    .await;
     sink.emit(AgentEvent::MessageEnd {
         message: message.clone(),
     })
-        .await;
+    .await;
 }
 
 /// 流式获取一次 assistant 响应（pi `streamAssistantResponse`）。
@@ -532,7 +532,7 @@ async fn stream_assistant_response<S: EventSink>(
                 sink.emit(AgentEvent::MessageStart {
                     message: assistant_message(p),
                 })
-                    .await;
+                .await;
             }
             AssistantMessageEvent::Done { message, .. }
             | AssistantMessageEvent::Error { error: message, .. } => {
@@ -548,12 +548,12 @@ async fn stream_assistant_response<S: EventSink>(
                     sink.emit(AgentEvent::MessageStart {
                         message: assistant_message(final_message.clone()),
                     })
-                        .await;
+                    .await;
                 }
                 sink.emit(AgentEvent::MessageEnd {
                     message: assistant_message(final_message.clone()),
                 })
-                    .await;
+                .await;
                 return Ok(final_message);
             }
             update => {
@@ -569,7 +569,7 @@ async fn stream_assistant_response<S: EventSink>(
                         message: assistant_message(p),
                         assistant_message_event: update,
                     })
-                        .await;
+                    .await;
                 }
             }
         }
@@ -593,12 +593,12 @@ async fn stream_assistant_response<S: EventSink>(
         sink.emit(AgentEvent::MessageStart {
             message: assistant_message(final_message.clone()),
         })
-            .await;
+        .await;
     }
     sink.emit(AgentEvent::MessageEnd {
         message: assistant_message(final_message.clone()),
     })
-        .await;
+    .await;
     Ok(final_message)
 }
 
@@ -662,7 +662,7 @@ async fn execute_tool_calls<S: EventSink>(
             signal,
             sink,
         )
-            .await)
+        .await)
     } else {
         Ok(execute_tool_calls_parallel(
             context,
@@ -672,7 +672,7 @@ async fn execute_tool_calls<S: EventSink>(
             signal,
             sink,
         )
-            .await)
+        .await)
     }
 }
 
@@ -696,7 +696,7 @@ async fn execute_tool_calls_sequential<S: EventSink>(
             config,
             signal,
         )
-            .await
+        .await
         {
             Preparation::Immediate { result, is_error } => FinalizedToolCall {
                 tool_call: tool_call.clone(),
@@ -709,7 +709,7 @@ async fn execute_tool_calls_sequential<S: EventSink>(
                     signal,
                     update_emitter(tool_call.clone(), sink.clone()),
                 )
-                    .await;
+                .await;
                 finalize_executed_tool_call(
                     context.clone(),
                     assistant_message,
@@ -717,7 +717,7 @@ async fn execute_tool_calls_sequential<S: EventSink>(
                     executed,
                     config,
                 )
-                    .await
+                .await
             }
         };
         emit_tool_execution_end(&finalized, sink).await;
@@ -756,7 +756,7 @@ async fn execute_tool_calls_parallel<S: EventSink>(
             config,
             signal,
         )
-            .await
+        .await
         {
             Preparation::Immediate { result, is_error } => {
                 let finalized = FinalizedToolCall {
@@ -788,7 +788,7 @@ async fn execute_tool_calls_parallel<S: EventSink>(
                         &signal,
                         update_emitter(prepared.tool_call.clone(), sink.clone()),
                     )
-                        .await;
+                    .await;
                     let finalized = finalize_executed_tool_call(
                         context.clone(),
                         &assistant_message,
@@ -796,7 +796,7 @@ async fn execute_tool_calls_parallel<S: EventSink>(
                         executed,
                         &config,
                     )
-                        .await;
+                    .await;
                     emit_tool_execution_end(&finalized, &sink).await;
                     finalized
                 }));
@@ -852,7 +852,7 @@ async fn prepare_tool_call(
             args: args.clone(),
             context: context.clone(),
         })
-            .await;
+        .await;
         if signal.is_cancelled() {
             return Preparation::Immediate {
                 result: error_tool_result("Operation aborted"),
@@ -959,7 +959,7 @@ async fn finalize_executed_tool_call(
             is_error,
             context,
         })
-            .await;
+        .await;
 
         if let Some(override_result) = override_result {
             // 与 pi 一致：只替换 content 而不给 structured_content 时丢弃结构化内容。
@@ -1024,8 +1024,8 @@ async fn fail_truncated_tool_calls<S: EventSink>(
 fn should_terminate_tool_batch(finalized_calls: &[FinalizedToolCall]) -> bool {
     !finalized_calls.is_empty()
         && finalized_calls
-        .iter()
-        .all(|finalized| finalized.result.terminate == Some(true))
+            .iter()
+            .all(|finalized| finalized.result.terminate == Some(true))
 }
 
 async fn emit_tool_execution_start<S: EventSink>(tool_call: &ToolCall, sink: &S) {
@@ -1034,7 +1034,7 @@ async fn emit_tool_execution_start<S: EventSink>(tool_call: &ToolCall, sink: &S)
         tool_name: tool_call.name.clone(),
         args: JsonValue::Object(tool_call.arguments.as_object().clone()),
     })
-        .await;
+    .await;
 }
 
 async fn emit_tool_execution_end<S: EventSink>(finalized: &FinalizedToolCall, sink: &S) {
@@ -1044,7 +1044,7 @@ async fn emit_tool_execution_end<S: EventSink>(finalized: &FinalizedToolCall, si
         result: finalized.result.clone(),
         is_error: finalized.is_error,
     })
-        .await;
+    .await;
 }
 
 async fn emit_tool_result_message<S: EventSink>(message: &ToolResultMessage, sink: &S) {
@@ -1052,7 +1052,7 @@ async fn emit_tool_result_message<S: EventSink>(message: &ToolResultMessage, sin
     sink.emit(AgentEvent::MessageStart {
         message: message.clone(),
     })
-        .await;
+    .await;
     sink.emit(AgentEvent::MessageEnd { message }).await;
 }
 

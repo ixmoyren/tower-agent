@@ -218,7 +218,7 @@ pub async fn run_tui(
         &submissions,
         host.as_ref(),
     )
-        .await;
+    .await;
 
     let mut terminal = tui.into_terminal();
     let restored = restore_terminal(&mut terminal);

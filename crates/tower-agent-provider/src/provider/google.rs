@@ -455,13 +455,13 @@ impl StreamState {
         // Google 可能不给 id，也可能重复：两种情况都自己生成一个唯一 id（pi 同样处理）。
         let id = match provided_id {
             Some(id)
-            if !id.is_empty()
-                && !self.output.content.iter().any(
-                |block| matches!(block, ContentBlock::ToolCall(call) if call.id == id),
-            ) =>
-                {
-                    id
-                }
+                if !id.is_empty()
+                    && !self.output.content.iter().any(
+                        |block| matches!(block, ContentBlock::ToolCall(call) if call.id == id),
+                    ) =>
+            {
+                id
+            }
             _ => {
                 self.tool_call_counter += 1;
                 format!(
@@ -695,12 +695,12 @@ fn convert_contents(messages: &[Message]) -> Vec<JsonValue> {
 fn push_content(contents: &mut Vec<JsonValue>, role: &str, parts: Vec<JsonValue>) {
     match contents.last_mut() {
         Some(JsonValue::Object(last))
-        if last.get("role").and_then(JsonValue::as_str) == Some(role) =>
-            {
-                if let Some(JsonValue::Array(existing)) = last.get_mut("parts") {
-                    existing.extend(parts);
-                }
+            if last.get("role").and_then(JsonValue::as_str) == Some(role) =>
+        {
+            if let Some(JsonValue::Array(existing)) = last.get_mut("parts") {
+                existing.extend(parts);
             }
+        }
         _ => contents.push(json!({ "role": role, "parts": parts })),
     }
 }

@@ -69,8 +69,8 @@ async fn text_turn_matches_the_pi_event_lifecycle() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     assert_eq!(
         sink.kinds(),
@@ -121,8 +121,8 @@ async fn unknown_tool_produces_an_error_result_and_continues() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     let ends: Vec<_> = sink
         .events()
@@ -197,8 +197,8 @@ async fn parallel_tools_end_in_completion_order_and_persist_in_source_order() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     let end_order: Vec<String> = sink
         .events()
@@ -257,8 +257,8 @@ async fn length_truncated_messages_fail_every_tool_call() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     assert_eq!(
         registered.call_count(),
@@ -311,8 +311,8 @@ async fn terminate_ends_the_batch_after_one_request() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     assert_eq!(
         sink.kinds()
@@ -364,8 +364,8 @@ async fn before_tool_call_can_block_a_call() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     assert_eq!(registered.call_count(), 0);
     let end = sink
@@ -411,8 +411,8 @@ async fn finish_turn_end_stops_without_another_request() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     assert_eq!(
         sink.kinds()
@@ -440,8 +440,8 @@ async fn error_stream_stops_the_run_and_reports_the_message() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     let last = sink.events().into_iter().last().expect("agent_end");
     let AgentEvent::AgentEnd { messages } = last else {
@@ -491,8 +491,8 @@ async fn sequential_mode_runs_one_tool_at_a_time() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     let order: Vec<String> = sink
         .events()
@@ -541,8 +541,8 @@ async fn steering_messages_are_injected_after_the_turn() {
         &signal,
         stream.clone(),
     )
-        .await
-        .expect("run succeeds");
+    .await
+    .expect("run succeeds");
 
     assert_eq!(
         sink.kinds()
@@ -584,9 +584,9 @@ async fn loop_future_is_send() {
             &signal,
             stream,
         )
-            .await
-    })
         .await
-        .expect("joins")
-        .expect("run succeeds");
+    })
+    .await
+    .expect("joins")
+    .expect("run succeeds");
 }

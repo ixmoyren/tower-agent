@@ -136,13 +136,14 @@ impl Stream for OnceStream {
 ///
 /// 这是 pi `AgentTool.execute` 的 Rust 对应物。
 pub trait AgentToolService:
-Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError> + Send + 'static
-{}
+    Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError> + Send + 'static
+{
+}
 
-impl<T> AgentToolService for T
-where
-    T: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError> + Send + 'static,
-{}
+impl<T> AgentToolService for T where
+    T: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError> + Send + 'static
+{
+}
 
 /// 类型擦除后的工具服务，便于按名存进路由表。
 pub type BoxToolService = BoxCloneService<ToolCallRequest, ToolResultStream, AgentError>;

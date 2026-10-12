@@ -98,8 +98,8 @@ pub const EMBEDDED_SANDBOX: &[u8] =
 
 /// 内嵌的命令层组件（由 `wasm/coreutils-wasm/generate.sh` 生成并入库）。
 pub const EMBEDDED_COREUTILS: &[u8] = include_bytes!(concat!(
-env!("CARGO_MANIFEST_DIR"),
-"/assets/coreutils.wasm"
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/coreutils.wasm"
 ));
 
 /// `bindgen!` 生成的组件绑定（生成的项没有 doc，这里统一放行）。
@@ -393,11 +393,11 @@ impl CodemodeHost {
                 move |_store: wasmtime::StoreContextMut<'_, HostState>,
                       (name, args, opts): (String, Vec<String>, ExecOpts)|
                       -> Box<
-                          dyn std::future::Future<
-                              Output = wasmtime::Result<(Result<ExecResult, String>,)>,
-                          > + Send
-                          + '_,
-                      > {
+                    dyn std::future::Future<
+                            Output = wasmtime::Result<(Result<ExecResult, String>,)>,
+                        > + Send
+                        + '_,
+                > {
                     // 宿主 import 走异步：命令被 `await`，于是它的超时能**取消**整个调用，
                     // 而不是把宿主线程一起卡住（epoch 只能打断正在执行的 wasm 指令）。
                     let backend = Arc::clone(&backend);
@@ -444,8 +444,8 @@ impl CodemodeHost {
             self.engine.component(),
             self.engine.linker(),
         )
-            .await
-            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+        .await
+        .map_err(|e| CodemodeError::Link(e.to_string()))?;
         let opts = RunOpts {
             cwd: None,
             timeout_ms: Some(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
@@ -461,9 +461,9 @@ impl CodemodeHost {
                 .tower_agent_codemode_sandbox()
                 .call_run(&mut store, code, &opts),
         )
-            .await
-            .map_err(|_| CodemodeError::Script(format!("脚本超时（{} ms）", budget.as_millis())))?
-            .map_err(|e| CodemodeError::Script(describe(&e)))?;
+        .await
+        .map_err(|_| CodemodeError::Script(format!("脚本超时（{} ms）", budget.as_millis())))?
+        .map_err(|e| CodemodeError::Script(describe(&e)))?;
         outcome.map_err(CodemodeError::Script)
     }
 

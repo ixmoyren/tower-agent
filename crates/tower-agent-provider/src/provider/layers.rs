@@ -238,12 +238,12 @@ impl<S> TimeoutService<S> {
 impl<S> tower::Service<crate::StreamRequest> for TimeoutService<S>
 where
     S: tower::Service<
-        crate::StreamRequest,
-        Response = crate::AssistantEventStream,
-        Error = crate::PiError,
-    > + Clone
-    + Send
-    + 'static,
+            crate::StreamRequest,
+            Response = crate::AssistantEventStream,
+            Error = crate::PiError,
+        > + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = crate::AssistantEventStream;

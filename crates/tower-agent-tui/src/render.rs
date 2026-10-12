@@ -44,7 +44,7 @@ pub fn render_with_plugins(
         Constraint::Length(EDITOR_HEIGHT),
         Constraint::Length(1),
     ])
-        .split(area);
+    .split(area);
 
     render_header(frame, chunks[0], state, plugins);
     render_transcript(frame, chunks[1], state, plugins);
@@ -206,8 +206,8 @@ pub fn transcript_lines_with_plugins(
             && let Some(tool) = &entry.tool
             && let Some(result) = &tool.result
             && let Some(custom) = plugins
-            .iter()
-            .find_map(|plugin| plugin.render_tool_result(&tool.name, result, width))
+                .iter()
+                .find_map(|plugin| plugin.render_tool_result(&tool.name, result, width))
         {
             lines.extend(custom);
             continue;
