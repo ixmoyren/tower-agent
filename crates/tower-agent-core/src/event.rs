@@ -2,6 +2,8 @@
 
 use tower_agent_provider::{AssistantMessageEvent, JsonValue, Message, ToolResultMessage};
 
+use serde::{Deserialize, Serialize};
+
 use crate::AgentToolResult;
 
 /// agent 消息：pi 的 LLM 消息加上应用自定义消息扩展点（pi `AgentMessage`）。
@@ -10,7 +12,7 @@ use crate::AgentToolResult;
 /// 应用通过 declaration merging 增加自定义消息。Rust 没有等价的开放联合，因此
 /// 退化为不透明 JSON 值；自定义消息应是带 `role` 字段的 JSON 对象，才能在编排层
 /// 参与按 role 的判断（例如插入 system 消息、检查最后一条消息的角色）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentMessage {
     /// pi 基础 LLM 消息。
     Message(Message),

@@ -1,0 +1,31 @@
+[package]
+name = "tower-agent-turso"
+description = "tower-agent default storage backend: embedded Turso (SQLite-compatible) implementing the storage traits, with an application-layer tokenized full-text index for Chinese-aware recall and a background write queue."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tower-agent-core = { workspace = true }
+tower-agent-storage = { workspace = true }
+dirs = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+
+turso = { version = "0.8.3", default-features = false, features = ["fts"] }
+
+jieba-rs = "0.11"
+stop-words = "0.10"
+unicode-segmentation = "1"
+waken_snowball = "0.1"
+whichlang = "0.1"
+
+[dev-dependencies]
+tower-agent-provider = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }

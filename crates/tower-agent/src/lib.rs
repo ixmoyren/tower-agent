@@ -28,6 +28,8 @@ pub use tower_agent_plugin_sdk as plugin_sdk;
 pub use tower_agent_protocol as protocol;
 #[cfg(feature = "tui")]
 pub use tower_agent_tui as tui;
+#[cfg(feature = "storage-turso")]
+pub use tower_agent_turso as turso;
 
 pub use tower_agent_core::{
     AfterToolResultLayer, AgentError, AgentEvent, AgentEventStream, AgentMessage, AgentRequest,

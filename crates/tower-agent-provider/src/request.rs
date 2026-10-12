@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use crate::{JsonObject, JsonValue, Message, Model};
@@ -10,7 +11,7 @@ use crate::{JsonObject, JsonValue, Message, Model};
 pub type ProviderHeaders = BTreeMap<String, Option<String>>;
 
 /// pi `ThinkingLevel`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ThinkingLevel {
     /// 最低思考预算。
     Minimal,
@@ -27,7 +28,7 @@ pub enum ThinkingLevel {
 }
 
 /// pi `ModelThinkingLevel`（`"off" | ThinkingLevel`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ModelThinkingLevel {
     /// 关闭思考。
     Off,
@@ -62,7 +63,7 @@ pub struct ThinkingBudgets {
 }
 
 /// 延迟响应的持久句柄（pi `DeferredHandle`）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeferredHandle {
     /// provider 标识。
     pub provider: String,

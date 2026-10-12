@@ -4,10 +4,11 @@ use crate::{
     json::{JsonObject, JsonValue},
     request::{DeferredHandle, ModelThinkingLevel},
 };
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, ops::Deref};
 
 /// transcript 中某个时间点的工具声明（pi `Tool` 的子集）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tool {
     /// 工具名，用于按名分发。
     pub name: String,
@@ -20,14 +21,14 @@ pub struct Tool {
 }
 
 /// 对已声明的工具的引用（pi `ToolReference`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolReference {
     /// 被引用工具的名字。
     pub name: String,
 }
 
 /// 文本内容块（pi `TextContent`）。
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct TextContent {
     /// 文本本身。
     pub text: String,
@@ -36,7 +37,7 @@ pub struct TextContent {
 }
 
 /// 思考内容块（pi `ThinkingContent`）。
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ThinkingContent {
     /// 思考文本。
     pub thinking: String,
@@ -47,7 +48,7 @@ pub struct ThinkingContent {
 }
 
 /// 图片内容块（pi `ImageContent`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageContent {
     /// base64 编码的图片数据。
     pub data: String,
@@ -56,7 +57,7 @@ pub struct ImageContent {
 }
 
 /// 模型发起的工具调用（pi `ToolCall`）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     /// 工具调用 id。
     pub id: String,
@@ -75,7 +76,7 @@ pub struct ToolCall {
 /// 通过 [`Deref`] 可以直接当 `JsonObject` 用；需要按类型取值时用
 /// [`Arguments::arg_str`] / [`Arguments::opt_str`] / [`Arguments::opt_u64`] /
 /// [`Arguments::opt_f64`]。
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Arguments(JsonObject);
 
 impl Arguments {
@@ -147,7 +148,7 @@ impl From<JsonObject> for Arguments {
 
 /// 内容块联合类型，对应 pi 的
 /// `TextContent | ThinkingContent | ImageContent | ToolCall`。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ContentBlock {
     /// 文本块。
     Text(TextContent),
@@ -160,7 +161,7 @@ pub enum ContentBlock {
 }
 
 /// 一次 assistant 响应的 token 用量与成本（pi `Usage`）。
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Usage {
     /// 输入 token 数。
     pub input: u64,
@@ -181,7 +182,7 @@ pub struct Usage {
 }
 
 /// 用量成本明细（pi `Usage.cost`）。
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct UsageCost {
     /// 输入成本。
     pub input: f64,
@@ -196,7 +197,7 @@ pub struct UsageCost {
 }
 
 /// 响应的终止原因（pi `StopReason`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StopReason {
     /// 响应尚未结束。
     Pending,
@@ -230,7 +231,7 @@ impl StopReason {
 }
 
 /// 用户消息内容：纯字符串或内容块数组（pi union）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum UserContent {
     /// 纯文本内容。
     Text(String),
@@ -239,7 +240,7 @@ pub enum UserContent {
 }
 
 /// system 指令与工具声明（pi `SystemMessage`）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemMessage {
     /// 指令文本；开头消息里是 base prompt，之后是追加指令。
     pub content: Vec<ContentBlock>,
@@ -254,7 +255,7 @@ pub struct SystemMessage {
 }
 
 /// 用户消息（pi `UserMessage`）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserMessage {
     /// 用户消息内容。
     pub content: UserContent,
@@ -263,7 +264,7 @@ pub struct UserMessage {
 }
 
 /// assistant 消息（pi `AssistantMessage`）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantMessage {
     /// 响应内容块（文本、思考、工具调用）。
     pub content: Vec<ContentBlock>,
@@ -298,7 +299,7 @@ pub struct AssistantMessage {
 }
 
 /// 工具结果消息（pi `ToolResultMessage`）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolResultMessage {
     /// 对应的工具调用 id。
     pub tool_call_id: String,
@@ -315,7 +316,7 @@ pub struct ToolResultMessage {
 }
 
 /// 会话消息联合类型（pi `Message`）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Message {
     /// system 消息。
     System(SystemMessage),
