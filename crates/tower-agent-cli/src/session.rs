@@ -23,6 +23,9 @@ use tower_agent_core::UiState;
 use tower_agent_monty::ModManager;
 #[cfg(feature = "codemode")]
 use tower_agent_plugins::StaticPlugin as _;
+use tower_agent_storage::{ConfigScope, ProviderCredential};
+
+use crate::store::CliStore;
 use tower_agent_provider::{
     BoxStreamService, Message, Model, ModelThinkingLevel, UserContent, UserMessage,
 };
@@ -48,6 +51,11 @@ pub struct Session {
     mods: Option<Arc<ModManager>>,
     /// 工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
     tool_filter: Mutex<ToolFilter>,
+    /// 配置存储：`/login` `/model` `/thinking` 会把结果写回（对齐 pi 的 `auth.json` /
+    /// `settings.json`）；未接入存储时为 `None`。
+    store: Option<Arc<CliStore>>,
+    /// transcript 持久化句柄（会话按项目归属）；未落盘时为 `None`。
+    transcript: Option<Arc<crate::store::Transcript>>,
 }
 
 /// 工具过滤：`none` 清空，`allow` 白名单（空 = 全放行），`exclude` 黑名单。
@@ -129,8 +137,18 @@ impl Session {
         Ok(())
     }
 
-    /// 用显式模型构造会话。
+    /// 用显式模型构造会话（空 transcript）。
     pub fn with_model(cwd: impl AsRef<Path>, stream: BoxStreamService, model: Model) -> Self {
+        Self::with_history(cwd, stream, model, Vec::new())
+    }
+
+    /// 用显式模型 + 初始 transcript 构造会话（续接历史记录时用）。
+    pub fn with_history(
+        cwd: impl AsRef<Path>,
+        stream: BoxStreamService,
+        model: Model,
+        messages: Vec<AgentMessage>,
+    ) -> Self {
         let cwd = cwd.as_ref().to_path_buf();
         let system_prompt = format!(
             "你是 tower-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
@@ -172,6 +190,7 @@ impl Session {
         options.initial.tools = initial_tools;
         options.initial.model = Some(model);
         options.initial.system_prompt = Some(system_prompt);
+        options.initial.messages = messages;
         let (service, control) = crate::stack::assemble(options);
         Self {
             service: Mutex::new(service),
@@ -181,7 +200,24 @@ impl Session {
             #[cfg(feature = "mods")]
             mods,
             tool_filter: Mutex::new(ToolFilter::default()),
+            store: None,
+            transcript: None,
         }
+    }
+
+    /// 接入 transcript 持久化句柄。
+    #[must_use]
+    pub fn with_transcript(mut self, transcript: Arc<crate::store::Transcript>) -> Self {
+        self.transcript = Some(transcript);
+        self
+    }
+
+    /// 接入配置存储：`/login` `/model` `/thinking` 会把结果写回
+    /// （对齐 pi 的 `auth.json` / `settings.json`）。
+    #[must_use]
+    pub fn with_store(mut self, store: Arc<CliStore>) -> Self {
+        self.store = Some(store);
+        self
     }
 
     /// 会话的工作目录。
@@ -236,6 +272,15 @@ impl Session {
     /// 替换思考级别（`--thinking` 与 `/thinking`）。
     pub fn set_thinking_level(&self, level: ModelThinkingLevel) {
         self.control.set_thinking_level(level);
+    }
+
+    /// 写回一项配置（未接入存储时是空操作）。
+    fn persist_config(&self, key: &str, value: serde_json::Value) {
+        if let Some(store) = &self.store {
+            // 运行期命令（`/model` `/thinking`）写的是**用户级**偏好；项目级由 CLI
+            // 显式指定作用域（`--config-scope project`）写入。
+            store.queue_set_config(ConfigScope::User, key, value);
+        }
     }
 
     /// 设置工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
@@ -351,7 +396,23 @@ impl Session {
         let outcome = service.oneshot(request).await.map(|_| ());
         // 本轮 mod 注册的工具在下一轮生效。
         self.refresh_tools();
+        // 无论成功 / 取消 / 失败，都把本轮新增的消息落盘（`sync` 只追加尾巴）。
+        self.persist_transcript().await;
         outcome
+    }
+
+    /// 把当前 transcript 的未落盘部分写进存储（未接入存储时是空操作）。
+    async fn persist_transcript(&self) {
+        let Some(transcript) = &self.transcript else {
+            return;
+        };
+        let state = self.state();
+        if let Err(error) = transcript
+            .sync(&state.messages, Some(&state.model.id))
+            .await
+        {
+            eprintln!("transcript 落盘失败：{error}");
+        }
     }
 }
 
@@ -426,12 +487,17 @@ pub fn available_providers() -> String {
 
 impl tower_agent_tui::CommandHost for Session {
     fn new_session(&self) -> Result<(), String> {
-        self.reset().map_err(|error| error.to_string())
+        self.reset().map_err(|error| error.to_string())?;
+        // `/new` 开一个新会话记录：换 id、清零「已落盘条数」，下一轮 sync 写新的会话。
+        if let Some(transcript) = &self.transcript {
+            transcript.reset();
+        }
+        Ok(())
     }
 
     fn session_info(&self) -> Vec<String> {
         let state = self.state();
-        vec![
+        let mut lines = vec![
             format!("cwd: {}", self.cwd().display()),
             format!(
                 "model: {} (provider {} / api {})",
@@ -451,7 +517,11 @@ impl tower_agent_tui::CommandHost for Session {
                     "idle"
                 }
             ),
-        ]
+        ];
+        if let Some(transcript) = &self.transcript {
+            lines.insert(0, format!("session: {}", transcript.id()));
+        }
+        lines
     }
 
     fn model(&self, arg: Option<&str>) -> Result<String, String> {
@@ -521,6 +591,12 @@ impl tower_agent_tui::CommandHost for Session {
 
         let model = crate::provider::model_for(kind, model_id);
         self.set_model(model.clone());
+        // 写回 pi `settings.json` 的 `defaultProvider` / `defaultModel`。
+        self.persist_config(
+            crate::store::DEFAULT_PROVIDER,
+            serde_json::json!(model.provider),
+        );
+        self.persist_config(crate::store::DEFAULT_MODEL, serde_json::json!(model.id));
         Ok(format!(
             "model switched to: {} (provider {})",
             model.id, model.provider
@@ -537,6 +613,11 @@ impl tower_agent_tui::CommandHost for Session {
             Some(value) => match parse_thinking_level(value) {
                 Some(level) => {
                     self.set_thinking_level(level);
+                    // 写回 pi `settings.json` 的 `defaultThinkingLevel`。
+                    self.persist_config(
+                        crate::store::DEFAULT_THINKING_LEVEL,
+                        serde_json::json!(thinking_level_name(level)),
+                    );
                     Ok(format!(
                         "thinking level set to: {}",
                         thinking_level_name(level)
@@ -578,6 +659,30 @@ impl tower_agent_tui::CommandHost for Session {
 
         self.control.set_stream(setup.stream_fn());
         self.control.set_model(setup.model.clone());
+        // 对齐 pi：`/login` 把凭据写进 `auth.json`、默认 provider / 模型写进 `settings.json`。
+        if let Some(store) = &self.store {
+            let model_id = setup.model.id.clone();
+            // 只持久化显式给出的 key；`/login <provider>`（回退到环境变量）不把环境里的 key 落盘。
+            if let Some(api_key) = api_key {
+                store.queue_put_credential(ProviderCredential {
+                    provider: kind.id().to_string(),
+                    api_key: api_key.to_string(),
+                    model: Some(model_id.clone()),
+                    base_url: None,
+                    updated_at: tower_agent_runtime::agent_loop::now_ms(),
+                });
+            }
+            store.queue_set_config(
+                ConfigScope::User,
+                crate::store::DEFAULT_PROVIDER,
+                serde_json::json!(kind.id()),
+            );
+            store.queue_set_config(
+                ConfigScope::User,
+                crate::store::DEFAULT_MODEL,
+                serde_json::json!(model_id),
+            );
+        }
         Ok(format!(
             "provider configured: {} (model {})",
             kind.canonical_name(),
@@ -1143,6 +1248,116 @@ mod tests {
                 .contains("/login <provider> <api-key>")
         );
         assert!(session.login(Some("nope key")).is_err());
+    }
+
+    #[tokio::test]
+    async fn command_host_persists_config_to_store() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let storage = tower_agent_turso::TursoStorage::in_memory()
+            .await
+            .expect("open in-memory");
+        let store = Arc::new(crate::store::CliStore::from_storage(
+            storage,
+            tokio::runtime::Handle::current(),
+        ));
+        let setup = crate::provider::build_with_api_key(
+            crate::provider::ProviderKind::Anthropic,
+            Some("claude-test"),
+            crate::provider::ProviderStackOptions::default(),
+            Some("test-key"),
+        )
+        .expect("provider setup");
+        let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone())
+            .with_store(Arc::clone(&store));
+
+        // `/model` / `/thinking` 写回 settings.json 的默认项。
+        session.model(Some("claude-other")).expect("switch model");
+        session.thinking(Some("high")).expect("set thinking");
+        store.flush().await.expect("flush");
+
+        let snapshot = store.snapshot(None).await;
+        assert_eq!(snapshot.default_provider.as_deref(), Some("anthropic"));
+        assert_eq!(snapshot.default_model.as_deref(), Some("claude-other"));
+        assert_eq!(snapshot.default_thinking_level.as_deref(), Some("high"));
+
+        // `/login <provider> <api-key>` 把凭据写回 auth.json 等价物，并更新默认项。
+        session
+            .login(Some("deepseek sk-secret"))
+            .expect("login deepseek");
+        store.flush().await.expect("flush");
+
+        let snapshot = store.snapshot(None).await;
+        assert_eq!(
+            snapshot.credential("deepseek").map(|c| c.api_key.as_str()),
+            Some("sk-secret")
+        );
+        assert_eq!(snapshot.default_provider.as_deref(), Some("deepseek"));
+        assert_eq!(snapshot.default_model.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[tokio::test]
+    async fn transcript_persists_across_turns_and_resumes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let storage = tower_agent_turso::TursoStorage::in_memory()
+            .await
+            .expect("open in-memory");
+        let store = Arc::new(crate::store::CliStore::from_storage(
+            storage,
+            tokio::runtime::Handle::current(),
+        ));
+        let project = crate::store::project_id(dir.path());
+        let transcript = Arc::new(crate::store::Transcript::new(
+            Arc::clone(&store),
+            project.clone(),
+            None,
+            0,
+        ));
+
+        let session = Session::with_model(dir.path(), FauxProvider::new().boxed(), model())
+            .with_transcript(Arc::clone(&transcript));
+        session.ask("你好").await.expect("turn succeeds");
+        store.flush().await.expect("flush");
+
+        let id = transcript.id();
+        let saved = store.load_transcript(&id).await;
+        assert_eq!(saved.len(), session.state().messages.len());
+        assert!(
+            saved.len() >= 3,
+            "system + user + assistant, got {}",
+            saved.len()
+        );
+
+        // 会话记录归属当前项目，标题取第一条用户消息。
+        let record = store
+            .latest_session(&project)
+            .await
+            .expect("latest session");
+        assert_eq!(record.id, id);
+        assert_eq!(record.title.as_deref(), Some("你好"));
+
+        // 续接：用落盘的 transcript 构造新会话，历史被恢复。
+        let resumed = Session::with_history(
+            dir.path(),
+            FauxProvider::new().boxed(),
+            model(),
+            store.load_transcript(&id).await,
+        );
+        assert_eq!(resumed.state().messages.len(), saved.len());
+
+        // `/new` 之后写到新的会话 id。
+        session.new_session().expect("new session");
+        let new_id = transcript.id();
+        assert_ne!(new_id, id);
+        session.ask("再来一轮").await.expect("turn succeeds");
+        store.flush().await.expect("flush");
+        let fresh = store.load_transcript(&new_id).await;
+        assert!(fresh.len() >= 3, "new session, got {}", fresh.len());
+        assert!(
+            store
+                .latest_session(&project)
+                .await
+                .is_some_and(|r| r.id == new_id)
+        );
     }
 
     #[tokio::test]

@@ -8,8 +8,6 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-# 外部依赖：只在 **2 个及以上** crate 使用。
-# 只被单个 crate 使用的依赖放在该 crate 自己的 `[dependencies]` 里（见各 crate）。
 tower = { version = "0.5.3", features = ["util", "timeout", "retry", "limit", "load-shed", "steer", "filter", "buffer"] }
 dirs = "7"
 futures-core = "0.3"
@@ -27,7 +25,6 @@ tokio-util = { version = "0.7", default-features = false }
 wasmtime = { version = "49", default-features = false, features = ["cranelift", "component-model", "cache", "runtime", "std", "parallel-compilation", "async"] }
 wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
 
-# 内部子 crate：crate 之间互相依赖一律走 `workspace = true`，路径只在这里声明一次。
 tower-agent-core = { path = "crates/tower-agent-core" }
 tower-agent-runtime = { path = "crates/tower-agent-runtime" }
 tower-agent-provider = { path = "crates/tower-agent-provider" }
@@ -49,3 +46,8 @@ missing_docs = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+[patch.crates-io]
+ratatui-core = { git = "https://github.com/ratatui/ratatui.git" }
+ratatui-widgets = { git = "https://github.com/ratatui/ratatui.git" }
+ratatui-termina = { git = "https://github.com/ratatui/ratatui.git" }

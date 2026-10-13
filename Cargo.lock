@@ -898,20 +898,6 @@ dependencies = [
 
 [[package]]
 name = "compact_str"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dfdd1c2274d9aa354115b09dc9a901d6c5576818cdf70d14cae2bdb47df00ab"
-dependencies = [
- "castaway",
- "cfg-if",
- "itoa",
- "rustversion",
- "ryu",
- "static_assertions",
-]
-
-[[package]]
-name = "compact_str"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79fcda08c33bb58b97008b2cdada6622500e949e060f5913361763121abd2416"
@@ -3775,30 +3761,11 @@ version = "0.30.2"
 source = "git+https://github.com/ratatui/ratatui.git#d1ef782b48ddf0cb825c111d4d8b9adef572c0e1"
 dependencies = [
  "instability",
- "ratatui-core 0.1.2 (git+https://github.com/ratatui/ratatui.git)",
+ "ratatui-core",
  "ratatui-macros",
- "ratatui-termina 0.1.0 (git+https://github.com/ratatui/ratatui.git)",
- "ratatui-widgets 0.3.2 (git+https://github.com/ratatui/ratatui.git)",
+ "ratatui-termina",
+ "ratatui-widgets",
  "serde",
-]
-
-[[package]]
-name = "ratatui-core"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbb175c433c8e28a809d1f5773a2ae96e68c0ce40db865cbab1020bf33ae479c"
-dependencies = [
- "bitflags 2.13.2",
- "compact_str 0.9.1",
- "hashbrown 0.17.1",
- "itertools 0.14.0",
- "kasuari",
- "lru 0.18.5",
- "strum 0.28.0",
- "thiserror 2.0.21",
- "unicode-segmentation",
- "unicode-truncate 2.0.1",
- "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -3807,7 +3774,7 @@ version = "0.1.2"
 source = "git+https://github.com/ratatui/ratatui.git#d1ef782b48ddf0cb825c111d4d8b9adef572c0e1"
 dependencies = [
  "bitflags 2.13.2",
- "compact_str 0.10.0",
+ "compact_str",
  "critical-section",
  "hashbrown 0.17.1",
  "itertools 0.15.0",
@@ -3818,7 +3785,7 @@ dependencies = [
  "strum 0.28.0",
  "thiserror 2.0.21",
  "unicode-segmentation",
- "unicode-truncate 3.0.0",
+ "unicode-truncate",
  "unicode-width 0.2.2",
 ]
 
@@ -3827,19 +3794,8 @@ name = "ratatui-macros"
 version = "0.7.2"
 source = "git+https://github.com/ratatui/ratatui.git#d1ef782b48ddf0cb825c111d4d8b9adef572c0e1"
 dependencies = [
- "ratatui-core 0.1.2 (git+https://github.com/ratatui/ratatui.git)",
- "ratatui-widgets 0.3.2 (git+https://github.com/ratatui/ratatui.git)",
-]
-
-[[package]]
-name = "ratatui-termina"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0bf912d9e66f057a759d92e386a280ea886b352ab757d6ac4d653c7ed2c43c2"
-dependencies = [
- "instability",
- "ratatui-core 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "termina 0.3.3",
+ "ratatui-core",
+ "ratatui-widgets",
 ]
 
 [[package]]
@@ -3848,8 +3804,8 @@ version = "0.1.0"
 source = "git+https://github.com/ratatui/ratatui.git#d1ef782b48ddf0cb825c111d4d8b9adef572c0e1"
 dependencies = [
  "instability",
- "ratatui-core 0.1.2 (git+https://github.com/ratatui/ratatui.git)",
- "termina 0.4.0",
+ "ratatui-core",
+ "termina",
 ]
 
 [[package]]
@@ -3857,28 +3813,10 @@ name = "ratatui-textarea"
 version = "0.9.3"
 source = "git+https://github.com/ixmoyren/ratatui-textarea#3e31840d83b7ab018f2a932fd3ca0e8b32ae1950"
 dependencies = [
- "ratatui-core 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "ratatui-termina 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ratatui-widgets 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "unicode-segmentation",
- "unicode-width 0.2.2",
-]
-
-[[package]]
-name = "ratatui-widgets"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66e3d19bcc9130ca376277d93b60767ff121ace3be06f5f95f81dd68956407d1"
-dependencies = [
- "bitflags 2.13.2",
- "hashbrown 0.17.1",
- "indoc",
- "instability",
- "itertools 0.14.0",
- "line-clipping",
- "ratatui-core 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "strum 0.28.0",
- "time",
+ "ratatui-core",
+ "ratatui-termina",
+ "ratatui-widgets",
+ "regex",
  "unicode-segmentation",
  "unicode-width 0.2.2",
 ]
@@ -3894,7 +3832,7 @@ dependencies = [
  "instability",
  "itertools 0.15.0",
  "line-clipping",
- "ratatui-core 0.1.2 (git+https://github.com/ratatui/ratatui.git)",
+ "ratatui-core",
  "serde",
  "strum 0.28.0",
  "time",
@@ -5017,19 +4955,6 @@ dependencies = [
 
 [[package]]
 name = "termina"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9048a889effe34a5cddee0af7f53285198b16dca3be510858d38dfdb3e62a04e"
-dependencies = [
- "bitflags 2.13.2",
- "parking_lot",
- "rustix 1.1.5",
- "signal-hook",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "termina"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "881a7f20ade48167027822c52a0aeca879afa3174b15c71997827826bce669f9"
@@ -5315,7 +5240,9 @@ dependencies = [
  "tower-agent-plugins",
  "tower-agent-provider",
  "tower-agent-runtime",
+ "tower-agent-storage",
  "tower-agent-tui",
+ "tower-agent-turso",
 ]
 
 [[package]]
@@ -5949,17 +5876,6 @@ name = "unicode-segmentation"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
-
-[[package]]
-name = "unicode-truncate"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16b380a1238663e5f8a691f9039c73e1cdae598a30e9855f541d29b08b53e9a5"
-dependencies = [
- "itertools 0.14.0",
- "unicode-segmentation",
- "unicode-width 0.2.2",
-]
 
 [[package]]
 name = "unicode-truncate"

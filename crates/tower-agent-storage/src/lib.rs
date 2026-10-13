@@ -9,13 +9,14 @@
 //!
 //! 各接口的边界：
 //!
-//! - [`ConfigStore`]：通用 key → JSON 配置项；
+//! - [`ConfigStore`]：按作用域（[`ConfigScope::User`] / [`ConfigScope::Project`]）存的
+//!   key → JSON 配置项；读取用 [`resolve_config`]，项目级覆盖用户级；
 //! - [`ProviderStore`]：登录过的 provider 凭据（API key / base URL / 默认模型）；
 //! - [`SessionStore`]：会话**元数据**（标题、模型、时间戳），不含消息体；
 //! - [`HistoryStore`]：会话的**原始对话历史**（逐条 [`AgentMessage`]，按序可重放）；
 //! - [`MemoryStore`]：跨会话的长期记忆条目。
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use futures_util::future::BoxFuture;
 use semver::Version;
@@ -53,19 +54,122 @@ impl StorageError {
     }
 }
 
-/// 配置存储：按 key 存取 JSON 值（默认模型、UI 偏好、上次会话等）。
+/// 配置作用域：同一批配置按作用域隔离存储，读取时**项目级覆盖用户级**。
+///
+/// 作用域是接口的一部分（不是某个后端的私事）：CLI、axum、webui 等任何消费端都通过
+/// [`ConfigStore`] + [`resolve_config`] 读写同一套语义，后端只决定「一个库还是多个库」。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ConfigScope {
+    /// 用户级：跨项目共享（对应 pi 的 agent 目录设置）。
+    User,
+    /// 项目级：按项目 id（通常是规范化后的工作目录）隔离。
+    Project(String),
+}
+
+impl ConfigScope {
+    /// 用项目 id 构造项目级作用域。
+    #[must_use]
+    pub fn project(id: impl Into<String>) -> Self {
+        Self::Project(id.into())
+    }
+
+    /// 从工作目录构造项目作用域；能 `canonicalize` 就规范化，否则退回去掉尾分隔符的字面路径。
+    #[must_use]
+    pub fn from_working_dir(dir: impl AsRef<Path>) -> Self {
+        let dir = dir.as_ref();
+        let resolved = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        Self::Project(normalize_project_id(&resolved))
+    }
+
+    /// 是否是用户级作用域。
+    #[must_use]
+    pub fn is_user(&self) -> bool {
+        matches!(self, Self::User)
+    }
+
+    /// 项目 id（用户级返回 `None`）。
+    #[must_use]
+    pub fn project_id(&self) -> Option<&str> {
+        match self {
+            Self::User => None,
+            Self::Project(id) => Some(id),
+        }
+    }
+
+    /// 落库用的两部分：`(scope_kind, scope_id)`。实现层用它拼主键，消费端不关心。
+    #[must_use]
+    pub fn storage_parts(&self) -> (&'static str, &str) {
+        match self {
+            Self::User => ("user", ""),
+            Self::Project(id) => ("project", id.as_str()),
+        }
+    }
+}
+
+/// 项目 id 规范化：去掉尾部的路径分隔符（`/a/b/` → `/a/b`）。
+fn normalize_project_id(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    let trimmed = text.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        text.into_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// 配置存储：按「作用域 + key」存取 JSON 值（默认模型、UI 偏好、上次会话等）。
 pub trait ConfigStore: Send + Sync + 'static {
     /// 读取一项配置；不存在返回 `None`。
-    fn get_config(&self, key: &str) -> StorageFuture<'_, Option<Value>>;
+    fn get_config(&self, scope: &ConfigScope, key: &str) -> StorageFuture<'_, Option<Value>>;
 
     /// 写入一项配置（覆盖旧值）。
-    fn set_config(&self, key: &str, value: Value) -> StorageFuture<'_, ()>;
+    fn set_config(&self, scope: &ConfigScope, key: &str, value: Value) -> StorageFuture<'_, ()>;
 
     /// 删除一项配置。
-    fn delete_config(&self, key: &str) -> StorageFuture<'_, ()>;
+    fn delete_config(&self, scope: &ConfigScope, key: &str) -> StorageFuture<'_, ()>;
 
-    /// 列出所有配置 key。
-    fn list_config(&self) -> StorageFuture<'_, Vec<String>>;
+    /// 列出某个作用域下的所有配置 key。
+    fn list_config(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<String>>;
+}
+
+/// 读取某个 key 的**有效值**：项目级覆盖用户级，都没有则返回 `None`。
+///
+/// 消费端（CLI / axum / webui）都走这个函数，保证作用域优先级只有一处实现。
+pub async fn resolve_config(
+    store: &dyn ConfigStore,
+    project: Option<&str>,
+    key: &str,
+) -> StorageResult<Option<Value>> {
+    if let Some(project) = project
+        && let Some(value) = store
+            .get_config(&ConfigScope::Project(project.to_owned()), key)
+            .await?
+    {
+        return Ok(Some(value));
+    }
+    store.get_config(&ConfigScope::User, key).await
+}
+
+/// 列出**合并后**的有效配置：用户级打底，项目级覆盖，按 key 排序。
+pub async fn effective_config(
+    store: &dyn ConfigStore,
+    project: Option<&str>,
+) -> StorageResult<Vec<(String, Value)>> {
+    let mut merged: BTreeMap<String, Value> = BTreeMap::new();
+    for key in store.list_config(&ConfigScope::User).await? {
+        if let Some(value) = store.get_config(&ConfigScope::User, &key).await? {
+            merged.insert(key, value);
+        }
+    }
+    if let Some(project) = project {
+        let scope = ConfigScope::Project(project.to_owned());
+        for key in store.list_config(&scope).await? {
+            if let Some(value) = store.get_config(&scope, &key).await? {
+                merged.insert(key, value);
+            }
+        }
+    }
+    Ok(merged.into_iter().collect())
 }
 
 /// 一个登录过的 provider 的凭据。

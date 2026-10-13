@@ -1,9 +1,32 @@
 //! 真正运行 `cli` 二进制的端到端测试（`--print` 模式不需要 TTY）。
 
-use std::process::Command;
+use std::{
+    path::Path,
+    process::Command,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+/// 每次调用分配一个独立的存储库路径，避免二进制测试读到 / 写到用户真实的
+/// `~/.local/share/tower-agent/storage.db`。
+static STORAGE_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn cli() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_tower-agent"))
+    let seq = STORAGE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let storage = std::env::temp_dir().join(format!(
+        "tower-agent-cli-test-{}-{seq}.db",
+        std::process::id()
+    ));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tower-agent"));
+    command.env("TOWER_AGENT_STORAGE", storage);
+    command
+}
+
+/// 指定存储库与工作目录的二进制（多次调用共享同一份配置）。
+fn cli_at(storage: &str, cwd: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tower-agent"));
+    command.env("TOWER_AGENT_STORAGE", storage);
+    command.arg("-C").arg(cwd);
+    command
 }
 
 fn stdout(output: &std::process::Output) -> String {
@@ -135,4 +158,102 @@ fn api_key_requires_an_explicit_provider() {
     let text = stderr(&output);
     assert!(text.contains("--api-key"), "got:\n{text}");
     assert!(text.contains("--provider"), "got:\n{text}");
+}
+
+#[test]
+fn config_commands_round_trip_through_storage() {
+    let home = tempfile::tempdir().expect("temp dir");
+    let work = tempfile::tempdir().expect("temp dir");
+    let other = tempfile::tempdir().expect("temp dir");
+    let storage = home.path().join("config.db").to_string_lossy().into_owned();
+
+    // 空库：读一个没设置的 key 是非零退出。
+    let output = cli_at(&storage, work.path())
+        .args(["--config-get", "defaultModel"])
+        .output()
+        .expect("run cli");
+    assert!(!output.status.success());
+
+    // user 作用域写入 + 读回（字符串值不加引号）。
+    let output = cli_at(&storage, work.path())
+        .args(["--config-set", "defaultModel=gpt-5.5"])
+        .output()
+        .expect("run cli");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+
+    let output = cli_at(&storage, work.path())
+        .args(["--config-get", "defaultModel"])
+        .output()
+        .expect("run cli");
+    assert!(output.status.success());
+    assert_eq!(stdout(&output).trim(), "gpt-5.5");
+
+    // JSON 值原样解析、紧凑回显。
+    let output = cli_at(&storage, work.path())
+        .args(["--config-set", "retry={\"max\":2}"])
+        .output()
+        .expect("run cli");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    let output = cli_at(&storage, work.path())
+        .args(["--config-get", "retry"])
+        .output()
+        .expect("run cli");
+    assert_eq!(stdout(&output).trim(), "{\"max\":2}");
+
+    // 列表是「用户级打底」的合并视图。
+    let output = cli_at(&storage, work.path())
+        .arg("--config-list")
+        .output()
+        .expect("run cli");
+    let text = stdout(&output);
+    assert!(text.contains("defaultModel = gpt-5.5"), "got:\n{text}");
+    assert!(text.contains("retry = {\"max\":2}"), "got:\n{text}");
+
+    // 项目作用域覆盖用户作用域，且只影响当前项目。
+    let output = cli_at(&storage, work.path())
+        .args([
+            "--config-scope",
+            "project",
+            "--config-set",
+            "defaultModel=local-model",
+        ])
+        .output()
+        .expect("run cli");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+
+    let output = cli_at(&storage, work.path())
+        .args(["--config-get", "defaultModel"])
+        .output()
+        .expect("run cli");
+    assert_eq!(stdout(&output).trim(), "local-model");
+
+    let output = cli_at(&storage, other.path())
+        .args(["--config-get", "defaultModel"])
+        .output()
+        .expect("run cli");
+    assert_eq!(stdout(&output).trim(), "gpt-5.5");
+
+    // 指定作用域的原始列表能看到项目级那一条。
+    let output = cli_at(&storage, work.path())
+        .args(["--config-scope", "project", "--config-list"])
+        .output()
+        .expect("run cli");
+    assert_eq!(stdout(&output).trim(), "defaultModel = local-model");
+
+    // 删掉项目级覆盖后，有效值退回用户级。
+    let output = cli_at(&storage, work.path())
+        .args([
+            "--config-scope",
+            "project",
+            "--config-unset",
+            "defaultModel",
+        ])
+        .output()
+        .expect("run cli");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    let output = cli_at(&storage, work.path())
+        .args(["--config-get", "defaultModel"])
+        .output()
+        .expect("run cli");
+    assert_eq!(stdout(&output).trim(), "gpt-5.5");
 }

@@ -33,6 +33,8 @@ futures-util = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tower = { workspace = true }
+tower-agent-storage.workspace = true
+tower-agent-turso.workspace = true
 
 [dev-dependencies]
 tower-agent-provider = { workspace = true, features = ["test-util"] }

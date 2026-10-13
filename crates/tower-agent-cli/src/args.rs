@@ -8,6 +8,15 @@ use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser, builder::NonEmptyStringValueParser};
 
+/// 配置作用域（对应 storage 的 `ConfigScope`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ConfigScopeArg {
+    /// 用户级：跨项目共享。
+    User,
+    /// 项目级：当前工作目录（`-C/--cwd`）。
+    Project,
+}
+
 /// 解析后的命令行参数。
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 #[command(
@@ -153,6 +162,68 @@ pub struct CliArgs {
         help = "Disable built-in tools (this port has no extension tools, so it equals --no-tools)."
     )]
     pub no_builtin_tools: bool,
+
+    /// 读取一项配置后退出：默认读「项目覆盖用户」的有效值，给了 `--config-scope` 则读该作用域。
+    #[arg(
+        long = "config-get",
+        value_name = "key",
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Print a config value, then exit (effective value unless --config-scope is given)."
+    )]
+    pub config_get: Option<String>,
+
+    /// 写入一项配置后退出：`<key>=<value>`；value 先按 JSON 解析，失败则当字符串。
+    #[arg(
+        long = "config-set",
+        value_name = "key=value",
+        help = "Set a config value (`<key>=<value>`; value is JSON if parseable, else a string), then exit."
+    )]
+    pub config_set: Option<String>,
+
+    /// 删除一项配置后退出（作用域见 `--config-scope`）。
+    #[arg(
+        long = "config-unset",
+        value_name = "key",
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Delete a config key, then exit."
+    )]
+    pub config_unset: Option<String>,
+
+    /// 列出配置后退出：默认列合并后的有效配置，给了 `--config-scope` 则列该作用域。
+    #[arg(
+        long = "config-list",
+        help = "List config (effective by default, or the scope given by --config-scope), then exit."
+    )]
+    pub config_list: bool,
+
+    /// `--config-set` / `--config-unset` 的目标作用域（默认 user）。
+    #[arg(
+        long = "config-scope",
+        value_name = "scope",
+        value_enum,
+        help = "Scope for --config-set / --config-unset (user or project; default user)."
+    )]
+    pub config_scope: Option<ConfigScopeArg>,
+
+    /// 继续当前工作目录下最近的一次会话（对应 pi `--continue`）。
+    #[arg(
+        long = "continue",
+        help = "Continue the most recent session in the working directory."
+    )]
+    pub continue_session: bool,
+
+    /// 继续指定 id 的会话（对应 pi `--session`）。
+    #[arg(
+        long = "session",
+        value_name = "id",
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Continue the session with the given id."
+    )]
+    pub session: Option<String>,
+
+    /// 不保存会话 transcript（对应 pi `--no-session`）。
+    #[arg(long = "no-session", help = "Do not persist the session transcript.")]
+    pub no_session: bool,
 
     /// 打印帮助后退出。
     #[arg(
@@ -348,5 +419,37 @@ mod tests {
 
         let args = parse_ok(&["-nbt"]);
         assert!(args.no_builtin_tools);
+    }
+
+    #[test]
+    fn config_flags_parse() {
+        let args = parse_ok(&["--config-set", "model=gpt", "--config-scope", "project"]);
+        assert_eq!(args.config_set.as_deref(), Some("model=gpt"));
+        assert_eq!(args.config_scope, Some(ConfigScopeArg::Project));
+        assert!(!args.config_list);
+
+        let args = parse_ok(&["--config-list"]);
+        assert!(args.config_list);
+        assert_eq!(args.config_scope, None);
+
+        let args = parse_ok(&["--config-get", "model", "--config-unset", "theme"]);
+        assert_eq!(args.config_get.as_deref(), Some("model"));
+        assert_eq!(args.config_unset.as_deref(), Some("theme"));
+
+        // 作用域只认 user / project。
+        assert!(parse(["--config-scope", "nope"]).is_err());
+    }
+
+    #[test]
+    fn session_flags_parse() {
+        let args = parse_ok(&["--continue"]);
+        assert!(args.continue_session);
+        assert!(!args.no_session);
+
+        let args = parse_ok(&["--session", "abc123"]);
+        assert_eq!(args.session.as_deref(), Some("abc123"));
+
+        let args = parse_ok(&["--no-session"]);
+        assert!(args.no_session);
     }
 }

@@ -256,12 +256,32 @@ pub fn build(
 }
 
 /// 从环境变量读取某个 provider 的 api key（空串视为未设置）。
-fn api_key_from_env(kind: ProviderKind) -> Option<String> {
+#[must_use]
+pub fn api_key_from_env(kind: ProviderKind) -> Option<String> {
     let name = kind.api_key_env()?;
     std::env::var(name)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+/// api key 的来源优先级（对齐 pi）：显式 `--api-key` > 环境变量 > 存储凭据。
+///
+/// 三者都为空时返回 `None`，由调用方报 [`ProviderError::MissingApiKey`]。
+#[must_use]
+pub fn resolve_api_key(
+    kind: ProviderKind,
+    explicit: Option<&str>,
+    stored: Option<&str>,
+) -> Option<String> {
+    let clean = |value: &str| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    };
+    explicit
+        .and_then(clean)
+        .or_else(|| api_key_from_env(kind))
+        .or_else(|| stored.and_then(clean))
 }
 
 /// 环境变量是否有非空取值。

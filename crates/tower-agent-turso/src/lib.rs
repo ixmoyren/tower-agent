@@ -50,8 +50,9 @@ use serde_json::Value as Json;
 use tokio::sync::{mpsc, oneshot};
 use tower_agent_core::AgentMessage;
 use tower_agent_storage::{
-    ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential, ProviderStore,
-    SessionRecord, SessionStore, StorageError, StorageFuture, StoragePlugin, StorageResult,
+    ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
+    ProviderStore, SessionRecord, SessionStore, StorageError, StorageFuture, StoragePlugin,
+    StorageResult,
 };
 use turso::{Connection, Row, Value as TursoValue};
 
@@ -65,8 +66,11 @@ pub const BACKEND_NAME: &str = "turso";
 /// 数据库 schema。所有 DDL 都幂等（`IF NOT EXISTS`），每次打开时执行一遍。
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS config (\
-    key   TEXT PRIMARY KEY,\
-    value TEXT NOT NULL\
+    scope_kind TEXT NOT NULL,\
+    scope_id   TEXT NOT NULL,\
+    key        TEXT NOT NULL,\
+    value      TEXT NOT NULL,\
+    PRIMARY KEY (scope_kind, scope_id, key)\
 );\
 CREATE TABLE IF NOT EXISTS provider (\
     provider   TEXT PRIMARY KEY,\
@@ -111,10 +115,14 @@ WHERE fts_match(tokens, ?1) \
 ORDER BY score DESC \
 LIMIT ?2";
 
-const SQL_SET_CONFIG: &str = "INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)";
-const SQL_GET_CONFIG: &str = "SELECT value FROM config WHERE key = ?1";
-const SQL_DELETE_CONFIG: &str = "DELETE FROM config WHERE key = ?1";
-const SQL_LIST_CONFIG: &str = "SELECT key FROM config ORDER BY key";
+const SQL_SET_CONFIG: &str = "INSERT OR REPLACE INTO config (scope_kind, scope_id, key, value) \
+     VALUES (?1, ?2, ?3, ?4)";
+const SQL_GET_CONFIG: &str = "SELECT value FROM config \
+     WHERE scope_kind = ?1 AND scope_id = ?2 AND key = ?3";
+const SQL_DELETE_CONFIG: &str = "DELETE FROM config \
+     WHERE scope_kind = ?1 AND scope_id = ?2 AND key = ?3";
+const SQL_LIST_CONFIG: &str = "SELECT key FROM config \
+     WHERE scope_kind = ?1 AND scope_id = ?2 ORDER BY key";
 
 const SQL_PUT_PROVIDER: &str = "INSERT OR REPLACE INTO provider \
      (provider, api_key, model, base_url, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)";
@@ -129,7 +137,7 @@ const SQL_UPSERT_SESSION: &str = "INSERT OR REPLACE INTO session \
 const SQL_GET_SESSION: &str = "SELECT id, title, model, created_at, updated_at, metadata \
      FROM session WHERE id = ?1";
 const SQL_LIST_SESSIONS: &str = "SELECT id, title, model, created_at, updated_at, metadata \
-     FROM session ORDER BY updated_at DESC";
+     FROM session ORDER BY updated_at DESC, id DESC";
 const SQL_DELETE_SESSION: &str = "DELETE FROM session WHERE id = ?1";
 
 const SQL_APPEND_MESSAGE: &str = "INSERT INTO message (session_id, payload) VALUES (?1, ?2)";
@@ -320,12 +328,14 @@ async fn transaction(
 }
 
 impl ConfigStore for TursoStorage {
-    fn get_config(&self, key: &str) -> StorageFuture<'_, Option<Json>> {
+    fn get_config(&self, scope: &ConfigScope, key: &str) -> StorageFuture<'_, Option<Json>> {
+        let (kind, id) = scope.storage_parts();
+        let id = id.to_owned();
         let key = key.to_owned();
         Box::pin(async move {
             let mut rows = self
                 .read
-                .query(SQL_GET_CONFIG, vec![text(key)])
+                .query(SQL_GET_CONFIG, vec![text(kind), text(id), text(key)])
                 .await
                 .map_err(backend)?;
             let Some(row) = rows.next().await.map_err(backend)? else {
@@ -335,32 +345,38 @@ impl ConfigStore for TursoStorage {
         })
     }
 
-    fn set_config(&self, key: &str, value: Json) -> StorageFuture<'_, ()> {
+    fn set_config(&self, scope: &ConfigScope, key: &str, value: Json) -> StorageFuture<'_, ()> {
+        let (kind, id) = scope.storage_parts();
+        let id = id.to_owned();
         let key = key.to_owned();
         Box::pin(async move {
             let value = serialize(&value)?;
             self.enqueue(WriteOp::Statement {
                 sql: SQL_SET_CONFIG,
-                params: vec![text(key), text(value)],
+                params: vec![text(kind), text(id), text(key), text(value)],
             })
         })
     }
 
-    fn delete_config(&self, key: &str) -> StorageFuture<'_, ()> {
+    fn delete_config(&self, scope: &ConfigScope, key: &str) -> StorageFuture<'_, ()> {
+        let (kind, id) = scope.storage_parts();
+        let id = id.to_owned();
         let key = key.to_owned();
         Box::pin(async move {
             self.enqueue(WriteOp::Statement {
                 sql: SQL_DELETE_CONFIG,
-                params: vec![text(key)],
+                params: vec![text(kind), text(id), text(key)],
             })
         })
     }
 
-    fn list_config(&self) -> StorageFuture<'_, Vec<String>> {
+    fn list_config(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<String>> {
+        let (kind, id) = scope.storage_parts();
+        let id = id.to_owned();
         Box::pin(async move {
             let mut rows = self
                 .read
-                .query(SQL_LIST_CONFIG, ())
+                .query(SQL_LIST_CONFIG, vec![text(kind), text(id)])
                 .await
                 .map_err(backend)?;
             let mut keys = Vec::new();

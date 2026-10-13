@@ -6,8 +6,8 @@ use serde_json::json;
 use tower_agent_core::AgentMessage;
 use tower_agent_provider::{Message, UserContent, UserMessage};
 use tower_agent_storage::{
-    ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential, ProviderStore,
-    SessionRecord, SessionStore,
+    ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
+    ProviderStore, SessionRecord, SessionStore, effective_config, resolve_config,
 };
 use tower_agent_turso::TursoStorage;
 
@@ -31,28 +31,90 @@ fn user_message(text: &str, timestamp: i64) -> AgentMessage {
 #[tokio::test]
 async fn config_round_trips_json() {
     let storage = TursoStorage::in_memory().await.expect("open in-memory");
+    let user = ConfigScope::User;
 
-    assert_eq!(storage.get_config("model").await.unwrap(), None);
+    assert_eq!(storage.get_config(&user, "model").await.unwrap(), None);
     storage
-        .set_config("model", json!({ "id": "gpt", "temp": 0.2 }))
+        .set_config(&user, "model", json!({ "id": "gpt", "temp": 0.2 }))
         .await
         .unwrap();
     storage.flush().await.unwrap();
     assert_eq!(
-        storage.get_config("model").await.unwrap(),
+        storage.get_config(&user, "model").await.unwrap(),
         Some(json!({ "id": "gpt", "temp": 0.2 }))
     );
 
-    storage.set_config("theme", json!("dark")).await.unwrap();
+    storage
+        .set_config(&user, "theme", json!("dark"))
+        .await
+        .unwrap();
     storage.flush().await.unwrap();
     assert_eq!(
-        storage.list_config().await.unwrap(),
+        storage.list_config(&user).await.unwrap(),
         vec!["model".to_owned(), "theme".to_owned()]
     );
 
-    storage.delete_config("model").await.unwrap();
+    storage.delete_config(&user, "model").await.unwrap();
     storage.flush().await.unwrap();
-    assert_eq!(storage.get_config("model").await.unwrap(), None);
+    assert_eq!(storage.get_config(&user, "model").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn project_config_overrides_user_and_is_isolated() {
+    let storage = TursoStorage::in_memory().await.expect("open in-memory");
+    let user = ConfigScope::User;
+    let project_a = ConfigScope::project("/work/a");
+    let project_b = ConfigScope::project("/work/b");
+
+    storage
+        .set_config(&user, "model", json!("gpt"))
+        .await
+        .unwrap();
+    storage
+        .set_config(&user, "theme", json!("dark"))
+        .await
+        .unwrap();
+    storage
+        .set_config(&project_a, "model", json!("claude"))
+        .await
+        .unwrap();
+    storage.flush().await.unwrap();
+
+    // 项目 A 覆盖 model，theme 落到用户级。
+    assert_eq!(
+        resolve_config(&storage, Some("/work/a"), "model")
+            .await
+            .unwrap(),
+        Some(json!("claude"))
+    );
+    assert_eq!(
+        resolve_config(&storage, Some("/work/a"), "theme")
+            .await
+            .unwrap(),
+        Some(json!("dark"))
+    );
+    // 项目 B 没有自己的值，退回用户级。
+    assert_eq!(
+        resolve_config(&storage, Some("/work/b"), "model")
+            .await
+            .unwrap(),
+        Some(json!("gpt"))
+    );
+    // 两个项目的 key 互不串扰。
+    assert_eq!(
+        storage.list_config(&project_b).await.unwrap(),
+        Vec::<String>::new()
+    );
+
+    // 合并视图：project A = {model: claude, theme: dark}。
+    let merged = effective_config(&storage, Some("/work/a")).await.unwrap();
+    assert_eq!(
+        merged,
+        vec![
+            ("model".to_owned(), json!("claude")),
+            ("theme".to_owned(), json!("dark")),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -186,11 +248,17 @@ async fn writes_apply_in_order_after_flush() {
     let storage = TursoStorage::in_memory().await.expect("open in-memory");
     // 先塞一批写，再一次性 flush：队列按序消费，最终状态是最后一次写入。
     for value in 0..32 {
-        storage.set_config("counter", json!(value)).await.unwrap();
+        storage
+            .set_config(&ConfigScope::User, "counter", json!(value))
+            .await
+            .unwrap();
     }
     storage.flush().await.unwrap();
     assert_eq!(
-        storage.get_config("counter").await.unwrap(),
+        storage
+            .get_config(&ConfigScope::User, "counter")
+            .await
+            .unwrap(),
         Some(json!(31))
     );
 }
@@ -202,7 +270,10 @@ async fn storage_persists_across_reopen() {
 
     {
         let storage = TursoStorage::open(&path).await.expect("open file db");
-        storage.set_config("language", json!("zh")).await.unwrap();
+        storage
+            .set_config(&ConfigScope::User, "language", json!("zh"))
+            .await
+            .unwrap();
         storage
             .remember(memory("m1", "记得这次中文检索的结论"))
             .await
@@ -213,7 +284,10 @@ async fn storage_persists_across_reopen() {
 
     let storage = TursoStorage::open(&path).await.expect("reopen file db");
     assert_eq!(
-        storage.get_config("language").await.unwrap(),
+        storage
+            .get_config(&ConfigScope::User, "language")
+            .await
+            .unwrap(),
         Some(json!("zh"))
     );
     let hits = storage.recall("检索", 10).await.unwrap();
