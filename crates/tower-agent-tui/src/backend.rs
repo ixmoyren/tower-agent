@@ -323,6 +323,7 @@ fn evaluate_command(host: &dyn CommandHost, input: &str) -> CommandOutcome {
         "model" => notice(host.model(arg)),
         "thinking" => notice(host.thinking(arg)),
         "login" => notice(host.login(arg)),
+        "compact" => notice(host.compact(arg)),
         "hotkeys" => CommandOutcome::Notice(command::hotkeys().join("\n")),
         _ => CommandOutcome::Notice(format!(
             "/{name} is not ported to tower-agent yet (pi description: {}).",
@@ -417,6 +418,13 @@ mod tests {
                 None => "usage: /login <provider> <api-key>".into(),
             })
         }
+
+        fn compact(&self, arg: Option<&str>) -> Result<String, String> {
+            Ok(match arg {
+                Some(instructions) => format!("compaction requested: {instructions}"),
+                None => "compaction requested".into(),
+            })
+        }
     }
 
     fn fake_host() -> FakeHost {
@@ -469,7 +477,7 @@ mod tests {
 
     #[test]
     fn unported_and_unknown_commands_are_reported() {
-        match evaluate_command(&fake_host(), "compact") {
+        match evaluate_command(&fake_host(), "export") {
             CommandOutcome::Notice(text) => {
                 assert!(text.contains("not ported"), "got: {text}");
             }

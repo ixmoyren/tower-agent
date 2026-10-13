@@ -32,7 +32,7 @@ use tower_agent_provider::{
 
 use crate::{
     AgentError, AgentEvent, AgentMessage, AgentTool, AgentToolResult, ToolCallRequest,
-    ToolExecutionMode, ToolResultStream,
+    ToolExecutionMode, ToolResultStream, compaction::CompactionReason,
 };
 
 /// 装箱的 `'static`、`Send` future。
@@ -205,6 +205,8 @@ pub struct LoopConfig {
     pub convert_to_llm: ConvertToLlm,
     /// 可选的上下文变换。
     pub transform_context: Option<TransformContext>,
+    /// 可选的上下文压缩器（`None` 表示不做压缩）。
+    pub compactor: Option<Arc<crate::compaction::Compactor>>,
     /// steer 消息来源。
     pub get_steering_messages: Option<SteeringSource>,
     /// follow-up 消息来源。
@@ -227,6 +229,7 @@ impl LoopConfig {
             tool_execution: ToolExecutionMode::Parallel,
             convert_to_llm,
             transform_context: None,
+            compactor: None,
             get_steering_messages: None,
             get_follow_up_messages: None,
             before_tool_call: None,
@@ -505,21 +508,87 @@ async fn stream_assistant_response<S: EventSink>(
     if let Some(transform) = &config.transform_context {
         messages = transform(messages, signal.clone()).await;
     }
-    let llm_messages = (config.convert_to_llm)(messages).await;
+    let raw = messages;
 
-    let mut options = config.options.clone();
-    options.base.signal = Some(signal.clone());
-    options.reasoning = match config.thinking_level {
-        ModelThinkingLevel::Off => None,
-        ModelThinkingLevel::Level(level) => Some(level),
-    };
-    let request = StreamRequest {
-        model: config.model.clone(),
-        context: TranscriptContext::new(llm_messages),
-        options,
-    };
+    let mut recovery_attempted = false;
+    loop {
+        // 上下文压缩（核心能力）：先应用已有压缩，超阈值或宿主请求过就压一次再投影。
+        // 压缩失败不阻断本轮——沿用未压缩的上下文继续（与 pi 一致）。
+        let mut visible = raw.clone();
+        if let Some(compactor) = &config.compactor {
+            let _ = compactor
+                .compact_if_needed(&visible, &config.model, stream_fn.clone())
+                .await;
+            visible = compactor.project(visible);
+        }
+        let llm_messages = (config.convert_to_llm)(visible).await;
 
-    let mut stream = stream_fn.clone().oneshot(request).await?;
+        let mut options = config.options.clone();
+        options.base.signal = Some(signal.clone());
+        options.reasoning = match config.thinking_level {
+            ModelThinkingLevel::Off => None,
+            ModelThinkingLevel::Level(level) => Some(level),
+        };
+        let request = StreamRequest {
+            model: config.model.clone(),
+            context: TranscriptContext::new(llm_messages),
+            options,
+        };
+
+        let start_len = context.messages.len();
+        let outcome = consume_response(context, config, sink, stream_fn.clone(), request).await;
+
+        // 溢出 / 长度恢复（pi）：压缩一次再重试当前请求，每个请求只试一次。
+        if !recovery_attempted
+            && let Some(compactor) = &config.compactor
+            && let Some(reason) = recovery_reason(&outcome)
+        {
+            recovery_attempted = true;
+            // 终态事件还没发（见 `consume_response`），因此回滚这次失败的尝试是干净的：
+            // 它既不会进 transcript，也不会被渲染成条目。
+            context.messages.truncate(start_len);
+            if compactor
+                .force_compact(&raw, &config.model, stream_fn.clone(), reason)
+                .await
+                .is_ok()
+            {
+                continue;
+            }
+        }
+
+        // 定稿：`MessageEnd` 才是「提交」事件（它会写进 transcript、渲染成条目）。
+        return match outcome {
+            Ok((message, started)) => {
+                if !started {
+                    sink.emit(AgentEvent::MessageStart {
+                        message: assistant_message(message.clone()),
+                    })
+                    .await;
+                }
+                sink.emit(AgentEvent::MessageEnd {
+                    message: assistant_message(message.clone()),
+                })
+                .await;
+                Ok(message)
+            }
+            Err(error) => Err(error),
+        };
+    }
+}
+
+/// 消费一次 provider 流：把 partial / 终态写进 transcript，并发出**流式**消息事件。
+///
+/// 终态事件（`MessageEnd`，以及没有 partial 时的 `MessageStart`）**不在这里发**——
+/// 外层要先用 [`recovery_reason`] 判断这次响应是不是「溢出 / 截断、可以压缩后重试」。
+/// 返回 `(终态消息, 是否已经发过 MessageStart)`。
+async fn consume_response<S: EventSink>(
+    context: &mut AgentContext,
+    config: &LoopConfig,
+    sink: &S,
+    stream_fn: BoxStreamService,
+    request: StreamRequest,
+) -> Result<(AssistantMessage, bool), AgentError> {
+    let mut stream = stream_fn.oneshot(request).await?;
     let mut partial: Option<AssistantMessage> = None;
     let mut added_partial = false;
 
@@ -545,16 +614,8 @@ async fn stream_assistant_response<S: EventSink>(
                     context
                         .messages
                         .push(assistant_message(final_message.clone()));
-                    sink.emit(AgentEvent::MessageStart {
-                        message: assistant_message(final_message.clone()),
-                    })
-                    .await;
                 }
-                sink.emit(AgentEvent::MessageEnd {
-                    message: assistant_message(final_message.clone()),
-                })
-                .await;
-                return Ok(final_message);
+                return Ok((final_message, added_partial));
             }
             update => {
                 if partial.is_some() {
@@ -590,16 +651,50 @@ async fn stream_assistant_response<S: EventSink>(
         context
             .messages
             .push(assistant_message(final_message.clone()));
-        sink.emit(AgentEvent::MessageStart {
-            message: assistant_message(final_message.clone()),
-        })
-        .await;
     }
-    sink.emit(AgentEvent::MessageEnd {
-        message: assistant_message(final_message.clone()),
-    })
-    .await;
-    Ok(final_message)
+    Ok((final_message, added_partial))
+}
+
+/// 什么情况下值得「压缩一次再重试当前请求」（pi 的 overflow / length 恢复）。
+fn recovery_reason(
+    outcome: &Result<(AssistantMessage, bool), AgentError>,
+) -> Option<CompactionReason> {
+    match outcome {
+        Ok((message, _)) => match message.stop_reason {
+            StopReason::Error => message
+                .error_message
+                .as_deref()
+                .filter(|text| looks_like_context_overflow(text))
+                .map(|_| CompactionReason::Overflow),
+            // 被长度截断且没有工具调用：典型的「还没产出就被截断」，压缩后重试一次。
+            StopReason::Length if collect_tool_calls(message).is_empty() => {
+                Some(CompactionReason::Length)
+            }
+            _ => None,
+        },
+        Err(error) => {
+            looks_like_context_overflow(&error.to_string()).then_some(CompactionReason::Overflow)
+        }
+    }
+}
+
+/// provider 报上下文溢出的文案（各家措辞不同，保守地做关键词匹配）。
+fn looks_like_context_overflow(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "context length",
+        "context_length",
+        "context window",
+        "context_window",
+        "maximum context",
+        "too many tokens",
+        "too long",
+        "prompt is too long",
+        "input is too long",
+        "context overflow",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// 一次工具批次的结果。

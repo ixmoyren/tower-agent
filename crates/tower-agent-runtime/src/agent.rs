@@ -132,6 +132,8 @@ pub struct AgentOptions {
     pub convert_to_llm: Option<ConvertToLlm>,
     /// 上下文变换。
     pub transform_context: Option<TransformContext>,
+    /// 上下文压缩器：放进循环后按阈值自动压缩；`None` 表示不做压缩。
+    pub compactor: Option<Arc<crate::compaction::Compactor>>,
     /// 工具执行前钩子。
     pub before_tool_call: Option<BeforeToolCall>,
     /// 工具执行后钩子。
@@ -156,6 +158,7 @@ impl AgentOptions {
             initial: AgentInitialState::default(),
             convert_to_llm: None,
             transform_context: None,
+            compactor: None,
             before_tool_call: None,
             after_tool_call: None,
             finish_turn: None,
@@ -176,6 +179,7 @@ struct Core {
     messages: Vec<AgentMessage>,
     convert_to_llm: ConvertToLlm,
     transform_context: Option<TransformContext>,
+    compactor: Option<Arc<crate::compaction::Compactor>>,
     before_tool_call: Option<BeforeToolCall>,
     after_tool_call: Option<AfterToolCall>,
     finish_turn: Option<FinishTurn>,
@@ -206,6 +210,7 @@ impl Core {
         config.options = self.options.clone();
         config.tool_execution = self.tool_execution;
         config.transform_context = self.transform_context.clone();
+        config.compactor = self.compactor.clone();
         config.before_tool_call = self.before_tool_call.clone();
         config.after_tool_call = self.after_tool_call.clone();
         config.finish_turn = self.finish_turn.clone();
@@ -292,6 +297,7 @@ impl Agent {
             initial,
             convert_to_llm,
             transform_context,
+            compactor,
             before_tool_call,
             after_tool_call,
             finish_turn,
@@ -323,6 +329,7 @@ impl Agent {
             messages,
             convert_to_llm: convert_to_llm.unwrap_or_else(|| Arc::new(default_convert_to_llm)),
             transform_context,
+            compactor,
             before_tool_call,
             after_tool_call,
             finish_turn,
@@ -501,6 +508,10 @@ impl Agent {
         core.error_message = None;
         core.steering.clear();
         core.follow_up.clear();
+        // 换会话：旧的压缩窗口不再适用。
+        if let Some(compactor) = &core.compactor {
+            compactor.clear();
+        }
         Ok(())
     }
 

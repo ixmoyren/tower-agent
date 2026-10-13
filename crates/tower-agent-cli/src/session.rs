@@ -31,7 +31,7 @@ use tower_agent_provider::{
 };
 use tower_agent_runtime::{
     AgentError, AgentEvent, AgentMessage, AgentOptions, AgentRequest, AgentState, AgentTool,
-    BoxAgentControl, BoxAgentService, Subscription,
+    BoxAgentControl, BoxAgentService, Compactor, Subscription,
 };
 
 /// 会话。
@@ -56,6 +56,8 @@ pub struct Session {
     store: Option<Arc<CliStore>>,
     /// transcript 持久化句柄（会话按项目归属）；未落盘时为 `None`。
     transcript: Option<Arc<crate::store::Transcript>>,
+    /// 上下文压缩器（核心能力，由 agent 循环在每次请求前自动执行）；未启用时为 `None`。
+    compactor: Option<Arc<Compactor>>,
 }
 
 /// 工具过滤：`none` 清空，`allow` 白名单（空 = 全放行），`exclude` 黑名单。
@@ -149,6 +151,29 @@ impl Session {
         model: Model,
         messages: Vec<AgentMessage>,
     ) -> Self {
+        Self::build(cwd, stream, model, messages, None)
+    }
+
+    /// 用显式模型 + 初始 transcript + 上下文压缩器构造会话。
+    ///
+    /// 压缩器交给 agent 循环：每次模型请求前按阈值自动压缩（核心能力，与终端无关）。
+    pub fn with_compaction(
+        cwd: impl AsRef<Path>,
+        stream: BoxStreamService,
+        model: Model,
+        messages: Vec<AgentMessage>,
+        compactor: Arc<Compactor>,
+    ) -> Self {
+        Self::build(cwd, stream, model, messages, Some(compactor))
+    }
+
+    fn build(
+        cwd: impl AsRef<Path>,
+        stream: BoxStreamService,
+        model: Model,
+        messages: Vec<AgentMessage>,
+        compactor: Option<Arc<Compactor>>,
+    ) -> Self {
         let cwd = cwd.as_ref().to_path_buf();
         let system_prompt = format!(
             "你是 tower-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
@@ -191,6 +216,7 @@ impl Session {
         options.initial.model = Some(model);
         options.initial.system_prompt = Some(system_prompt);
         options.initial.messages = messages;
+        options.compactor = compactor.clone();
         let (service, control) = crate::stack::assemble(options);
         Self {
             service: Mutex::new(service),
@@ -202,6 +228,7 @@ impl Session {
             tool_filter: Mutex::new(ToolFilter::default()),
             store: None,
             transcript: None,
+            compactor,
         }
     }
 
@@ -407,8 +434,12 @@ impl Session {
             return;
         };
         let state = self.state();
+        let compaction = self
+            .compactor
+            .as_ref()
+            .and_then(|compactor| compactor.current());
         if let Err(error) = transcript
-            .sync(&state.messages, Some(&state.model.id))
+            .sync(&state.messages, Some(&state.model.id), compaction.as_ref())
             .await
         {
             eprintln!("transcript 落盘失败：{error}");
@@ -520,6 +551,15 @@ impl tower_agent_tui::CommandHost for Session {
         ];
         if let Some(transcript) = &self.transcript {
             lines.insert(0, format!("session: {}", transcript.id()));
+        }
+        if let Some(compactor) = &self.compactor {
+            let settings = compactor.settings();
+            lines.push(format!(
+                "compaction: {} (reserve {} / keep {})",
+                if settings.enabled { "on" } else { "off" },
+                settings.reserve_tokens,
+                settings.keep_recent_tokens
+            ));
         }
         lines
     }
@@ -688,6 +728,19 @@ impl tower_agent_tui::CommandHost for Session {
             kind.canonical_name(),
             setup.model.id
         ))
+    }
+
+    fn compact(&self, arg: Option<&str>) -> Result<String, String> {
+        let Some(compactor) = &self.compactor else {
+            return Err("compaction is not enabled for this session".into());
+        };
+        compactor.request_compaction(arg.map(str::to_owned));
+        Ok(match arg {
+            Some(instructions) => {
+                format!("Compaction requested ({instructions}); it runs before the next request.")
+            }
+            None => "Compaction requested; it runs before the next model request.".into(),
+        })
     }
 }
 
@@ -1358,6 +1411,78 @@ mod tests {
                 .await
                 .is_some_and(|r| r.id == new_id)
         );
+    }
+
+    #[tokio::test]
+    async fn compact_command_requests_a_compaction() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let compactor = Arc::new(tower_agent_runtime::Compactor::new(
+            tower_agent_runtime::CompactionSettings::default(),
+        ));
+        let session = Session::with_compaction(
+            dir.path(),
+            FauxProvider::new().boxed(),
+            model(),
+            Vec::new(),
+            Arc::clone(&compactor),
+        );
+
+        let notice = session.compact(Some("聚焦压缩")).expect("compact");
+        assert!(notice.contains("Compaction requested"), "got: {notice}");
+        assert!(compactor.has_pending_request());
+    }
+
+    #[tokio::test]
+    async fn transcript_persists_the_active_compaction() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let storage = tower_agent_turso::TursoStorage::in_memory()
+            .await
+            .expect("open in-memory");
+        let store = Arc::new(crate::store::CliStore::from_storage(
+            storage,
+            tokio::runtime::Handle::current(),
+        ));
+        let project = crate::store::project_id(dir.path());
+        let compactor = Arc::new(tower_agent_runtime::Compactor::new(
+            tower_agent_runtime::CompactionSettings::default(),
+        ));
+        let known = tower_agent_runtime::Compaction {
+            summary: "已有摘要".into(),
+            first_kept: 1,
+            tokens_before: 99,
+        };
+        compactor.restore(known.clone());
+
+        let transcript = Arc::new(crate::store::Transcript::new(
+            Arc::clone(&store),
+            project,
+            None,
+            0,
+        ));
+        let session = Session::with_compaction(
+            dir.path(),
+            FauxProvider::new().boxed(),
+            model(),
+            Vec::new(),
+            Arc::clone(&compactor),
+        )
+        .with_transcript(Arc::clone(&transcript));
+        session.ask("你好").await.expect("turn succeeds");
+        store.flush().await.expect("flush");
+
+        let record = store
+            .session_record(&transcript.id())
+            .await
+            .expect("record");
+        assert_eq!(crate::store::compaction_from_record(&record), Some(known));
+    }
+
+    #[tokio::test]
+    async fn compact_command_reports_missing_compactor() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        // 没有压缩器时明确报错，而不是静默忽略。
+        let plain = Session::with_model(dir.path(), FauxProvider::new().boxed(), model());
+        assert!(plain.compact(None).is_err());
     }
 
     #[tokio::test]

@@ -17,7 +17,8 @@
 //! 七个内置工具（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）在独立的
 //! `tools` crate 中；`shell` 内嵌 brush（bash 兼容），跨平台行为一致。
 //!
-//! 扩展（`coding-agent` 的 extensions/MCP/compaction）尚未移植。
+//! 扩展（`coding-agent` 的 extensions/MCP）尚未移植；上下文压缩是核心能力
+//! （`tower_agent_runtime::Compactor`），由 agent 循环自动执行。
 
 pub mod args;
 pub mod provider;
@@ -179,27 +180,29 @@ fn main() -> ExitCode {
 
     // 会话续接 / 新建：`--no-session` 关闭持久化；`--session <id>` / `--continue` 续接已有
     // 会话；否则开一个新会话（默认自动保存）。
-    let (resume_id, initial_messages) = match &store {
+    let (resume_id, initial_messages, resume_record) = match &store {
         Some(store) if !args.no_session => {
-            let resume_id = match &args.session {
-                Some(id) => Some(id.clone()),
-                None if args.continue_session => runtime
-                    .block_on(store.latest_session(&project))
-                    .map(|record| record.id),
+            let record = match &args.session {
+                Some(id) => runtime.block_on(store.session_record(id)),
+                None if args.continue_session => runtime.block_on(store.latest_session(&project)),
                 None => None,
             };
-            match resume_id {
-                Some(id) => {
-                    let messages = runtime.block_on(store.load_transcript(&id));
-                    (Some(id), messages)
+            match record {
+                Some(record) => {
+                    let messages = runtime.block_on(store.load_transcript(&record.id));
+                    (Some(record.id.clone()), messages, Some(record))
                 }
-                None => (None, Vec::new()),
+                None => (None, Vec::new(), None),
             }
         }
-        _ => (None, Vec::new()),
+        _ => (None, Vec::new(), None),
     };
-    if args.continue_session && resume_id.is_none() && !args.no_session {
-        eprintln!("没有可续接的会话（{project}），已开始新会话。");
+    if !args.no_session && resume_record.is_none() {
+        if let Some(id) = &args.session {
+            eprintln!("找不到会话 {id}，已开始新会话。");
+        } else if args.continue_session {
+            eprintln!("没有可续接的会话（{project}），已开始新会话。");
+        }
     }
 
     let transcript = match (&store, args.no_session) {
@@ -212,11 +215,25 @@ fn main() -> ExitCode {
         _ => None,
     };
 
-    let session = Session::with_history(
+    // 上下文压缩：核心能力，设置来自 storage（user / project 有效值，缺省对齐 pi）。
+    let compaction = match &store {
+        Some(store) => runtime.block_on(store.compaction_settings(Some(&project))),
+        None => tower_agent_runtime::CompactionSettings::default(),
+    };
+    let compactor = Arc::new(tower_agent_runtime::Compactor::new(compaction));
+    // 续接会话时恢复持久化的压缩状态，避免重新摘要一遍。
+    if let Some(record) = &resume_record
+        && let Some(restored) = store::compaction_from_record(record)
+    {
+        compactor.restore(restored);
+    }
+
+    let session = Session::with_compaction(
         cwd.clone(),
         setup.stream_fn(),
         setup.model.clone(),
         initial_messages,
+        Arc::clone(&compactor),
     );
     let session = match &transcript {
         Some(transcript) => session.with_transcript(Arc::clone(transcript)),

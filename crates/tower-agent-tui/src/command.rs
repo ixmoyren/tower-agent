@@ -111,8 +111,8 @@ pub const BUILTIN_SLASH_COMMANDS: &[SlashCommand] = &[
     cmd(
         "compact",
         "Manually compact the session context",
-        None,
-        false,
+        Some("[instructions]"),
+        true,
     ),
     cmd("resume", "Resume a different session", None, false),
     cmd(
@@ -176,7 +176,8 @@ pub fn hotkeys() -> &'static [&'static str] {
 /// 斜杠命令需要访问的会话能力；由宿主（`cli`）实现。
 ///
 /// 命令在 TUI 的事件循环里**同步**执行，只做本地状态修改（不联网、不跑模型）：
-/// 需要异步长任务的 pi 命令（`/compact`、`/export`…）在本移植版里尚未实现。
+/// 需要异步长任务的 pi 命令（`/export`、`/resume`…）在本移植版里尚未实现；
+/// `/compact` 走压缩器，排到下一个模型请求前执行。
 pub trait CommandHost: Send + Sync {
     /// `/new`：重置当前会话（清空 transcript，保留 system prompt 与工具）。
     fn new_session(&self) -> Result<(), String>;
@@ -192,6 +193,9 @@ pub trait CommandHost: Send + Sync {
 
     /// `/login [provider] [api-key]`：配置 provider 认证；无参数时返回用法。
     fn login(&self, arg: Option<&str>) -> Result<String, String>;
+
+    /// `/compact [instructions]`：请求压缩上下文（核心能力，在下一个模型请求前生效）。
+    fn compact(&self, arg: Option<&str>) -> Result<String, String>;
 }
 
 #[cfg(test)]
@@ -246,7 +250,7 @@ mod tests {
         assert_eq!(
             ported,
             vec![
-                "model", "thinking", "session", "hotkeys", "login", "new", "quit"
+                "model", "thinking", "session", "hotkeys", "login", "new", "compact", "quit"
             ]
         );
     }

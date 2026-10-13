@@ -39,6 +39,13 @@ pub const DEFAULT_MODEL: &str = "defaultModel";
 /// pi `settings.json` 的 `defaultThinkingLevel`。
 pub const DEFAULT_THINKING_LEVEL: &str = "defaultThinkingLevel";
 
+/// 压缩开关（pi `settings.json` 的 `compaction.enabled`）。
+pub const COMPACTION_ENABLED: &str = "compaction.enabled";
+/// 压缩预留 token（pi `compaction.reserveTokens`）。
+pub const COMPACTION_RESERVE_TOKENS: &str = "compaction.reserveTokens";
+/// 压缩保留窗口（pi `compaction.keepRecentTokens`）。
+pub const COMPACTION_KEEP_RECENT_TOKENS: &str = "compaction.keepRecentTokens";
+
 /// 覆盖存储数据库路径的环境变量（测试与自定义位置用）。
 pub const STORAGE_PATH_ENV: &str = "TOWER_AGENT_STORAGE";
 
@@ -208,12 +215,47 @@ impl CliStore {
         self.list_sessions(project).await.into_iter().next()
     }
 
+    /// 按 id 取一个会话记录。
+    pub async fn session_record(&self, id: &str) -> Option<SessionRecord> {
+        self.storage.get_session(id).await.unwrap_or(None)
+    }
+
     /// 读一项有效字符串配置（非字符串或缺席都返回 `None`）。
     async fn effective_string(&self, project: Option<&str>, key: &str) -> Option<String> {
         match self.resolve_config(project, key).await {
             Some(Value::String(value)) => Some(value),
             _ => None,
         }
+    }
+
+    /// 读上下文压缩设置（缺省值对齐 pi）。
+    pub async fn compaction_settings(
+        &self,
+        project: Option<&str>,
+    ) -> tower_agent_runtime::CompactionSettings {
+        let mut settings = tower_agent_runtime::CompactionSettings::default();
+        if let Some(enabled) = self
+            .resolve_config(project, COMPACTION_ENABLED)
+            .await
+            .and_then(|value| value.as_bool())
+        {
+            settings.enabled = enabled;
+        }
+        if let Some(reserve) = self
+            .resolve_config(project, COMPACTION_RESERVE_TOKENS)
+            .await
+            .and_then(|value| value.as_u64())
+        {
+            settings.reserve_tokens = reserve;
+        }
+        if let Some(keep) = self
+            .resolve_config(project, COMPACTION_KEEP_RECENT_TOKENS)
+            .await
+            .and_then(|value| value.as_u64())
+        {
+            settings.keep_recent_tokens = keep;
+        }
+        settings
     }
 
     /// fire-and-forget 写入一项配置（`CommandHost` 的同步回调用）。
@@ -332,11 +374,18 @@ impl Transcript {
         &self,
         messages: &[AgentMessage],
         model: Option<&str>,
+        compaction: Option<&tower_agent_runtime::Compaction>,
     ) -> Result<(), StorageError> {
         let (id, created_at, skip) = {
             let state = self.state.lock().expect("transcript poisoned");
             (state.id.clone(), state.created_at, state.persisted)
         };
+        let mut metadata = serde_json::json!({ "cwd": self.project });
+        if let Some(compaction) = compaction
+            && let Ok(value) = serde_json::to_value(compaction)
+        {
+            metadata["compaction"] = value;
+        }
         self.store
             .upsert_session(SessionRecord {
                 id: id.clone(),
@@ -344,7 +393,7 @@ impl Transcript {
                 model: model.map(str::to_owned),
                 created_at,
                 updated_at: now_ms(),
-                metadata: serde_json::json!({ "cwd": self.project }),
+                metadata,
             })
             .await?;
         if skip < messages.len() {
@@ -355,6 +404,13 @@ impl Transcript {
         }
         Ok(())
     }
+}
+
+/// 从会话记录里读回持久化的压缩状态（续接会话时用，避免重新摘要）。
+#[must_use]
+pub fn compaction_from_record(record: &SessionRecord) -> Option<tower_agent_runtime::Compaction> {
+    let value = record.metadata.get("compaction")?.clone();
+    serde_json::from_value(value).ok()
 }
 
 /// 新会话 id：毫秒时间戳 + 进程内自增序号（可读、够唯一）。
@@ -488,6 +544,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compaction_settings_come_from_scoped_config() {
+        let storage = TursoStorage::in_memory().await.expect("open in-memory");
+        let store = CliStore::from_storage(storage, tokio::runtime::Handle::current());
+
+        // 缺省值对齐 pi。
+        let defaults = store.compaction_settings(None).await;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.reserve_tokens, 16_384);
+        assert_eq!(defaults.keep_recent_tokens, 20_000);
+
+        let user = ConfigScope::User;
+        store
+            .set_config(&user, COMPACTION_ENABLED, serde_json::json!(false))
+            .await
+            .expect("set enabled");
+        store
+            .set_config(&user, COMPACTION_RESERVE_TOKENS, serde_json::json!(100))
+            .await
+            .expect("set reserve");
+        store
+            .set_config(&user, COMPACTION_KEEP_RECENT_TOKENS, serde_json::json!(50))
+            .await
+            .expect("set keep");
+        store.flush().await.expect("flush");
+
+        let settings = store.compaction_settings(None).await;
+        assert!(!settings.enabled);
+        assert_eq!(settings.reserve_tokens, 100);
+        assert_eq!(settings.keep_recent_tokens, 50);
+
+        // 项目级覆盖用户级。
+        store
+            .set_config(
+                &ConfigScope::project("/work/a"),
+                COMPACTION_ENABLED,
+                serde_json::json!(true),
+            )
+            .await
+            .expect("set project enabled");
+        store.flush().await.expect("flush");
+        assert!(store.compaction_settings(Some("/work/a")).await.enabled);
+        assert!(!store.compaction_settings(Some("/work/b")).await.enabled);
+    }
+
+    #[tokio::test]
+    async fn session_metadata_round_trips_compaction() {
+        let storage = TursoStorage::in_memory().await.expect("open in-memory");
+        let store = Arc::new(CliStore::from_storage(
+            storage,
+            tokio::runtime::Handle::current(),
+        ));
+        let transcript = Transcript::new(Arc::clone(&store), "/work/a", None, 0);
+        let messages = vec![
+            AgentMessage::message(Message::User(UserMessage {
+                content: UserContent::Text("第一条".into()),
+                timestamp: 1,
+            })),
+            AgentMessage::message(Message::User(UserMessage {
+                content: UserContent::Text("第二条".into()),
+                timestamp: 2,
+            })),
+        ];
+        let compaction = tower_agent_runtime::Compaction {
+            summary: "结构化摘要".into(),
+            first_kept: 1,
+            tokens_before: 4242,
+        };
+
+        transcript
+            .sync(&messages, Some("gpt-5.5"), Some(&compaction))
+            .await
+            .expect("sync");
+        store.flush().await.expect("flush");
+
+        let record = store
+            .session_record(&transcript.id())
+            .await
+            .expect("record");
+        assert_eq!(compaction_from_record(&record), Some(compaction));
+        // 项目作用域照旧写进 metadata。
+        assert_eq!(
+            record.metadata.get("cwd").and_then(Value::as_str),
+            Some("/work/a")
+        );
+    }
+
+    #[tokio::test]
     async fn transcript_syncs_and_sessions_are_project_scoped() {
         let storage = TursoStorage::in_memory().await.expect("open in-memory");
         let store = Arc::new(CliStore::from_storage(
@@ -501,7 +644,7 @@ mod tests {
             timestamp: 1,
         }))];
         transcript
-            .sync(&messages, Some("gpt-5.5"))
+            .sync(&messages, Some("gpt-5.5"), None)
             .await
             .expect("sync");
         store.flush().await.expect("flush");
@@ -519,7 +662,7 @@ mod tests {
 
         // 再 sync 一次不会重复追加（只写尾巴）。
         transcript
-            .sync(&messages, Some("gpt-5.5"))
+            .sync(&messages, Some("gpt-5.5"), None)
             .await
             .expect("sync again");
         store.flush().await.expect("flush");
@@ -530,7 +673,7 @@ mod tests {
         let new_id = transcript.id();
         assert_ne!(new_id, record.id);
         transcript
-            .sync(&messages, Some("gpt-5.5"))
+            .sync(&messages, Some("gpt-5.5"), None)
             .await
             .expect("sync new session");
         store.flush().await.expect("flush");

@@ -19,12 +19,17 @@
 
 mod agent;
 pub mod agent_loop;
+pub mod compaction;
 mod control;
 mod event_bus;
 mod router;
 mod service;
 
 pub use agent::{Agent, AgentInitialState, AgentOptions, AgentState, QueueMode};
+pub use compaction::{
+    AfterCompact, BeforeCompact, Compaction, CompactionDecision, CompactionError, CompactionFailed,
+    CompactionHook, CompactionReason, CompactionSettings, Compactor,
+};
 pub use control::{AgentControl, BoxAgentControl};
 pub use event_bus::{EventBus, Subscription};
 pub use router::{ToolRouter, ToolRouterFuture};

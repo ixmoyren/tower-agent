@@ -202,6 +202,10 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 - `tower_agent_runtime::Agent` 实现 `Service<AgentRequest, Response = AgentResponse>`，并提供 `BoxAgentService` / `AgentServiceExt`，可与 axum 等 tower 生态组合（定位类似 `tower-mcp`）。
 - `tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`（pi 的 `tool_call` / `tool_result` 钩子即 tower `Layer`）；工具服务可与 `tower::timeout` / `tower::limit` 等生态 layer 混用（会把错误擦成 `BoxError` 的 layer 用 `map_err(AgentError::other)` 转回）。
 - `tower_agent_runtime::ToolRegistration` 提供 schemars + serde 的 typed tool 注册：参数 schema 自动生成，入参自动反序列化，校验失败编码成 `is_error` 工具结果。
+- `tower_agent_runtime::Compactor` 提供**核心的上下文压缩**（pi `core/compaction`）：宿主构造一个 `Compactor` 放进 `AgentOptions`，agent 循环在每次模型请求前按阈值（`context_window - reserve_tokens`）自动压缩；`compact()` / `request_compaction()` 供异步 / 同步宿主手动触发。摘要走同一个 provider 流服务，消息按 pi 的 `serializeConversation` 形状序列化，切点只落在 user / assistant 上（绝不切 tool result），压缩后模型看到的是 `system + 摘要 + 保留的消息`——**原始 transcript 不改写**，与终端无关，CLI / axum 共用。
+  - **溢出 / 长度恢复**：provider 报上下文溢出（建立请求失败，或流内 `error` 文案命中溢出关键词），或响应被长度截断且没有工具调用时，会**压缩一次再重试当前请求**（每个请求只试一次）。终态事件（`MessageEnd`）由外层在确定不重试后才发出，因此被丢弃的那次尝试不会进 transcript、也不会渲染成条目。
+  - **压缩钩子**：`CompactionHook`（`before` / `after` / `failed`）对应 pi 的 `session_before_compact` / `session_compact` / `session_compact_failed`；`before` 可取消压缩或用自定义摘要跳过内置摘要调用，`after` / `failed` 供遥测。`CompactionReason` 区分 `Threshold` / `Manual` / `Overflow` / `Length`。
+  - **可持久化 / 可恢复**：`Compaction` 是 serde 可序列化的（`summary` / `first_kept` / `tokens_before`），`Compactor::restore` 可把已持久化的压缩装回去，续接会话时不必重新摘要。
 - `tower_agent_tui::UiPlugin` 是 UI 扩展点（状态栏片段 / overlay / 工具结果定制渲染），后端仍固定用 termina（不引入 crossterm）。
 - tower-agent-cli 侧：`cli` crate 重命名为 `tower-agent-cli`，其余 crate 名称与职责不变。
 
@@ -264,8 +268,9 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 - `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、 **流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。以 `/` 开头的输入不进 agent，而是交给 `tui` 的斜杠命令层。
 - `faux`：确定性的离线 provider， **测试替身**——实现放在 `tower_agent_provider::provider::faux`（`test-util` feature，`tower-agent-cli` 以 dev-dependency 引入），`ProviderKind::Faux` 与 `--provider faux` 都只存在于测试构建里，发布的二进制不含它；不联网也能端到端跑通会话，按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
 - 二进制 `tower-agent-cli`： **不带参数且 stdin/stdout 都是终端时直接进 TUI**（提示词可选，TUI 里用 `/` 命令驱动）；`--print` 或任一路被重定向时走一次性纯文本模式（提示词来自位置参数或 stdin），`--list-tools` 打印八个工具后退屏；`--provider` / `--model` / `--thinking` / `-t` 系列选择 provider、模型与工具。这与 pi「终端交互默认进 TUI、重定向默认 print」一致。
-- TUI 斜杠命令：`tower_agent_tui::command` 的表逐条对齐 pi `BUILTIN_SLASH_COMMANDS`（24 条，名称与说明一致），编辑器里 `/` 打开菜单（前缀优先过滤、`Tab` 补全、`↑/↓` 选择、`Enter` 执行、`Esc` 关闭）。已实现 `/model`、`/thinking`、`/session`（含会话 id）、`/hotkeys`、`/new`（开新会话记录）、`/quit`、`/login`（凭据与默认项写回 `store`）；其余命令（`/compact`、`/export`、`/resume`…）依赖尚未移植的压缩 / 导出 / 会话选择器能力，执行时给出明确的“尚未移植”提示。
-- 尚未移植：扩展（extensions/MCP/compaction）。TUI 模式下输入区即 vim 编辑器，提交的文本经 `Session::submit` 进入 agent。
+- TUI 斜杠命令：`tower_agent_tui::command` 的表逐条对齐 pi `BUILTIN_SLASH_COMMANDS`（24 条，名称与说明一致），编辑器里 `/` 打开菜单（前缀优先过滤、`Tab` 补全、`↑/↓` 选择、`Enter` 执行、`Esc` 关闭）。已实现 `/model`、`/thinking`、`/session`（含会话 id）、`/hotkeys`、`/new`（开新会话记录）、`/quit`、`/login`（凭据与默认项写回 `store`）、`/compact`（请求压缩，排到下一个模型请求前）；其余命令（`/export`、`/resume`…）依赖尚未移植的导出 / 会话选择器能力，执行时给出明确的“尚未移植”提示。
+- **上下文压缩**：核心实现（见上，`tower_agent_runtime::Compactor`）由 agent 循环自动执行；CLI 只是从 storage 读 `compaction.enabled` / `compaction.reserveTokens` / `compaction.keepRecentTokens`（user ⊕ project 有效值）构造压缩器。压缩状态随会话落进 `session.metadata.compaction`，`--continue` / `--session` 续接时用 `Compactor::restore` 装回去，不会重新摘要。原始 transcript 不改写，导出 / 续接仍能看到完整历史。
+- 尚未移植：扩展（extensions/MCP）。TUI 模式下输入区即 vim 编辑器，提交的文本经 `Session::submit` 进入 agent。
 - 不使用 tower：TUI 订阅事件流，不是"请求 → 响应"边界（第 4.1 节）。
 
 ---
@@ -342,4 +347,4 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
         - 测试：10 个 `args` 单元测试、3 个 `faux` 单元测试（在 `ai` 的 `test-util` 下）、11 个 `provider` 单元测试、3 个二进制单元测试、9 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路、`/new` 重置与 `/model` `/thinking` 的宿主行为、纯文本渲染断言）、9 个 **真正运行 `tower-agent-cli` 二进制**的端到端测试（`--help` / `--version`（含 `-v`）/ `--list-tools` / 错误参数 / `--provider` 选择 / 缺凭据 / 未知 provider / 无凭据时的默认 provider 提示 / `--api-key` 需要 `--provider` /
           `--faux` 与
           `--provider faux` 都被拒绝）；TUI 侧另有斜杠菜单的编辑器、渲染与命令分派测试。
-        - 待办：扩展（extensions/MCP/compaction）与更多 provider（bedrock / vertex / mistral / cloudflare / pi-messages）。
+        - 待办：扩展（extensions/MCP）、分支摘要（branch summarization，依赖会话树）、与更多 provider（bedrock / vertex / mistral / cloudflare / pi-messages）。
