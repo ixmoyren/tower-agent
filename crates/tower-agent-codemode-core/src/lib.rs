@@ -153,7 +153,7 @@ impl FromStr for Capability {
 ///
 /// A script is allowed to use a capability only when its corresponding switch
 /// is enabled. The actual filesystem write scope is still governed by mounts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ScriptPermissions {
     /// Allow running coreutils-wasm commands.

@@ -45,7 +45,7 @@ struct WriteParams {
     name: String,
     /// monty Python 源码。
     code: String,
-    /// 可选权限；缺省 = 默认权限（工具/UI/状态/FS 全开，FS 可写范围由挂载模式决定）。
+    /// 可选权限；缺省 = 默认权限（命令/工具/UI/状态/FS 全开，FS 可写范围由挂载模式决定）。
     #[serde(default)]
     permissions: Option<ModPermissions>,
     /// 可选依赖的宿主能力，形如 `tool.read`；进注册表做依赖校验与拓扑排序。
@@ -73,7 +73,7 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
         ToolRegistration::new::<WriteParams, _, _>(
             MOD_WRITE,
             "创建或热重载一个 monty mod：模型生成 Python 代码，代码可调用宿主函数 \
-             （tool_call/log/state_*）、注册工具（tool_register）、贡献 UI（ui_status/ui_panel/ui_tool_render）。\
+             （exec/tool_call/log/state_*）、注册工具（tool_register）、贡献 UI（ui_status/ui_panel/ui_tool_render）。\
              可用 `requires` 声明依赖的宿主能力（如 `tool.read`），`permissions` 收窄权限。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);

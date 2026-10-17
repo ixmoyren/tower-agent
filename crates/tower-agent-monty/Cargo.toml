@@ -27,6 +27,7 @@ tower = { workspace = true }
 wasmtime = { workspace = true }
 monty-fs = "1.1.0"
 monty-types = "1.1.0"
+tower-agent-codemode-core.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -35,3 +35,9 @@ tower-agent-tui = { workspace = true, optional = true }
 tower-agent-protocol = { workspace = true, optional = true }
 tower-agent-plugin-sdk = { workspace = true, optional = true }
 tower-agent-turso = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures-util.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tower.workspace = true

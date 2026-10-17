@@ -3,6 +3,13 @@
 //! 脚本调用未定义的 `function(*args)` 时，monty 会挂起为 `TurnEvent::FunctionCall`；
 //! 宿主把参数转成 JSON 交给 [`MontyHost::dispatch`]，再把结果送回沙箱。参数与返回值
 //! 都是 JSON，因此一个接口就能承载「调工具 / 改 TUI / 读写状态」等所有能力。
+//!
+//! 共享 `exec` 协议：`exec(name: str, args: list[str], opts: object)` 返回
+//! `{code: int, stdout: str, stderr: str}`。`opts` 支持 `stdin`（UTF-8 字符串）、
+//! `timeout_ms`；stdout/stderr 也按 UTF-8 字符串返回（非法字节会被替换）。
+//! `cwd` 字段预留给后续统一文件系统实现，当前会明确返回不支持。
+//! Python 自带同名内建函数，因此引擎预载的 `exec` 包装会转发到内部 host call
+//! `__codemode_exec`；脚本可见 API 仍是 `exec(...)`。
 
 use std::collections::BTreeMap;
 

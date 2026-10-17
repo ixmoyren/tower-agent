@@ -119,11 +119,24 @@ impl Session {
             ),
             None => tower_agent_codemode::SessionRoot::Ephemeral,
         };
+        #[cfg(feature = "mods")]
+        let exec_surface = self
+            .mods
+            .as_ref()
+            .map(|_| {
+                tower_agent_codemode::ExecCapabilitySurface::new(root.clone(), parsed.clone())
+                    .map(Arc::new)
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?;
         let plugin = tower_agent_codemode::CodemodePlugin::new(workspace, root).with_mounts(parsed);
         #[cfg(feature = "mods")]
         if let Some(mods) = &self.mods {
             mods.register_static_plugin(Arc::new(plugin))
                 .map_err(|error| error.to_string())?;
+            if let Some(surface) = exec_surface {
+                mods.set_capability_surface(surface);
+            }
             self.refresh_tools();
             return Ok(());
         }

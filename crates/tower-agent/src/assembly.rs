@@ -104,6 +104,27 @@ impl HostPlugins {
     /// 用这个；只要内置工具 + 宿主能力的宿主用 [`HostPlugins::tools`]。
     #[cfg(feature = "mods")]
     pub fn mods(self, ui: UiState) -> Result<Arc<tower_agent_monty::ModManager>, PluginError> {
-        tower_agent_monty::ModManager::new(ui, self.registry())
+        #[cfg(feature = "codemode")]
+        let capability_surface = self
+            .codemode
+            .as_ref()
+            .map(|setup| {
+                tower_agent_codemode::ExecCapabilitySurface::new(
+                    setup.session.clone(),
+                    setup.mounts.clone(),
+                )
+                .map(Arc::new)
+                .map_err(|error| PluginError::Load {
+                    plugin: "codemode-exec".to_owned(),
+                    message: error.to_string(),
+                })
+            })
+            .transpose()?;
+        let manager = tower_agent_monty::ModManager::new(ui, self.registry())?;
+        #[cfg(feature = "codemode")]
+        if let Some(surface) = capability_surface {
+            manager.set_capability_surface(surface);
+        }
+        Ok(manager)
     }
 }

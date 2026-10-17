@@ -10,6 +10,7 @@
 //! 每次 `run` 都新建 `Store`：组件只编译一次（JIT 缓存），实例用完即丢——所以 guest trap
 //! （例如 JS 深递归、脚本超时）只影响那一次调用，不需要额外的「丢弃实例」逻辑。
 
+mod capability;
 mod exec;
 mod plugin;
 mod tool;
@@ -29,6 +30,8 @@ pub use self::component::exports::tower_agent::codemode::sandbox::{
     CommandLog, RunOpts, RunResult,
 };
 use self::component::tower_agent::codemode::host::{ExecOpts, ExecResult};
+/// 把 coreutils 命令层包装成两个引擎共用的 `CapabilitySurface`。
+pub use capability::ExecCapabilitySurface;
 /// 命令层后端（宿主实现的那一半）。
 pub use exec::ExecService;
 /// codemode 的静态插件形态（名字与能力受保护）。

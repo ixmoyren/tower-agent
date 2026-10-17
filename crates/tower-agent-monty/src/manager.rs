@@ -15,8 +15,10 @@ use futures_util::{StreamExt as _, future::BoxFuture};
 use monty_fs::{MountCallOutcome, MountMode, MountTable};
 use monty_types::OsFunctionCall;
 use semver::{Version, VersionReq};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tower_agent_codemode_core::{
+    Capability, CapabilityError, CapabilitySurface, ExecOptions, ScriptPermissions,
+};
 use tower_agent_core::{
     AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer, UiState,
 };
@@ -78,33 +80,8 @@ pub struct ShadowedTool {
     pub shadowed_by: PluginId,
 }
 
-/// 一个 mod 的权限。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(default)]
-pub struct ModPermissions {
-    /// 允许调用宿主工具（`tool_call` / `tool_list`）。
-    pub tools: bool,
-    /// 允许注册/注销工具（`tool_register` / `tool_unregister`）。
-    pub register_tools: bool,
-    /// 允许贡献 UI（`ui_*`）。
-    pub ui: bool,
-    /// 允许读写宿主状态（`state_*`）与 `log`。
-    pub state: bool,
-    /// 允许文件系统 / OS 调用（实际可写范围由挂载模式决定）。
-    pub fs: bool,
-}
-
-impl Default for ModPermissions {
-    fn default() -> Self {
-        Self {
-            tools: true,
-            register_tools: true,
-            ui: true,
-            state: true,
-            fs: true,
-        }
-    }
-}
+/// 一个 mod 的权限（共享能力层里的 `ScriptPermissions`）。
+pub type ModPermissions = ScriptPermissions;
 
 /// 写一个 mod 时的选项。
 #[derive(Debug, Clone, Default)]
@@ -131,6 +108,7 @@ pub struct ModManager {
     host: HostApi,
     ui: UiState,
     pool: Arc<SandboxPool>,
+    capability_surface: Mutex<Option<Arc<dyn CapabilitySurface>>>,
     mounts: Mutex<MountTable>,
     permissions: Mutex<BTreeMap<String, ModPermissions>>,
     /// 三形态共用的注册表（调用方通常塞入内置静态插件）。
@@ -169,6 +147,7 @@ impl ModManager {
             host: HostApi::from_tools(Vec::<AgentTool>::new()),
             ui,
             pool: crate::sandbox::new_pool(DEFAULT_POOL_SIZE),
+            capability_surface: Mutex::new(None),
             mounts: Mutex::new(MountTable::new()),
             permissions: Mutex::new(BTreeMap::new()),
             registry: Mutex::new(registry),
@@ -226,6 +205,26 @@ impl ModManager {
     #[must_use]
     pub fn host_api(&self) -> &HostApi {
         &self.host
+    }
+
+    /// 注入两个脚本引擎共用的宿主能力面。
+    ///
+    /// monty 只依赖 `tower-agent-codemode-core` 的接口；实际命令执行由宿主实现
+    /// （例如 `tower-agent-codemode::ExecCapabilitySurface`），避免 monty → codemode
+    /// 的反向依赖。
+    pub fn set_capability_surface(&self, surface: Arc<dyn CapabilitySurface>) {
+        *self
+            .capability_surface
+            .lock()
+            .expect("capability surface poisoned") = Some(surface);
+    }
+
+    /// 移除当前注入的宿主能力面（后续能力调用会明确失败）。
+    pub fn clear_capability_surface(&self) {
+        *self
+            .capability_surface
+            .lock()
+            .expect("capability surface poisoned") = None;
     }
 
     /// 解析并安装当前注册表：回写 `HostApi` 与工具目录，返回工具集。
@@ -790,6 +789,12 @@ impl ModManager {
         let denied = |what: &str| Err(format!("mod `{}` is not allowed to {what}", call.plugin));
 
         match call.function.as_str() {
+            "exec" | "__codemode_exec" => {
+                permissions
+                    .authorize(Capability::Exec)
+                    .map_err(|error| capability_error_text(&error))?;
+                self.host_exec(&call).await
+            }
             "tool_call" | "tool_list" => {
                 if !permissions.tools {
                     return denied("call host tools");
@@ -902,6 +907,42 @@ impl ModManager {
         let mut names = self.host.capabilities();
         names.sort();
         json!(names)
+    }
+
+    async fn host_exec(&self, call: &HostCall) -> Result<Value, String> {
+        let name = arg_str(call, 0, "name").ok_or("exec requires (name, args, opts)")?;
+        let args = match call.positional_or_kwarg(1, "args") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(values)) => values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "exec args must be an array of strings".to_owned())
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(other) => return Err(format!("exec args must be an array, got {other}")),
+        };
+        let options = match call.positional_or_kwarg(2, "opts") {
+            None | Some(Value::Null) => ExecOptions::default(),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid exec options: {error}"))?,
+        };
+        let surface = self
+            .capability_surface
+            .lock()
+            .expect("capability surface poisoned")
+            .clone()
+            .ok_or_else(|| "exec capability is not configured by the host".to_owned())?;
+        surface
+            .authorize(Capability::Exec)
+            .map_err(|error| capability_error_text(&error))?;
+        let result = surface
+            .exec(name, args, options)
+            .await
+            .map_err(|error| capability_error_text(&error))?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
     }
 
     async fn host_tool_call(&self, call: &HostCall) -> Result<Value, String> {
@@ -1217,6 +1258,10 @@ fn dedupe_tools(
 fn arg_str<'a>(call: &'a HostCall, index: usize, name: &str) -> Option<&'a str> {
     call.positional_or_kwarg(index, name)
         .and_then(Value::as_str)
+}
+
+fn capability_error_text(error: &CapabilityError) -> String {
+    serde_json::to_string(error).unwrap_or_else(|_| error.to_string())
 }
 
 fn mod_error(name: &str, message: impl Into<String>) -> PluginError {

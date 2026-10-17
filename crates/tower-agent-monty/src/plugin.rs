@@ -15,6 +15,14 @@ use crate::{
     sandbox::{Progress, Sandbox, SandboxPool},
 };
 
+/// `exec` is a Python builtin, so the engine pre-binds the shared capability
+/// name to a private host callback. Keep this protocol in sync with
+/// `ModManager::dispatch`.
+const CAPABILITY_PRELUDE: &str = "\
+def exec(name, args, opts={}):
+    return __codemode_exec(name, args, opts)
+";
+
 /// 一个内嵌 wasm 沙箱的 monty 插件。
 pub struct MontyPlugin {
     manifest: PluginManifest,
@@ -133,7 +141,8 @@ impl MontyPlugin {
         setup: bool,
     ) -> Result<String, PluginError> {
         let name = self.manifest.name.clone();
-        let mut progress = sandbox.start(source)?;
+        let source = format!("{CAPABILITY_PRELUDE}\n{source}");
+        let mut progress = sandbox.start(&source)?;
 
         loop {
             match progress {

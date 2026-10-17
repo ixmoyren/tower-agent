@@ -10,7 +10,8 @@
 //! 一个「mod」是 LLM/用户生成的一段 monty 代码，它能：
 //!
 //! - **调宿主能力**：脚本里未定义的函数调用会让组件返回 `function-call` 进度，经
-//!   [`MontyHost`] 派发到宿主（[`ModManager`] 提供 `tool_call` / `log` / `state_*`）；
+//!   [`MontyHost`] 派发到宿主（[`ModManager`] 提供 `exec` / `tool_call` / `log` /
+//!   `state_*`）；
 //! - **提供工具**：安装期调用 `tool_register(name, function, ...)`，宿主把它包成一个
 //!   [`ModTool`] 动态注册进工具集；
 //! - **改 UI**：调用 `ui_status` / `ui_panel` / `ui_tool_render`，写进前端无关的
@@ -41,6 +42,9 @@ pub use manager::{
 pub use plugin::MontyPlugin;
 pub use store::{ModMeta, ModStore, StoredMod};
 pub use tool::{ModTool, ToolSpec};
+pub use tower_agent_codemode_core::{
+    Capability, CapabilityError, CapabilitySurface, ScriptPermissions,
+};
 
 #[cfg(test)]
 mod tests {
@@ -97,6 +101,172 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    struct TestExecSurface;
+
+    impl CapabilitySurface for TestExecSurface {
+        fn permissions(&self) -> ScriptPermissions {
+            let mut permissions = ScriptPermissions::deny_all();
+            permissions.exec = true;
+            permissions
+        }
+
+        fn exec(
+            &self,
+            name: &str,
+            _args: Vec<String>,
+            _options: tower_agent_codemode_core::ExecOptions,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, tower_agent_codemode_core::ExecResult>
+        {
+            let name = name.to_owned();
+            Box::pin(async move {
+                match name.as_str() {
+                    "cat" => Ok(tower_agent_codemode_core::ExecResult {
+                        code: 0,
+                        stdout: "hello from exec\n".to_owned(),
+                        stderr: String::new(),
+                    }),
+                    "wc" => Ok(tower_agent_codemode_core::ExecResult {
+                        code: 0,
+                        stdout: "1\n".to_owned(),
+                        stderr: String::new(),
+                    }),
+                    other => Err(CapabilityError::Engine {
+                        capability: Capability::Exec,
+                        message: format!("unknown test command `{other}`"),
+                    }),
+                }
+            })
+        }
+
+        fn fs_read(&self, _path: &str) -> tower_agent_codemode_core::CapabilityFuture<'_, Vec<u8>> {
+            unsupported(Capability::Fs)
+        }
+
+        fn fs_write(
+            &self,
+            _path: &str,
+            _contents: Vec<u8>,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::Fs)
+        }
+
+        fn fs_read_dir(
+            &self,
+            _path: &str,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, Vec<tower_agent_codemode_core::FsEntry>>
+        {
+            unsupported(Capability::Fs)
+        }
+
+        fn fs_exists(&self, _path: &str) -> tower_agent_codemode_core::CapabilityFuture<'_, bool> {
+            unsupported(Capability::Fs)
+        }
+
+        fn fs_mkdir(
+            &self,
+            _path: &str,
+            _recursive: bool,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::Fs)
+        }
+
+        fn fs_remove(
+            &self,
+            _path: &str,
+            _recursive: bool,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::Fs)
+        }
+
+        fn tool_call(
+            &self,
+            _name: &str,
+            _args: Value,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, Value> {
+            unsupported(Capability::Tools)
+        }
+
+        fn tool_list(
+            &self,
+        ) -> tower_agent_codemode_core::CapabilityFuture<
+            '_,
+            Vec<tower_agent_codemode_core::ToolDescriptor>,
+        > {
+            unsupported(Capability::Tools)
+        }
+
+        fn tool_register(
+            &self,
+            _registration: tower_agent_codemode_core::ToolRegistration,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::RegisterTools)
+        }
+
+        fn tool_unregister(
+            &self,
+            _name: &str,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::RegisterTools)
+        }
+
+        fn state_get(
+            &self,
+            _key: &str,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, Option<Value>> {
+            unsupported(Capability::State)
+        }
+
+        fn state_set(
+            &self,
+            _key: &str,
+            _value: Value,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::State)
+        }
+
+        fn log(
+            &self,
+            _level: tower_agent_codemode_core::LogLevel,
+            _message: &str,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::State)
+        }
+
+        fn ui_status(&self, _message: &str) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::Ui)
+        }
+
+        fn ui_panel(
+            &self,
+            _panel: tower_agent_codemode_core::UiPanel,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::Ui)
+        }
+
+        fn ui_clear(&self) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::Ui)
+        }
+
+        fn ui_tool_render(
+            &self,
+            _tool: &str,
+            _renderer: Value,
+        ) -> tower_agent_codemode_core::CapabilityFuture<'_, ()> {
+            unsupported(Capability::Ui)
+        }
+    }
+
+    fn unsupported<T>(
+        capability: Capability,
+    ) -> tower_agent_codemode_core::CapabilityFuture<'static, T> {
+        Box::pin(async move {
+            Err(CapabilityError::Engine {
+                capability,
+                message: "test surface does not implement this capability".to_owned(),
+            })
+        })
     }
 
     /// 按名从目录（含地基的作者工具）取工具。
@@ -651,5 +821,53 @@ def read_note(args):
             text.contains("PermissionError") || text.contains("not allowed"),
             "无 fs 权限时应被拒，实际：{text}"
         );
+    }
+
+    #[tokio::test]
+    async fn exec_uses_the_injected_capability_surface() {
+        let manager = manager();
+        manager.set_capability_surface(Arc::new(TestExecSurface));
+
+        let code = "\
+tool_register(\"run_commands\", \"run_commands\", \"\", {\"type\": \"object\"})
+
+def run_commands(args):
+    cat = exec(\"cat\", [\"/work/note.txt\"])
+    wc = exec(\"wc\", [\"-l\", \"/work/note.txt\"])
+    return cat[\"stdout\"] + wc[\"stdout\"]
+";
+        manager.write("exec_caller", code).await.expect("write mod");
+        let text = call_mod_tool(&tool(&manager, "run_commands"), json!({})).await;
+        assert_eq!(text, "hello from exec\n1\n");
+    }
+
+    #[tokio::test]
+    async fn exec_permission_denial_is_explicit() {
+        let manager = manager();
+        manager.set_capability_surface(Arc::new(TestExecSurface));
+
+        let code = "\
+tool_register(\"run_commands\", \"run_commands\", \"\", {\"type\": \"object\"})
+
+def run_commands(args):
+    return exec(\"cat\", [\"/work/note.txt\"])[\"stdout\"]
+";
+        manager
+            .write_with_options(
+                "exec_locked",
+                code,
+                ModOptions {
+                    permissions: Some(ModPermissions {
+                        exec: false,
+                        ..ModPermissions::default()
+                    }),
+                    ..ModOptions::default()
+                },
+            )
+            .await
+            .expect("write locked mod");
+        let text = call_mod_tool(&tool(&manager, "run_commands"), json!({})).await;
+        assert!(text.contains("unauthorized"), "actual: {text}");
+        assert!(text.contains("\"capability\":\"exec\""), "actual: {text}");
     }
 }

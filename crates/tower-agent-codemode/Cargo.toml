@@ -23,6 +23,7 @@ tokio = { workspace = true }
 tower = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
+tower-agent-codemode-core.workspace = true
 
 [dev-dependencies]
 tower-agent-provider = { workspace = true }
