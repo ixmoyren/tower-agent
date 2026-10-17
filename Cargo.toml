@@ -35,6 +35,7 @@ tower-agent-tui = { path = "crates/tower-agent-tui" }
 tower-agent-protocol = { path = "crates/tower-agent-protocol" }
 tower-agent-monty = { path = "crates/tower-agent-monty" }
 tower-agent-wasmtime = { path = "crates/tower-agent-wasmtime" }
+tower-agent-codemode-core = { path = "crates/tower-agent-codemode-core" }
 tower-agent-codemode = { path = "crates/tower-agent-codemode" }
 tower-agent-storage = { path = "crates/tower-agent-storage" }
 tower-agent-turso = { path = "crates/tower-agent-turso" }

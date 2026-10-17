@@ -5267,6 +5267,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tower-agent-codemode-core"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "tower-agent-core"
 version = "0.1.0"
 dependencies = [
