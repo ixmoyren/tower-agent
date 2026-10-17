@@ -79,6 +79,8 @@
 
 ### 4.3 热重载插件（monty）
 
+> **v2 提案（待评审）**：`mods`（本节的 JIT 形态）与 `codemode` 本质是同一件事——*agent 可以编程*：LLM 生成脚本、沙箱执行、脚本既能组合工具也能扩展 agent。计划合并为统一的 `codemode`（解释器可选：monty/Python 或 rquickjs/JS），脚本侧扩展点落在 `tower-agent-plugin-sdk` 上（不新增 crate）。见 [`codemode.md`](./codemode.md) §0 与 [`sdk.md`](./sdk.md)。
+
 - 用 monty（Python 子集）编写脚本；宿主把 monty 解释器编译成 **wasm 组件**（`wasm/monty-sandbox`）内嵌进二进制，用 wasmtime 在沙箱里执行（崩溃/越界/内存超限转成 trap，不波及宿主）；脚本调用的未定义外部函数即宿主能力调用（组件返回 `function-call` → `MontyHost` 回调 → `resume`）。
 - 原子换绑实现 **热加载**：试跑新版本 → 成功才替换源码槽位 → 旧版本等待 in-flight 完成后释放；失败保留旧版本并回报错误。
 - 目标场景：cc 的 `mods` 模式（用户/LLM 可写、可热更的轻量逻辑）。
@@ -87,11 +89,11 @@
 > CLI、没有子进程、不需要 `TPA_MONTY_BIN`；mods 代码的越界/栈溢出/内存超限被 wasmtime 转成 trap 错误，不会带走宿主进程。WIT 接口是宿主驱动的 REPL 状态机（`start` + `resume-*`），参数/返回值都是 JSON；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主，热加载用 `reload_checked` 试跑成功后原子替换源码。重新生成组件：`./wasm/monty-sandbox/generate.sh`。
 >
 > **mods（cc `mods` 模式）**：`ModManager` 管理一组 monty mod，对 LLM 暴露 `mod_write` / `mod_reload` / `mod_list` / `mod_remove` 作者工具。mod 脚本可：
-> 1. **调宿主能力**：`tool_call(name, args)` / `log` / `state_get` / `state_set`；
+> 1. **调宿主能力**：`exec(name, args, opts)` / `tool_call(name, args)` / `log` / `state_get` / `state_set`；
 > 2. **提供工具**：安装期 `tool_register(name, function, description, parameters)` 把 Python 函数包成 `ModTool`，运行时动态注册进 `HostApi` 与 agent 工具集（`tool_unregister` 注销）；
 > 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据。
 >
-> 沙箱侧还提供： **实例池**（`SandboxPool`，一次运行借出、跑完归还）+ **预热**（`ModManager::warmup` / `spawn_warmup` 后台编译组件、预建实例）、 **文件系统挂载**（`ModManager::mount*` 用 `monty-fs` 的 `MountTable` 在宿主侧服务 OS 调用：`ReadOnly` / `OverlayMemory` / `ReadWrite`）与 **每-mod 权限**（`ModPermissions`：`tools` / `register_tools` / `ui` / `state` / `fs`，在派发与 OS 处理时强制）。CLI 默认把工作目录只读挂到 `/work`。
+> 沙箱侧还提供： **实例池**（`SandboxPool`，一次运行借出、跑完归还）+ **预热**（`ModManager::warmup` / `spawn_warmup` 后台编译组件、预建实例）、 **文件系统挂载**（`ModManager::mount*` 用 `monty-fs` 的 `MountTable` 在宿主侧服务 OS 调用：`ReadOnly` / `OverlayMemory` / `ReadWrite`）与 **每-mod 权限**（`ModPermissions` 现为 `ScriptPermissions` 别名：`exec` / `fs` / `tools` / `register_tools` / `hooks` / `commands` / `ui` / `state`，在派发与 OS 处理时强制）。CLI 默认把工作目录只读挂到 `/work`。
 >
 > **三形态同表（解析规则一致）**：mod 以 `PluginKind::Jit` 载荷注册进 **同一个 `PluginRegistry`**（内置工具是同一注册表里的静态插件），因此覆盖优先级（静态 < 动态 < JIT）、能力级覆盖、依赖图/拓扑排序、版本收敛与被遮蔽记录（`ModManager::shadows`）对三形态统一生效——同名 JIT mod 会遮蔽同名静态插件。工具目录的唯一来源是「解析 + 安装」的结果（`ModManager::tools`），`HostApi` 同步获得同一份工具集；`--tools` / `--exclude-tools` / `--no-tools` 以 `ToolFilter` 作用在该目录之上。
 >
@@ -348,7 +350,7 @@ pub enum PluginError {
 | M1 ✅  | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移；生命周期 / 宿主 API / 权限 / 错误已落地 |
 | M2 ✅  | `plugins-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `../examples/plugin-dyn` 示例 cdylib + 端到端测试                          |
 | M3 ✅  | `tower-agent-monty`（monty + monty-pool）：宿主函数回调、原子换绑热加载与失败回滚                                                                                    |
-| M4     | 大型动态插件：沙箱 / 记忆 / 持久化 / codemode；cc `mods` 模式接入                                                                                                    |
+| M4 ◐   | 沙箱（`tower-agent-wasmtime`）/ 记忆 / 持久化 / codemode 已各自落地为静态插件；**未完成**：动态形态的沙箱与记忆、`mods` 与 `codemode` 的统一（见 [`codemode.md`](./codemode.md) §0）。其余未完成项见 [`roadmap.md`](./roadmap.md)。 |
 
 ## 16. 已确认决策
 

@@ -17,7 +17,9 @@ use std::{
 
 use bindings::{
     exports::tower_agent::codemode::sandbox::{CommandLog, Guest, RunOpts, RunResult},
-    tower_agent::codemode::host::{ExecOpts, exec},
+    tower_agent::codemode::host::{
+        ExecOpts, ToolRegistration, exec, tool_call, tool_list, tool_register, tool_unregister,
+    },
 };
 use rquickjs::{Context, Ctx, Function, Promise, Runtime, Value, promise::PromiseState};
 
@@ -64,6 +66,18 @@ globalThis.__call = (payload) => {
   if (!r.ok) throw new Error(r.error);
   return r.data;
 };
+globalThis.tool_call = async (name, args = {}) =>
+  __call(__toolCall(String(name), JSON.stringify(args)));
+globalThis.tool_list = () => __call(__toolList());
+globalThis.tool_register = (name, handler, description = "", parameters = {}, outputSchema = null) =>
+  __call(__toolRegister(
+    String(name),
+    String(handler),
+    String(description),
+    JSON.stringify(parameters),
+    outputSchema === null || outputSchema === undefined ? null : JSON.stringify(outputSchema),
+  ));
+globalThis.tool_unregister = (name) => __call(__toolUnregister(String(name)));
 globalThis.fs = {
   readFile: (path) => __call(__readFile(String(path))),
   writeFile: (path, data) => __call(__writeFile(String(path), String(data))),
@@ -217,6 +231,71 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .set("__exec", exec_fn)
         .map_err(|e| format!("__exec: {e}"))?;
 
+    let call_tool = Function::new(
+        ctx.clone(),
+        |name: String, args_json: String| -> String {
+            capability_payload(tool_call(&name, &args_json))
+        },
+    )
+    .map_err(|e| format!("__toolCall: {e}"))?;
+    ctx.globals()
+        .set("__toolCall", call_tool)
+        .map_err(|e| format!("__toolCall: {e}"))?;
+
+    let list_tools = Function::new(ctx.clone(), || -> String {
+        let result = tool_list().map(|tools| {
+            tools
+                .into_iter()
+                .map(|tool| {
+                    serde_json::json!({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": serde_json::from_str::<serde_json::Value>(&tool.parameters)
+                            .unwrap_or_else(|_| serde_json::json!({ "type": "object" })),
+                        "output_schema": tool.output_schema.and_then(|schema| {
+                            serde_json::from_str::<serde_json::Value>(&schema).ok()
+                        }),
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        capability_payload(result)
+    })
+    .map_err(|e| format!("__toolList: {e}"))?;
+    ctx.globals()
+        .set("__toolList", list_tools)
+        .map_err(|e| format!("__toolList: {e}"))?;
+
+    let register_tool = Function::new(
+        ctx.clone(),
+        |name: String,
+         handler: String,
+         description: String,
+         parameters: String,
+         output_schema: Option<String>|
+         -> String {
+            capability_payload(tool_register(&ToolRegistration {
+                name,
+                handler,
+                description,
+                parameters,
+                output_schema,
+            }))
+        },
+    )
+    .map_err(|e| format!("__toolRegister: {e}"))?;
+    ctx.globals()
+        .set("__toolRegister", register_tool)
+        .map_err(|e| format!("__toolRegister: {e}"))?;
+
+    let unregister_tool = Function::new(ctx.clone(), |name: String| -> String {
+        capability_payload(tool_unregister(&name))
+    })
+    .map_err(|e| format!("__toolUnregister: {e}"))?;
+    ctx.globals()
+        .set("__toolUnregister", unregister_tool)
+        .map_err(|e| format!("__toolUnregister: {e}"))?;
+
     let read = Function::new(ctx.clone(), |path: String| -> String {
         match std::fs::read_to_string(&path) {
             Ok(data) => serde_json::json!({ "ok": true, "data": data }).to_string(),
@@ -303,6 +382,13 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .map_err(|e| format!("__rm: {e}"))?;
 
     Ok(())
+}
+
+fn capability_payload<T: serde::Serialize>(result: Result<T, String>) -> String {
+    match result {
+        Ok(data) => serde_json::json!({ "ok": true, "data": data }).to_string(),
+        Err(error) => serde_json::json!({ "ok": false, "error": error }).to_string(),
+    }
 }
 
 /// 把 JS 异常整理成一句给宿主看的话。

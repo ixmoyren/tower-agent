@@ -11,7 +11,7 @@
 
 行为对齐仍然以 pi 参考实现为准，工作流见 skill `rust-pi-agent-rewrite`；本文只规定结构，不改变行为。
 
-> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、monty 热重载插件）、[`codemode.md`](./codemode.md)（codemode 模式：rquickjs + wasmtime + uutils，v0.1 草案，待决策）。
+> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、JIT 脚本插件）、[`codemode.md`](./codemode.md)（**agent 可以编程**：§0 是"mods/codemode 统一 + 解释器可选"的 v2 提案，§1–§11 是 JS 引擎细节）、[`sdk.md`](./sdk.md)（扩展点设计，落在 `tower-agent-plugin-sdk`）、[`roadmap.md`](./roadmap.md)（未完成事项的单一入口）。
 
 ---
 
@@ -347,4 +347,4 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
         - 测试：10 个 `args` 单元测试、3 个 `faux` 单元测试（在 `ai` 的 `test-util` 下）、11 个 `provider` 单元测试、3 个二进制单元测试、9 个会话端到端测试（含"用户 → 工具调用 → 真实 `read` 工具执行 → 工具结果 → 收尾回复"的完整链路、`/new` 重置与 `/model` `/thinking` 的宿主行为、纯文本渲染断言）、9 个 **真正运行 `tower-agent-cli` 二进制**的端到端测试（`--help` / `--version`（含 `-v`）/ `--list-tools` / 错误参数 / `--provider` 选择 / 缺凭据 / 未知 provider / 无凭据时的默认 provider 提示 / `--api-key` 需要 `--provider` /
           `--faux` 与
           `--provider faux` 都被拒绝）；TUI 侧另有斜杠菜单的编辑器、渲染与命令分派测试。
-        - 待办：扩展（extensions/MCP）、分支摘要（branch summarization，依赖会话树）、与更多 provider（bedrock / vertex / mistral / cloudflare / pi-messages）。
+        - 待办：见 [`roadmap.md`](./roadmap.md)（扩展 / MCP、会话树与分支摘要、codemode 与 SDK 统一、更多 provider 等）。

@@ -134,15 +134,18 @@ tower-agent/
 └── wasm/                    # 独立的 wasm 组件 workspace
     ├── monty-sandbox/       #   把 monty 解释器编译成 wasm 组件
     ├── coreutils-wasm/      #   codemode 的命令层（uutils multicall，60 命令）
-    └── codemode-sandbox/    #   codemode 的 JS 沙箱（rquickjs → wasip2）
+    └── rquickjs-sandbox/    #   codemode 的 JS 沙箱（rquickjs → wasip2）
 ```
 
 ### 文档
 
+- [`TASKS.md`](TASKS.md)：**当前可执行任务清单**（codemode v2 的决策、任务、依赖、验收标准；冷启动从这里开始）。
 - [`docs/design.md`](docs/design.md)：整体设计 —— tower 模型与 pi 概念的映射、移植路线。
 - [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md)：目标架构与迁移计划。
-- [`docs/plugins.md`](docs/plugins.md)：插件 / 扩展体系（静态 / 动态 / 热重载）。
-- [`docs/codemode.md`](docs/codemode.md)：codemode 模式（rquickjs + wasmtime + uutils：脚本与命令都在 wasm 沙箱里跑）。
+- [`docs/plugins.md`](docs/plugins.md)：插件 / 扩展体系（静态 / 动态 / JIT 脚本）。
+- [`docs/codemode.md`](docs/codemode.md)：codemode —— **agent 可以编程**（LLM 生成脚本、沙箱执行；解释器可选 monty/Python 或 rquickjs/JS）。§0 是 v2 统一提案，§1–§11 是 JS 引擎细节。
+- [`docs/sdk.md`](docs/sdk.md)：扩展点设计（对照 pi `ExtensionAPI`）——落在 `tower-agent-plugin-sdk` 上，Rust 插件与沙箱脚本共用同一套语义。
+- [`docs/roadmap.md`](docs/roadmap.md)：**未完成事项**的单一入口（以及建议顺序）。
 - [`docs/architecture-review.md`](docs/architecture-review.md)：现状评审。
 - [`wasm/monty-sandbox/README.md`](wasm/monty-sandbox/README.md)：wasm 组件接口与再生成流程。
 
@@ -167,21 +170,21 @@ cargo clippy --all-features --all-targets
 |------------------------------------------------------|------------------------|------------------------------------------------------|
 | `crates/tower-agent-monty/assets/monty-sandbox.wasm` | `tower-agent-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
 | `crates/tower-agent-codemode/assets/coreutils.wasm`  | `tower-agent-codemode` | `./wasm/coreutils-wasm/generate.sh`                  |
-| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/codemode-sandbox/generate.sh` |
+| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/rquickjs-sandbox/generate.sh` |
 
 工具链（只在编 wasm 时要用，日常 `cargo build` 不需要）：
 
 ```sh
 rustup target add wasm32-wasip2          # 三个产物都要
 rustup target add wasm32-wasip1          # monty-sandbox 走 p1 + wasm-opt + 组件化
-cargo install cargo-component --locked   # monty-sandbox 与 codemode-sandbox
+cargo install cargo-component --locked   # monty-sandbox 与 rquickjs-sandbox
 cargo install wasm-tools --locked        # monty-sandbox（embed/new）
 # wasm-opt（binaryen）                    # monty-sandbox 的体积优化
-# WASI_SDK（wasi-sdk 24+ 的根目录）       # codemode-sandbox：rquickjs 要编 quickjs 的 C 源码
+# WASI_SDK（wasi-sdk 24+ 的根目录）       # rquickjs-sandbox：rquickjs 要编 quickjs 的 C 源码
 ```
 
 - **coreutils-wasm** 最简单：只要 `wasm32-wasip2`，rustc 直出组件（不需要 wasi-sdk / wasm-opt / wasm-tools）。
-- **codemode-sandbox** 需要 `WASI_SDK`（本机可在 `~/.cache/wasi-sdk-*`）；crates.io 上的 `rquickjs-sys`
+- **rquickjs-sandbox** 需要 `WASI_SDK`（本机可在 `~/.cache/wasi-sdk-*`）；crates.io 上的 `rquickjs-sys`
   自带 quickjs 的 C 源码，所以 **不需要子模块或 vendor**。
 - 首次构建某条链路要从 crates.io 拉依赖；之后各 workspace 里的 `Cargo.lock` 已固定版本，可加 `--offline`。
 - 细节（接口、上限、重生成流程）见各 workspace 的 README：`wasm/*/README.md`。

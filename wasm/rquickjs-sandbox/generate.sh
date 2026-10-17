@@ -32,5 +32,5 @@ CARGO_TARGET_DIR="$target_dir" cargo component build --release --target wasm32-w
 
 echo "[3/3] 落到宿主 crate 的 assets/"
 mkdir -p "$(dirname "$out")"
-cp "$target_dir/wasm32-wasip2/release/codemode_sandbox.wasm" "$out"
+cp "$target_dir/wasm32-wasip2/release/rquickjs_sandbox.wasm" "$out"
 echo "wrote $out ($(du -h "$out" | cut -f1))"

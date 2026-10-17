@@ -45,7 +45,7 @@ pub fn tool_parameters() -> Value {
         "properties": {
             "code": {
                 "type": "string",
-                "description": "一段 JavaScript。可用：`await exec(name, args, opts)`（跑 coreutils，返回 {code, stdout, stderr}）、`fs.readFile/writeFile/readdir`（会话目录，`/` 就是会话根）、`console.log`（输出会带回），`return` 的值也会带回。"
+                "description": "一段 JavaScript。可用：`await exec(name, args, opts)`（跑 coreutils）、`await tool_call(name, args)` / `tool_list()`（宿主工具）、`tool_register(name, handler, description, parameters)` / `tool_unregister(name)`（扩展工具）、`fs.readFile/writeFile/readdir`（会话目录）、`console.log`；`return` 的值也会带回。"
             },
             "timeout_ms": {
                 "type": "integer",
@@ -69,6 +69,8 @@ pub fn tool_description() -> String {
         "- 想拿退出码/原始 stderr 就用 `.result()`：`const r = await cat(\"/missing\").result()` → `{ code, stdout, stderr }`（不抛）；`await <cmd>` 遇非零退出会抛异常。",
         "- 逃生口：`await exec(\"sort\", [\"-n\", \"/a.txt\"], { stdin: \"4\\n2\\n\" })` → `{ code, stdout, stderr }`；命令共 60 个（cat head tail tac nl fold expand unexpand od cut tr uniq comm join paste split shuf tsort sort wc seq ls cp mv rm mkdir touch mktemp dirname basename realpath readlink ln link unlink truncate true false echo printf test expr date sleep tee yes pwd numfmt factor printenv md5sum sha1sum sha256sum sha512sum b2sum cksum sum base64 base32 basenc）。",
         "- `fs.readFile(path)` / `fs.writeFile(path, text)` / `fs.readdir(path)` / `fs.exists(path)` / `fs.mkdir(path)` / `fs.rm(path)`：`/` 是会话根（越界路径会抛错）。",
+        "- `await tool_call(name, args)` 调用宿主工具，返回文本结果；`tool_list()` 返回可用工具元数据。",
+        "- `tool_register(name, handler, description, parameters[, outputSchema])` 注册一个脚本函数作为新工具；`tool_unregister(name)` 只注销脚本自己注册的工具。",
         "- 命令有**硬超时**（默认 10 s，`exec(..., { timeoutMs })` 可覆盖；脚本整体默认 30 s）：超时会被取消，不会挂住。",
         "- `console.log(...)` 的输出会作为 stdout 带回；`return <值>` 会以 JSON 带回。",
         "",
@@ -120,6 +122,19 @@ pub struct CodemodeTool {
 impl CodemodeTool {
     /// 起一条专用 worker 线程并在其上编译两个组件；返回时组件已编译好（避免第一次调用慢启动）。
     pub fn new(options: CodemodeOptions) -> Result<Self, CodemodeError> {
+        Self::new_with_host(
+            options,
+            tower_agent_plugins::HostApi::from_tools(Vec::<AgentTool>::new()),
+            tower_agent_codemode_core::ScriptPermissions::default(),
+        )
+    }
+
+    /// 起 worker，并把宿主工具表与脚本权限交给 codemode 宿主。
+    pub fn new_with_host(
+        options: CodemodeOptions,
+        host: tower_agent_plugins::HostApi,
+        permissions: tower_agent_codemode_core::ScriptPermissions,
+    ) -> Result<Self, CodemodeError> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
 
@@ -127,7 +142,7 @@ impl CodemodeTool {
             .name("codemode".to_owned())
             .stack_size(WORKER_STACK)
             .spawn(move || {
-                let host = match CodemodeHost::new(options) {
+                let host = match CodemodeHost::new_with_host(options, host, permissions) {
                     Ok(host) => {
                         let _ = ready_tx.send(Ok(()));
                         host
@@ -215,6 +230,23 @@ impl CodemodeTool {
         session: SessionRoot,
         mounts: &[crate::Mount],
     ) -> Result<Self, CodemodeError> {
+        Self::for_workspace_with_host(
+            workspace,
+            session,
+            mounts,
+            tower_agent_plugins::HostApi::from_tools(Vec::<AgentTool>::new()),
+            tower_agent_codemode_core::ScriptPermissions::default(),
+        )
+    }
+
+    /// 完整版：在 [`Self::for_workspace_with`] 基础上注入宿主工具与权限。
+    pub fn for_workspace_with_host(
+        workspace: impl AsRef<std::path::Path>,
+        session: SessionRoot,
+        mounts: &[crate::Mount],
+        host: tower_agent_plugins::HostApi,
+        permissions: tower_agent_codemode_core::ScriptPermissions,
+    ) -> Result<Self, CodemodeError> {
         let (root, temp) = match session {
             SessionRoot::Ephemeral => {
                 let dir = tempfile::tempdir()
@@ -231,7 +263,7 @@ impl CodemodeTool {
         let mut options = CodemodeOptions::embedded(root)
             .mount(crate::Mount::read_only(workspace.as_ref(), "/work"));
         options.mounts.extend(mounts.iter().cloned());
-        let mut tool = Self::new(options)?;
+        let mut tool = Self::new_with_host(options, host, permissions)?;
         tool.session = temp;
         Ok(tool)
     }

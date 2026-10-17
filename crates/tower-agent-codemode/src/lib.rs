@@ -1,4 +1,4 @@
-//! codemode 宿主：驱动 `wasm/codemode-sandbox` 那份 JS 沙箱组件，并实现它的命令层
+//! codemode 宿主：驱动 `wasm/rquickjs-sandbox` 那份 JS 沙箱组件，并实现它的命令层
 //! （`tower-agent:codemode/host.exec` → 起 `wasm/coreutils-wasm` 那份 multicall 组件）。
 //!
 //! 分工：
@@ -17,10 +17,19 @@ mod tool;
 
 use std::{
     borrow::Cow,
+    collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, Weak},
+    task::{Context, Poll},
 };
 
+use futures_util::{StreamExt as _, future::BoxFuture};
+use serde_json::Value;
+use tower::Service;
+use tower_agent_codemode_core::{Capability, CapabilityError, ScriptPermissions};
+use tower_agent_core::{AgentError, AgentTool, AgentToolResult, ToolCallRequest, ToolResultStream};
+use tower_agent_plugins::HostApi;
+use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
 use tower_agent_wasmtime::{HostState, SandboxEngine, SandboxError, SandboxOptions};
 use wasmtime::{Store, StoreLimitsBuilder};
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtxBuilder};
@@ -29,7 +38,10 @@ use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtxBuilder};
 pub use self::component::exports::tower_agent::codemode::sandbox::{
     CommandLog, RunOpts, RunResult,
 };
-use self::component::tower_agent::codemode::host::{ExecOpts, ExecResult};
+use self::component::tower_agent::codemode::host::{
+    ExecOpts, ExecResult, ToolDescriptor as WireToolDescriptor,
+    ToolRegistration as WireToolRegistration,
+};
 /// 把 coreutils 命令层包装成两个引擎共用的 `CapabilitySurface`。
 pub use capability::ExecCapabilitySurface;
 /// 命令层后端（宿主实现的那一半）。
@@ -95,7 +107,7 @@ pub fn clear_session_in(root: &Path, name: &str) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// 内嵌的 JS 沙箱组件（由 `wasm/codemode-sandbox/generate.sh` 生成并入库）。
+/// 内嵌的 JS 沙箱组件（由 `wasm/rquickjs-sandbox/generate.sh` 生成并入库）。
 pub const EMBEDDED_SANDBOX: &[u8] =
     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/codemode.wasm"));
 
@@ -109,7 +121,7 @@ pub const EMBEDDED_COREUTILS: &[u8] = include_bytes!(concat!(
 #[allow(missing_docs)]
 mod component {
     wasmtime::component::bindgen!({
-        path: "../../wasm/codemode-sandbox/wit",
+        path: "../../wasm/rquickjs-sandbox/wit",
         world: "codemode",
         // 导出侧要异步绑定：这样 `call_run` 是可取消的 future（超时才能掐断）。
         exports: { default: async },
@@ -366,17 +378,41 @@ fn guest_sandbox_options() -> SandboxOptions {
     }
 }
 
+struct HostBackend {
+    exec: Arc<ExecService>,
+    host: HostApi,
+    permissions: ScriptPermissions,
+    current_source: Mutex<Option<String>>,
+    script_tools: Mutex<BTreeSet<String>>,
+    this: Mutex<Weak<CodemodeHost>>,
+}
+
+type HostFuture<'a, T> = Box<dyn std::future::Future<Output = wasmtime::Result<(T,)>> + Send + 'a>;
+
 /// codemode 宿主。
 pub struct CodemodeHost {
     engine: Arc<SandboxEngine>,
-    exec: Arc<ExecService>,
+    backend: Arc<HostBackend>,
     root: PathBuf,
     mounts: Vec<Mount>,
 }
 
 impl CodemodeHost {
     /// 编译两个组件、装好命令层，得到一个可反复调用的宿主。
-    pub fn new(options: CodemodeOptions) -> Result<Self, CodemodeError> {
+    pub fn new(options: CodemodeOptions) -> Result<Arc<Self>, CodemodeError> {
+        Self::new_with_host(
+            options,
+            HostApi::from_tools(Vec::<AgentTool>::new()),
+            ScriptPermissions::default(),
+        )
+    }
+
+    /// 构造带宿主工具表与脚本权限的 codemode 宿主。
+    pub fn new_with_host(
+        options: CodemodeOptions,
+        host: HostApi,
+        permissions: ScriptPermissions,
+    ) -> Result<Arc<Self>, CodemodeError> {
         let exec = Arc::new(ExecService::new(
             &options.coreutils_wasm,
             &options.session_root,
@@ -384,9 +420,17 @@ impl CodemodeHost {
             options.command_timeout,
             &options.sandbox,
         )?);
+        let backend = Arc::new(HostBackend {
+            exec,
+            host,
+            permissions,
+            current_source: Mutex::new(None),
+            script_tools: Mutex::new(BTreeSet::new()),
+            this: Mutex::new(Weak::new()),
+        });
 
         let mut engine = SandboxEngine::new(&options.sandbox_wasm, options.sandbox.clone())?;
-        let backend = Arc::clone(&exec);
+        let backend_for_exec = Arc::clone(&backend);
         engine
             .linker_mut()
             .instance("tower-agent:codemode/host@0.1.0")
@@ -395,29 +439,90 @@ impl CodemodeHost {
                 "exec",
                 move |_store: wasmtime::StoreContextMut<'_, HostState>,
                       (name, args, opts): (String, Vec<String>, ExecOpts)|
-                      -> Box<
-                    dyn std::future::Future<
-                            Output = wasmtime::Result<(Result<ExecResult, String>,)>,
-                        > + Send
-                        + '_,
-                > {
-                    // 宿主 import 走异步：命令被 `await`，于是它的超时能**取消**整个调用，
-                    // 而不是把宿主线程一起卡住（epoch 只能打断正在执行的 wasm 指令）。
-                    let backend = Arc::clone(&backend);
+                      -> HostFuture<'_, Result<ExecResult, String>> {
+                    let backend = Arc::clone(&backend_for_exec);
                     Box::new(async move {
-                        // 命令层自己把错误变成 `result<_, string>`，不让它升级成 wasm trap。
-                        Ok((backend.exec(&name, &args, &opts).await,))
+                        if let Err(error) = backend.permissions.authorize(Capability::Exec) {
+                            return Ok((Err(capability_error_text(&error)),));
+                        }
+                        Ok((backend.exec.exec(&name, &args, &opts).await,))
                     })
                 },
             )
             .map_err(|e| CodemodeError::Link(e.to_string()))?;
 
-        Ok(Self {
+        let backend_for_tools = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "tool-call",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (name, args_json): (String, String)|
+                      -> HostFuture<'_, Result<String, String>> {
+                    let backend = Arc::clone(&backend_for_tools);
+                    Box::new(async move { Ok((backend.tool_call(&name, &args_json).await,)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_list = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "tool-list",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (): ()|
+                      -> HostFuture<'_, Result<Vec<WireToolDescriptor>, String>> {
+                    let backend = Arc::clone(&backend_for_list);
+                    Box::new(async move { Ok((backend.tool_list(),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_register = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "tool-register",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (registration,): (WireToolRegistration,)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_register);
+                    Box::new(async move { Ok((backend.tool_register(registration),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_unregister = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "tool-unregister",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (name,): (String,)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_unregister);
+                    Box::new(async move { Ok((backend.tool_unregister(&name),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let host = Arc::new(Self {
             engine: Arc::new(engine),
-            exec,
+            backend: Arc::clone(&backend),
             root: options.session_root,
             mounts: options.mounts,
-        })
+        });
+        *backend.this.lock().expect("codemode host weak poisoned") = Arc::downgrade(&host);
+        Ok(host)
     }
 
     /// 会话根目录。
@@ -429,7 +534,13 @@ impl CodemodeHost {
     /// 命令层后端（想直接跑命令、或做冒烟测试时用）。
     #[must_use]
     pub fn exec(&self) -> &ExecService {
-        &self.exec
+        &self.backend.exec
+    }
+
+    /// 宿主工具表（脚本注册的工具也会写回这里）。
+    #[must_use]
+    pub fn host_api(&self) -> &HostApi {
+        &self.backend.host
     }
 
     /// 跑一段 JS，返回脚本的 `return` 值（JSON）、`console.log` 收集与命令流水。
@@ -441,33 +552,48 @@ impl CodemodeHost {
         code: &str,
         timeout_ms: Option<u32>,
     ) -> Result<RunResult, CodemodeError> {
-        let mut store = self.store()?;
-        let bindings = component::Codemode::instantiate_async(
-            &mut store,
-            self.engine.component(),
-            self.engine.linker(),
-        )
-        .await
-        .map_err(|e| CodemodeError::Link(e.to_string()))?;
-        let opts = RunOpts {
-            cwd: None,
-            timeout_ms: Some(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
-            utils: COMMANDS.iter().map(|name| (*name).to_owned()).collect(),
-        };
-        // 三层：超时 → wasm 级失败（trap 之类）→ 脚本自己返回的 `Err(message)`。
-        let budget = std::time::Duration::from_millis(u64::from(
-            opts.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
-        ));
-        let outcome = tokio::time::timeout(
-            budget,
-            bindings
-                .tower_agent_codemode_sandbox()
-                .call_run(&mut store, code, &opts),
-        )
-        .await
-        .map_err(|_| CodemodeError::Script(format!("脚本超时（{} ms）", budget.as_millis())))?
-        .map_err(|e| CodemodeError::Script(describe(&e)))?;
-        outcome.map_err(CodemodeError::Script)
+        let previous_source = self
+            .backend
+            .current_source
+            .lock()
+            .expect("codemode source poisoned")
+            .replace(code.to_owned());
+        let result = async {
+            let mut store = self.store()?;
+            let bindings = component::Codemode::instantiate_async(
+                &mut store,
+                self.engine.component(),
+                self.engine.linker(),
+            )
+            .await
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+            let opts = RunOpts {
+                cwd: None,
+                timeout_ms: Some(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
+                utils: COMMANDS.iter().map(|name| (*name).to_owned()).collect(),
+            };
+            // 三层：超时 → wasm 级失败（trap 之类）→ 脚本自己返回的 `Err(message)`。
+            let budget = std::time::Duration::from_millis(u64::from(
+                opts.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
+            ));
+            let outcome = tokio::time::timeout(
+                budget,
+                bindings
+                    .tower_agent_codemode_sandbox()
+                    .call_run(&mut store, code, &opts),
+            )
+            .await
+            .map_err(|_| CodemodeError::Script(format!("脚本超时（{} ms）", budget.as_millis())))?
+            .map_err(|e| CodemodeError::Script(describe(&e)))?;
+            outcome.map_err(CodemodeError::Script)
+        }
+        .await;
+        *self
+            .backend
+            .current_source
+            .lock()
+            .expect("codemode source poisoned") = previous_source;
+        result
     }
 
     /// 同步便利入口：内部起一个 current-thread runtime 跑 [`Self::run_async`]。
@@ -498,6 +624,242 @@ impl CodemodeHost {
         );
         store.limiter(|state| &mut state.limits);
         Ok(store)
+    }
+}
+
+impl HostBackend {
+    async fn tool_call(&self, name: &str, args_json: &str) -> Result<String, String> {
+        self.permissions
+            .authorize(Capability::Tools)
+            .map_err(|error| capability_error_text(&error))?;
+        let args: Value = serde_json::from_str(args_json)
+            .map_err(|error| format!("invalid tool args: {error}"))?;
+        let arguments = match args {
+            Value::Object(object) => object,
+            Value::Null => serde_json::Map::new(),
+            other => return Err(format!("tool args must be an object, got {other}")),
+        };
+        let request = ToolCallRequest::new(ToolCall {
+            id: format!("codemode:{name}"),
+            name: name.to_owned(),
+            arguments: Arguments::from(arguments),
+            thought_signature: None,
+            namespace: None,
+        });
+        let mut stream = self
+            .host
+            .call_tool(name, request)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut result = None;
+        while let Some(item) = stream.next().await {
+            result = Some(item);
+        }
+        let result = result.ok_or_else(|| format!("tool `{name}` produced no result"))?;
+        if result.is_error {
+            return Err(result_text(&result));
+        }
+        serde_json::to_string(&Value::String(result_text(&result)))
+            .map_err(|error| format!("serialize tool result: {error}"))
+    }
+
+    fn tool_list(&self) -> Result<Vec<WireToolDescriptor>, String> {
+        self.permissions
+            .authorize(Capability::Tools)
+            .map_err(|error| capability_error_text(&error))?;
+        let mut names = self.host.capabilities();
+        names.sort();
+        Ok(names
+            .into_iter()
+            .map(|name| {
+                let tool = self.host.tool(&name);
+                let description = tool
+                    .as_ref()
+                    .map(|tool| tool.tool_description().to_owned())
+                    .unwrap_or_default();
+                let parameters = tool
+                    .as_ref()
+                    .and_then(|tool| serde_json::to_string(tool.tool_parameters()).ok())
+                    .unwrap_or_else(|| "{\"type\":\"object\"}".to_owned());
+                let output_schema = tool
+                    .as_ref()
+                    .and_then(|tool| tool.declared_output_schema().cloned())
+                    .and_then(|schema| serde_json::to_string(&schema).ok());
+                WireToolDescriptor {
+                    name,
+                    description,
+                    parameters,
+                    output_schema,
+                }
+            })
+            .collect())
+    }
+
+    fn tool_register(&self, registration: WireToolRegistration) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::RegisterTools)
+            .map_err(|error| capability_error_text(&error))?;
+        if registration.name.trim().is_empty() {
+            return Err("tool_register requires a non-empty tool name".to_owned());
+        }
+        if !is_js_identifier(&registration.handler) {
+            return Err(format!(
+                "tool handler `{}` must be a JavaScript identifier",
+                registration.handler
+            ));
+        }
+        let parameters: Value = serde_json::from_str(&registration.parameters)
+            .map_err(|error| format!("invalid parameter schema: {error}"))?;
+        if !parameters.is_object() {
+            return Err("tool parameter schema must be a JSON object".to_owned());
+        }
+        let output_schema = registration
+            .output_schema
+            .map(|schema| {
+                serde_json::from_str::<Value>(&schema)
+                    .map_err(|error| format!("invalid output schema: {error}"))
+            })
+            .transpose()?;
+        let source = self
+            .current_source
+            .lock()
+            .expect("codemode source poisoned")
+            .clone()
+            .ok_or_else(|| "tool_register must run inside a codemode script".to_owned())?;
+
+        let mut registered = self
+            .script_tools
+            .lock()
+            .expect("codemode script tools poisoned");
+        if !registered.contains(&registration.name) && self.host.tool(&registration.name).is_some()
+        {
+            return Err(format!(
+                "tool `{}` already exists and is not owned by a script",
+                registration.name
+            ));
+        }
+        let script_tool = ScriptTool {
+            host: self
+                .this
+                .lock()
+                .expect("codemode host weak poisoned")
+                .clone(),
+            source,
+            function: registration.handler,
+        };
+        let mut tool = AgentTool::new(registration.name.clone(), script_tool)
+            .label(registration.name.clone())
+            .description(registration.description)
+            .parameters(parameters);
+        if let Some(schema) = output_schema {
+            tool = tool.output_schema(schema);
+        }
+        self.host.register_tool(tool);
+        registered.insert(registration.name);
+        Ok(true)
+    }
+
+    fn tool_unregister(&self, name: &str) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::RegisterTools)
+            .map_err(|error| capability_error_text(&error))?;
+        let owned = self
+            .script_tools
+            .lock()
+            .expect("codemode script tools poisoned")
+            .remove(name);
+        if !owned {
+            return Ok(false);
+        }
+        self.host.remove_tool(name);
+        Ok(true)
+    }
+}
+
+#[derive(Clone)]
+struct ScriptTool {
+    host: Weak<CodemodeHost>,
+    source: String,
+    function: String,
+}
+
+impl Service<ToolCallRequest> for ScriptTool {
+    type Response = ToolResultStream;
+    type Error = AgentError;
+    type Future = BoxFuture<'static, Result<ToolResultStream, AgentError>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: ToolCallRequest) -> Self::Future {
+        let host = self.host.clone();
+        let source = self.source.clone();
+        let function = self.function.clone();
+        Box::pin(async move {
+            let Some(host) = host.upgrade() else {
+                return Ok(ToolResultStream::once(AgentToolResult::error(
+                    "codemode host has been dropped",
+                )));
+            };
+            let args = Value::Object(request.tool_call.arguments.as_object().clone());
+            let result = host.call_registered_tool(&source, &function, args).await;
+            Ok(ToolResultStream::once(match result {
+                Ok(value) => AgentToolResult::text(value_to_text(&value)),
+                Err(error) => AgentToolResult::error(error),
+            }))
+        })
+    }
+}
+
+impl CodemodeHost {
+    async fn call_registered_tool(
+        &self,
+        source: &str,
+        function: &str,
+        args: Value,
+    ) -> Result<Value, String> {
+        let args = serde_json::to_string(&args).map_err(|error| error.to_string())?;
+        let code = format!("{source}\n\nreturn await {function}({args});");
+        let result = self
+            .run_async(&code, None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let value = result.value.unwrap_or_else(|| "null".to_owned());
+        Ok(serde_json::from_str(&value).unwrap_or(Value::String(value)))
+    }
+}
+
+fn capability_error_text(error: &CapabilityError) -> String {
+    serde_json::to_string(error).unwrap_or_else(|_| error.to_string())
+}
+
+fn is_js_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || matches!(first, '_' | '$'))
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$'))
+}
+
+fn result_text(result: &AgentToolResult) -> String {
+    result
+        .content
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text(text) => text.text.clone(),
+            other => format!("{other:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn value_to_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Null => String::new(),
+        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
     }
 }
 

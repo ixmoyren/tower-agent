@@ -1,4 +1,4 @@
-# codemode-sandbox (wasm component)
+# rquickjs-sandbox (wasm component)
 
 codemode 的 **JS 沙箱**：宿主调 `run(code, opts)`，脚本在 rquickjs 里跑；脚本要用命令时，组件把
 请求 `exec` 回宿主，宿主再去起 [`wasm/coreutils-wasm`](../coreutils-wasm/README.md)。设计与决策见

@@ -24,7 +24,9 @@ tower = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 tower-agent-codemode-core.workspace = true
+tower-agent-provider.workspace = true
 
 [dev-dependencies]
 tower-agent-provider = { workspace = true }
 tempfile = { workspace = true }
+tower-agent-tools.workspace = true

@@ -5,7 +5,7 @@
 [`docs/codemode.md`](../../docs/codemode.md) §3.5 / §4.1。
 
 名字里没有 sandbox：**它不是一个沙箱，而是一个被宿主调用的 wasm 工具**（沙箱是跑脚本的那个
-`wasm/codemode-sandbox`）。产物是 `dist/coreutils.wasm`，工具名 `coreutils`。
+`wasm/rquickjs-sandbox`）。产物是 `dist/coreutils.wasm`，工具名 `coreutils`。
 
 ## 接口与宿主契约
 

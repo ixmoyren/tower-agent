@@ -14,10 +14,33 @@ interface host {
     stdout: list<u8>,
     stderr: list<u8>,
   }
+  record tool-descriptor {
+    name: string,
+    description: string,
+    /// JSON Schema encoded as a JSON string.
+    parameters: string,
+    /// Optional JSON Schema encoded as a JSON string.
+    output-schema: option<string>,
+  }
+  record tool-registration {
+    name: string,
+    handler: string,
+    description: string,
+    parameters: string,
+    output-schema: option<string>,
+  }
 
   /// 跑一个命令。`name` 是裸命令名（`cat`），宿主据此设 `argv[0]`。
   exec: func(name: string, args: list<string>, opts: exec-opts)
     -> result<exec-result, string>;
+  /// 调用一个宿主工具；参数与返回值都是 JSON 字符串。
+  tool-call: func(name: string, args-json: string) -> result<string, string>;
+  /// 列出脚本可调用的工具及其元数据。
+  tool-list: func() -> result<list<tool-descriptor>, string>;
+  /// 注册一个由当前脚本 handler 实现的工具。
+  tool-register: func(registration: tool-registration) -> result<bool, string>;
+  /// 注销一个由脚本注册的工具。
+  tool-unregister: func(name: string) -> result<bool, string>;
 }
 
 /// 沙箱导出：跑脚本。

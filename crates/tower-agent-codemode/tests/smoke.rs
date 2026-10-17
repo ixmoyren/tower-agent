@@ -4,7 +4,7 @@
 //! - 直接驱动 [`CodemodeHost`]（走 `on_big_stack`：wasmtime 同步执行用调用方线程的栈）；
 //! - 走 [`CodemodeTool`]（工具自带大栈 worker 线程，所以普通测试线程上跑就行——这正是工具层的价值）。
 
-use std::{path::Path, pin::Pin};
+use std::{path::Path, pin::Pin, sync::Arc};
 
 use futures_util::StreamExt;
 use tower::ServiceExt;
@@ -28,11 +28,14 @@ fn on_big_stack<T: Send + 'static>(body: impl FnOnce() -> T + Send + 'static) ->
         .expect("join")
 }
 
-fn host_with(files: &[(&str, &str)]) -> (tempfile::TempDir, CodemodeHost) {
+fn host_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Arc<CodemodeHost>) {
     host_with_mounts(files, &[])
 }
 
-fn host_with_mounts(files: &[(&str, &str)], mounts: &[Mount]) -> (tempfile::TempDir, CodemodeHost) {
+fn host_with_mounts(
+    files: &[(&str, &str)],
+    mounts: &[Mount],
+) -> (tempfile::TempDir, Arc<CodemodeHost>) {
     let dir = tempfile::tempdir().expect("tempdir");
     for (name, contents) in files {
         let path = dir.path().join(name.trim_start_matches('/'));

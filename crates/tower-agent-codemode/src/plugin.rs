@@ -7,9 +7,10 @@
 use std::{path::PathBuf, sync::Mutex};
 
 use semver::Version;
+use tower_agent_codemode_core::ScriptPermissions;
 use tower_agent_core::AgentTool;
 use tower_agent_plugins::{
-    CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
+    CapabilityId, HostApi, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
 };
 
 use crate::{CodemodeError, CodemodeTool, Mount, SessionRoot};
@@ -22,6 +23,7 @@ pub struct CodemodePlugin {
     cwd: PathBuf,
     session: SessionRoot,
     mounts: Vec<Mount>,
+    permissions: ScriptPermissions,
     /// 编译好的工具（`CodemodeTool::new` 会同步编译两个 wasm 组件，很贵）。
     ///
     /// 注册表每次 `resolve` 都会调用 `install`，所以这里只编译一次、之后 clone；
@@ -37,6 +39,7 @@ impl CodemodePlugin {
             cwd: cwd.into(),
             session,
             mounts: Vec::new(),
+            permissions: ScriptPermissions::default(),
             tool: Mutex::new(None),
         }
     }
@@ -45,6 +48,13 @@ impl CodemodePlugin {
     #[must_use]
     pub fn with_mounts(mut self, mounts: Vec<Mount>) -> Self {
         self.mounts = mounts;
+        self
+    }
+
+    /// 设置脚本可使用的共享能力权限。
+    #[must_use]
+    pub fn with_permissions(mut self, permissions: ScriptPermissions) -> Self {
+        self.permissions = permissions;
         self
     }
 }
@@ -63,13 +73,19 @@ impl StaticPlugin for CodemodePlugin {
             message: "codemode plugin mutex poisoned".to_owned(),
         })?;
         if cached.is_none() {
-            let tool =
-                CodemodeTool::for_workspace_with(&self.cwd, self.session.clone(), &self.mounts)
-                    .map_err(|error: CodemodeError| PluginError::Install {
-                        plugin: PLUGIN_NAME.to_owned(),
-                        message: error.to_string(),
-                    })?
-                    .into_agent_tool();
+            let host = HostApi::from_tools(context.tools().iter().cloned());
+            let tool = CodemodeTool::for_workspace_with_host(
+                &self.cwd,
+                self.session.clone(),
+                &self.mounts,
+                host,
+                self.permissions,
+            )
+            .map_err(|error: CodemodeError| PluginError::Install {
+                plugin: PLUGIN_NAME.to_owned(),
+                message: error.to_string(),
+            })?
+            .into_agent_tool();
             *cached = Some(tool);
         }
         let tool = cached.as_ref().ok_or_else(|| PluginError::Install {

@@ -1,11 +1,194 @@
-# codemode 设计 · rquickjs（wasm guest）+ wasmtime + uutils
+# codemode 设计
 
-| 项目     | 值                                                                                                                                                                                                                   |
-|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 状态     | v0.6 草案。**Q1–Q11 已定**（含组合 R1 + Q2(a)，权威表见 §8）；M0–M5 + CLI 接线 + M7 第一层已完成，下一阶段见 §9（M6：并发走 ticket + join，不做 p3）
-| 日期     | 2026-10-11                                                                                                                                                                                                           |
-| 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、`crates/tower-agent-wasmtime`、`crates/tower-agent-monty`（同构样板）                                                                                      |
-| 本地引用 | `~/Projects/DelSkayn/rquickjs`、`~/Projects/awslabs/llrt`、`~/Projects/rquickjs/rquickjs-extra`、`~/Projects/rquickjs/rquickjs-serde`                                                                                |
+> v2（本节 §0， **提案 / 待评审**）：把 `mods` 与 `codemode` 统一成同一个能力—— **agent 可以编程**，
+> 解释器可选（monty = Python / rquickjs-sandbox = JavaScript）。
+> §1–§11 是 v1 的 **JS 引擎（rquickjs）实现细节**，作为该统一设计的第一个后端保留原文。
+> **执行清单见 [`TASKS.md`](../TASKS.md)**（决策已定，从 T1.1 开始）。
+
+## 0. 统一设计（v2 提案 · 待评审）
+
+### 0.1 一句话定位
+
+**codemode = agent 可以编程**：LLM（或用户）生成一段脚本，agent 在沙箱里执行它。脚本能做两件事：
+
+1. **组合工具**：在一次工具调用里跑多步「文件 + 命令 + 其它工具」，只把最终结果带回上下文（省 token、少往返）；
+2. **扩展 agent**：注册新工具、挂上钩子、贡献 UI —— 也就是 pi extensions 那套"改 agent 行为"的能力。
+
+`mods` 与 `codemode` 的差别只是 **第 1 条和第 2 条谁做得多**，以及 **用什么语言写脚本**，不是两种东西。
+因此统一为一个名字： **`codemode`**。
+
+### 0.2 现状盘点（2026-10-14）
+
+| 部件           | crate / 产物                                                                                                        | 已有能力                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 缺口                                                                           |
+|----------------|---------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| 沙箱基础设施   | `tower-agent-wasmtime`：`SandboxEngine` / `HostState` / `Sandbox` / `SandboxPool`                                   | wasm 组件编译 + WASI + 内存/栈上限 + JIT 缓存 + 实例池；`wasmtime` 静态插件占位（`protected`）                                                                                                                                                                                                                                                                                                                                                               | ——                                                                             |
+| guest 命令集   | `wasm/coreutils-wasm`（uutils multicall，**60 个命令**，argv[0] 分发；权威列表见 `tower_agent_codemode::COMMANDS`） | `exec(name, args, opts)`                                                                                                                                                                                                                                                                                                                                                                                                                                     | 两个引擎均已接入；monty 通过注入的 `CapabilitySurface` 转发                    |
+| mods（Python） | `tower-agent-monty` + `wasm/monty-sandbox`                                                                          | monty 子集、宿主导发的 REPL 状态机；宿主能力 `exec` / `tool_call` / `tool_list` / `tool_register` / `tool_unregister` / `log` / `state_get` / `state_set` / `ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render`；挂载表（`ReadOnly` / `OverlayMemory` / `ReadWrite`）；`ScriptPermissions`；热重载（原子换绑 + 回滚）；持久化（`mod_persist` / `dirs::config_dir()/tower-agent/mods`）；作者工具 `mod_write` / `mod_reload` / `mod_list` / `mod_remove` | 与 codemode 仍各有一套会话 / 存储 / 插件形态                                   |
+| codemode（JS） | `tower-agent-codemode` + `wasm/rquickjs-sandbox`                                                                    | rquickjs（guest）、`exec` + 60 个命令函数 + 链式 pipeline + `fs` 门面；`tool_call` / `tool_list` / `tool_register` / `tool_unregister`（注册工具绑定脚本 handler，可进入后续宿主调用）；会话根（`--codemode-session <name>`，`<config>/tower-agent/codemode/<name>`）；命名会话列表 / 清理 | 没有工具钩子与 UI 贡献；脚本注册工具尚未自动同步到 CLI 的 agent 工具目录 |
+| 插件体系       | `tower-agent-plugins` / `tower-agent-plugin-sdk`                                                                    | 静态（Layer）/ 动态（stabby cdylib）/ JIT（monty）三形态；能力注册表、依赖与版本、`protected`、权限提示；`HostApi` 中介调用                                                                                                                                                                                                                                                                                                                                  | 与 codemode/mods 的"脚本"路径尚未打通；扩展点面很窄（见 [`sdk.md`](./sdk.md)） |
+
+结论：两者缺的恰好是对方有的。合并之后，一个脚本 **同时**能跑命令、调工具、注册工具、挂钩子。
+
+### 0.3 目标架构
+
+```
+                        ┌──────────────────── 宿主（CLI / TUI / axum / webui）────────────────────┐
+                        │  CodemodeHost                                                           │
+   LLM 生成脚本 ──────▶ │   ├─ ScriptEngine（可插拔）：monty(Python) │ rquickjs-sandbox(JS)       │
+                        │   ├─ CapabilitySurface（统一能力层）                                    │
+                        │   │    exec / fs / tool_call / tool_list / tool_register /              │
+                        │   │    state_get|set / log / ui_* / hooks / commands …                  │
+                        │   ├─ 权限（Permissions，按会话 / 按脚本）                               │
+                        │   ├─ 会话与存储（脚本仓库、会话根、快照）                               │
+                        │   └─ PromptBuilder（按「引擎 + 能力集 + 挂载」生成给 LLM 的说明）       │
+                        │                                                                         │
+                        │  tower-agent-plugin-sdk：扩展点 API（Rust 侧与脚本侧同一套语义）        │
+                        └─────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+                        tower-agent-wasmtime（引擎 / WASI / 限制 / 池）
+                        wasm/coreutils-wasm（命令集） · wasm/*-sandbox（解释器组件）
+```
+
+三层职责：
+
+1. **引擎层**（`ScriptEngine`）：语言与执行模型。monty 是"宿主导发的 REPL 状态机"（`start` / `resume-function` / `resume-os`），JS 是"同步 import + 预载 JS 门面"。差异只在这一层。
+2. **能力层**（`CapabilitySurface`）： **两种引擎完全一致**的能力集合，也就是脚本能调用的宿主函数表。它由 `tower-agent-plugin-sdk` 定义、由 `CodemodeHost` 实现，并被沙箱以 host import 的形式暴露。
+3. **宿主层**：权限、会话、存储、提示词、以及与插件注册表 / 工具集 / UI 状态的接线。
+
+> 关键点： **统的是能力层与提示词，不是执行模型。** 不要求 monty 和 JS 用同一种 host import 机制（一个是挂起 + resume，一个是同步调用）；只要求它们面对脚本时看起来是同一个"标准库"。
+
+### 0.4 解释器可选
+
+| 维度     | `monty`（Python 子集）                                        | `rquickjs-sandbox`（JavaScript，rquickjs）          |
+|----------|---------------------------------------------------------------|-----------------------------------------------------|
+| 语言     | Python 子集                                                   | JavaScript（含 ES2020 左右特性）                    |
+| 执行模型 | 宿主驱动状态机：`function-call` / `os-call` 挂起后 `resume-*` | 同步 host import + guest 内 JS 门面（Promise 包装） |
+| 现状     | 已有工具注册 / UI / 状态 / 挂载 / 权限 / 热重载               | 已有 `exec` / 命令链式 / `fs` / 会话目录            |
+| 适合     | "改 agent 行为"：写小函数、注册工具、挂钩子                   | "跑一次复杂任务"：组合命令与文件操作、数据处理      |
+| 短板     | 无命令集；Python 子集表达能力有限                             | 无工具注册 / 钩子 / 权限                            |
+
+目标： **两者都补齐到同一张能力表**，差异只体现在提示词与语言特性上。
+
+### 0.5 提示词由「引擎 + 能力集」生成
+
+同一个 codemode 工具，给 LLM 的说明按运行时配置生成，而不是写死：
+
+```
+Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱里执行。
+
+可用命令（coreutils-wasm）：
+  cat ls wc sort head tail grep cut uniq tr mkdir
+  用法：await cat("/data/a.txt") / 链式 sort("x").head(3)   ← JS 引擎
+        cat("/data/a.txt") / 同名函数                        ← Python 引擎
+
+可用工具（宿主工具，需权限）：read / write / edit / grep / find / ls / shell / codemode …
+  用法：tool_call("read", {"path": "src/main.rs"})
+
+扩展点（可注册，需权限）：
+  tool_register(name, function, description, parameters)  —— 给 agent 增加一个工具
+  on("tool_call", handler)                                —— 在工具执行前放行 / 改写 / 拦截
+  on("tool_result", handler)                              —— 改写工具结果
+  ui_status / ui_panel / ui_tool_render                   —— 前端无关的 UI 贡献
+
+挂载：/work（只读，工作目录）、/data（可写，会话根）
+限制：单次 30s / 128 MB / 无网络
+```
+
+要点：
+
+- **能力表就是提示词的来源**：引擎注册了哪些 host function、管理员开了哪些权限、挂了哪些目录，提示词就写哪些。`PromptBuilder` 是 `CapabilitySurface` 的投影，不另维护一份文档。
+- 引擎差异只影响"语法示例"段落（Python / JS 各一段）。
+- 与 pi 的做法一致：工具描述 + instructions 由宿主生成，模型据此写脚本。
+
+### 0.6 扩展点注入（落在 `tower-agent-plugin-sdk`）
+
+脚本能"改 agent 行为"，靠的是宿主把扩展点暴露成 host function。扩展点清单、与 pi extensions 的逐条对照、以及"哪些点现在还没有"都在 [`sdk.md`](./sdk.md)。这里只给结论：
+
+- **扩展点定义在 `tower-agent-plugin-sdk`**（已定，见 0.9 Q7）： **不新增 `tower-agent-sdk` crate**，作者 API 直接长在现有的 plugin-sdk 上；Rust 插件与沙箱脚本用同一套名字与语义（`registerTool` ↔ `tool_register`，`pi.on("tool_call")` ↔ `on("tool_call", …)`）。
+- **脚本侧的扩展点受权限约束**：`ModPermissions` 扩成 `ScriptPermissions`，每一种扩展点一个开关（`tools` / `register_tools` / `hooks` / `commands` / `ui` / `state` / `fs` / `exec`）。
+- **扩展点的数量受运行时的钩子面限制**：现在 runtime 只有 10 个 `AgentEvent`（纯通知）+ `BeforeToolCallLayer` / `AfterToolResultLayer` / `CompactionHook`。pi 有 41 个事件且多数可 transform / block。所以"脚本改行为"的第一步是 **把 runtime 的事件面补到够用**（详见 `sdk.md` §3 的缺口列）。
+
+### 0.7 迁移计划（提案，按可独立验收的粒度切）
+
+| 阶段 | 内容                                                                                                                                                                                                                                                                         | 验收                                                                                                 |
+|------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| P1   | **统一能力层**：抽出 `CapabilitySurface`（exec / fs / tool_call / tool_register / state / log / ui）到新的内部 crate `tower-agent-codemode-core`（引擎无关，避免 monty ↔ codemode 依赖成环）；monty 接上 `exec`（coreutils-wasm）；JS 引擎接上 `tool_call` / `tool_register` | 两个引擎各有一组同样的能力测试                                                                       |
+| P2   | **统一提示词 + 引擎选择**：`PromptBuilder` 由 `CapabilitySurface` 生成；引擎**全局默认 + 脚本可覆盖**（Q1）：`--codemode-engine monty\|js` 定进程默认，脚本头声明语言时覆盖它                                                                                                | 同一任务在两种引擎下都能跑通；提示词随能力/引擎变化                                                  |
+| P3   | **合并 feature / CLI**：`mods` 与 `codemode` 合并为 `codemode`（两个引擎各一个子 feature：`codemode-python` / `codemode-js`，**都保留**，Q2）；`--codemode*` 一整套开关；`mod_*` 作者工具并入 codemode                                                                       | `--no-default-features` 只留内置工具；`-p codemode-python` / `-p codemode-js` 各自可编译，也可一起编 |
+| P4   | **统一会话与存储**：脚本仓库（持久 / 临时）、会话根、快照、权限，一套模型两种引擎共用                                                                                                                                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
+| P5   | **接扩展点 v0**：`tower-agent-plugin-sdk` 的扩展点 = **工具注册 + `tool_call` / `tool_result` 钩子**（Q4）；codemode 把 host function 映射过去                                                                                                                               | 一个脚本能注册工具并在下一轮生效（与现在 monty 等价）+ 能在工具执行前改写/拦截、执行后改写结果       |
+
+兼容性：
+
+- **名字**：两个引擎 crate 都保留（Q2）；`tower-agent-monty` 是 monty/Python 引擎、`tower-agent-codemode` 是宿主 + JS 引擎（或把 JS 引擎拆成 `tower-agent-quickjs`）；对外只有 `codemode`。
+- **`mods` 这个词**：建议降级为"codemode 的持久化脚本"这一子概念（`mod_persist` 等），不再作为顶层模式名；CLI 的 `--no-mods` / `TPA_NO_MODS` 换成 `--no-codemode`。
+- 不保留 `mods` 与 `codemode` 两套会话目录；统一到 `<config>/tower-agent/codemode/`（脚本仓库 + 会话根分开子目录）。
+
+### 0.8 影响面
+
+- crate：`tower-agent-codemode`（宿主，吃掉 monty 的宿主职责或改为引擎适配器）、`tower-agent-monty`（Python 引擎）、`tower-agent-wasmtime`（不变）、 **新增内部 crate `tower-agent-codemode-core`**（能力层 / 提示词 / 脚本模型，引擎无关）、 **扩展 `tower-agent-plugin-sdk`**（不新增对外 SDK crate）。
+- feature：`tower-agent` 门面 / `tower-agent-cli` 的 `mods` + `codemode` → `codemode` + `codemode-python` + `codemode-js`。
+- CLI：`--codemode` / `--codemode-engine` / `--codemode-session*` / 权限开关；`TPA_NO_MODS` 废弃。
+- 文档：`docs/codemode.md`（本文件，v2 提案 + JS 细节）、`docs/sdk.md`（扩展点设计，落在 plugin-sdk）、`docs/plugins.md`（§4.3 / §16 需改：JIT 形态与 codemode 的关系）、`docs/design.md`（§5 CLI 段落与待办）。
+- 测试：能力层的"双引擎一致性"测试（同一脚本语义在两种语言下等价）、提示词快照测试、权限矩阵测试。
+
+### 0.9 已确认决策（2026-10-17）
+
+| #  | 问题                                   | 结论                                                                                                                                |
+|----|----------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| Q1 | 引擎选择粒度                           | **(c) 两者都支持**：进程级默认引擎（`--codemode-engine` / 配置项 `codemode.engine`）+ 脚本可声明语言覆盖它                          |
+| Q2 | 两个引擎是否都保留                     | **(a) 都保留**：monty/Python 与 rquickjs/JS 都是正式后端                                                                            |
+| Q3 | `mods` 词汇是否彻底消失                | **(a) 彻底消失**：不再有顶层 `mods` 模式；`mod_persist` 等降级为 codemode 的"持久化脚本"子概念；CLI / 环境变量 / feature 名一并改名 |
+| Q4 | 脚本侧扩展点 v0 范围                   | **(b) 工具注册 + 工具前后钩子**：`tool_register` / `tool_call` + `on("tool_call")` / `on("tool_result")`                            |
+| Q5 | 权限模型                               | **沿用并扩展**：`ModPermissions` → `ScriptPermissions`，增加 `exec` / `hooks` / `commands` 等开关；不做"能力名 + 资源"两级大改      |
+| Q6 | 脚本仓库形态                           | **(c) storage 为主 + 导出/导入**：SQLite 行是真源，文件是显式导出的投影（详见 0.10）                                                |
+| Q7 | `tower-agent-sdk` 与 plugin-sdk 的关系 | **合并到 `tower-agent-plugin-sdk`**：不新增 crate，扩展点作者 API 直接加在 plugin-sdk 上（见 `sdk.md` §2）                          |
+
+### 0.10 Q6 决策说明：为什么是 (c)
+
+三条路线的形态：
+
+| 路线                         | 真源在哪                                 | 作者怎么改                             | 人类可读 / git      | 多前端共享                            |
+|------------------------------|------------------------------------------|----------------------------------------|---------------------|---------------------------------------|
+| (a) 每脚本一条 storage 记录  | SQLite 行（新增一个 `ScriptStore`）      | 走工具 / API（`script_write`）         | ❌ 要导出才能看     | ✅ 现成（`tower-agent-storage` 抽象） |
+| (b) 每脚本一个文件           | `<config>/tower-agent/codemode/*.py\|js` | 编辑器 / `script_write` 都行           | ✅ 天然             | ⚠️ 每个前端都要知道路径约定 + 文件锁  |
+| (c) storage 为主 + 导出/导入 | SQLite 行为真源，文件是投影              | 工具 / API 写库；人类改文件后 `import` | ✅（显式导出/导入） | ✅                                    |
+
+判断前先回答两个子问题（它们直接决定选哪条）：
+
+1. **脚本的主要作者是谁？** LLM 用工具写 → (a)/ (c) 顺手； (b) 会让"工具写文件"变成又一条写路径（还得处理半写状态、外部编辑触发 reload）。
+2. **脚本需要提交进项目仓库、与人协作 review 吗？** 需要 → (b) 最自然（`.tower-agent/codemode/*.py` 直接进 git）；不需要 → (a)/ (c) 够。
+
+与既有决策的张力：
+
+- 前面已经定过"**配置一律走 `tower-agent-storage`，不能走别的路子**"（CLI/axum/webui 共用同一套存储抽象）。脚本更接近"用户资产"而不是"运行时产物"，按同一条原则应该进 storage。
+- 但 mods 现在是 **文件**（`dirs::cache_dir()/tower-agent/mods` 临时、`dirs::config_dir()/tower-agent/mods` 持久），合并时要么把文件搬进 storage，要么把 storage 的脚本导出成文件。
+- 无论哪条， **脚本元数据（语言、权限、启用状态、源码哈希、最近运行）都应该进 storage**——它是权限矩阵与热重载校验的依据，JSON 侧车文件只会制造两处真相。
+
+**结论 (c)**：storage 是真源（与"配置走 storage"一致、多前端零成本、LLM 写入路径天然），文件用于 **显式导出 / 导入**（满足"人类要读、要 git、要 review"）。项目级脚本走 storage 的 project 作用域（上一轮刚加的 scope 维度正好用上）；确实需要进仓库时，导出到 `.tower-agent/codemode/` 再纳入 git。
+
+落地形状：
+
+1. `tower-agent-storage` 增加 `ScriptStore` 子接口（与 `ConfigStore` / `HistoryStore` 并列）：脚本 id、名字、语言（`monty` / `js`）、作用域（user / project）、源码、启用状态、权限、元数据、时间戳。
+2. `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` 直接读写 `ScriptStore`。
+3. `codemode export <dir>` / `codemode import <dir>`：每个脚本一个文件（源码 + 元数据头）；项目级默认导出到 `.tower-agent/codemode/`。
+4. 脚本的 **元数据永远在 storage**（权限、源码哈希、最近运行），文件只是投影——避免两处真相。
+
+不再考虑 (b) 作为真源：它会形成"第二套配置写入路径"，与"配置一律走 storage"的既定原则冲突。
+
+---
+
+## 附录：v1 细节（JS 引擎 · rquickjs）
+
+> 以下 §1–§11 是 v1 的原文，描述 **JS 引擎**那一部分的设计与实测结论；下面的状态表只覆盖这部分进度。
+
+| 项目     | 值                                                                                                                                                   |
+|----------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 状态     | v0.6 草案。**Q1–Q11 已定**（含组合 R1 + Q2(a)，权威表见 §8）；M0–M5 + CLI 接线 + M7 第一层已完成，下一阶段见 §9（M6：并发走 ticket + join，不做 p3） |
+| 日期     | 2026-10-11                                                                                                                                           |
+| 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、`crates/tower-agent-wasmtime`、`crates/tower-agent-monty`（同构样板）                      |
+| 本地引用 | `~/Projects/DelSkayn/rquickjs`、`~/Projects/awslabs/llrt`、`~/Projects/rquickjs/rquickjs-extra`、`~/Projects/rquickjs/rquickjs-serde`                |
 
 ## 1. 目标与非目标
 
@@ -112,20 +295,20 @@ LLM
 **[实测] 已跑通（M1 第一步）**：rquickjs 0.14 编到 `wasm32-wasip2` 并在 wasmtime 上跑起 JS。构建前置三项：
 
 1. **wasi-sdk**：本机在 `~/.cache/wasi-sdk-34.0-x86_64-linux`（`bin/clang`、`bin/ar`、`share/wasi-sysroot` 齐备）；用 `WASI_SDK=<该目录>` 即可，build.rs 里那个「下载 wasi-sdk 24」的分支不会走（SDK 34 也能用）。
-2. **quickjs-ng 子模块**：`sys/quickjs` 是 submodule（`github.com/quickjs-ng/quickjs`），未初始化时构建会 `Unable to copy source; try 'git submodule update --init'`。本次是在 `/tmp` 的副本里 `git submodule update --init --depth 1`（pin `6d46d07`）——**不改本地仓库**。
+2. **quickjs-ng 子模块**：`sys/quickjs` 是 submodule（`github.com/quickjs-ng/quickjs`），未初始化时构建会 `Unable to copy source; try 'git submodule update --init'`。本次是在 `/tmp` 的副本里 `git submodule update --init --depth 1`（pin `6d46d07`）—— **不改本地仓库**。
 3. 命令：`WASI_SDK=… cargo build --release --target wasm32-wasip2`（rustc 直出组件），产物 **1.26 MB**。
 
-**[实测] 子模块/vendor 问题不存在**：**crates.io 上的 `rquickjs` 0.14 直接可用**——`rquickjs-sys` 自带那 4 个 C 文件（`quickjs.c` / `libregexp.c` / `libunicode.c` / `dtoa.c`），只用 `WASI_SDK` 就能编过并跑通。所以 `wasm/codemode-sandbox` 直接依赖 registry 版本，**不需要 quickjs-ng 子模块，也不需要 vendor**（上面第 2 条只在用 path 依赖时才需要处理）。
+**[实测] 子模块/vendor 问题不存在**： **crates.io 上的 `rquickjs` 0.14 直接可用**——`rquickjs-sys` 自带那 4 个 C 文件（`quickjs.c` / `libregexp.c` / `libunicode.c` / `dtoa.c`），只用 `WASI_SDK` 就能编过并跑通。所以 `wasm/rquickjs-sandbox` 直接依赖 registry 版本， **不需要 quickjs-ng 子模块，也不需要 vendor**（上面第 2 条只在用 path 依赖时才需要处理）。
 
-跑起来的结果：`1 + 2 * 3` → `7`；`JSON.stringify({…,"中文"})` 正确；`[3,1,2].sort().join("-")` → `1-2-3`；`throw` 变成 Rust 侧 `Err`。**不需要 feature gate，也不需要 wasm-opt。**
+跑起来的结果：`1 + 2 * 3` → `7`；`JSON.stringify({…,"中文"})` 正确；`[3,1,2].sort().join("-")` → `1-2-3`；`throw` 变成 Rust 侧 `Err`。 **不需要 feature gate，也不需要 wasm-opt。**
 
-**[实测] 但递归会 trap —— 上游推荐的 256 KiB 反而更糟**：用 `set_max_stack_size(256 * 1024)`（README 建议值）时，深递归（~1000 层）**直接 `wasm trap: call stack exhausted`**，整个实例报废，而不是抛可捕获的 `RangeError`；改成 **64 KiB** 后，同样深度变成 `caught:RangeError`（实测 200 层 ok、400 层起稳定可捕获）。原因是 wasm shadow stack 只有 1 MiB、QuickJS 每个 JS 帧约 1 KiB，限额报的是「相对某个 base 的值」，256 KiB 落在真实耗尽点之上，检查来不及触发。
+**[实测] 但递归会 trap —— 上游推荐的 256 KiB 反而更糟**：用 `set_max_stack_size(256 * 1024)`（README 建议值）时，深递归（~1000 层） **直接 `wasm trap: call stack exhausted`**，整个实例报废，而不是抛可捕获的 `RangeError`；改成 **64 KiB** 后，同样深度变成 `caught:RangeError`（实测 200 层 ok、400 层起稳定可捕获）。原因是 wasm shadow stack 只有 1 MiB、QuickJS 每个 JS 帧约 1 KiB，限额报的是「相对某个 base 的值」，256 KiB 落在真实耗尽点之上，检查来不及触发。
 
-→ 结论：**`set_max_stack_size` 要取小值（首版 64 KiB）**，让栈溢出保持「可捕获」；同时宿主侧**仍必须把 wasm trap 当成脚本失败处理，并丢弃该实例**（trap 之后实例不可复用）。
+→ 结论： **`set_max_stack_size` 要取小值（首版 64 KiB）**，让栈溢出保持「可捕获」；同时宿主侧 **仍必须把 wasm trap 当成脚本失败处理，并丢弃该实例**（trap 之后实例不可复用）。
 
-**[实测] 但「可捕获」只在独立跑时成立**：同一段代码放进**组件**里（rquickjs 编到 `wasm32-wasip2`、宿主用 wasmtime 同步调用）后，64 KiB 限额下深递归**仍然是硬 trap**（`wasm trap: call stack exhausted`）——组件里 JS 的栈检查来不及在 wasm 影子栈耗尽前触发。所以宿主必须把 trap 当「脚本失败」：`tower-agent-codemode` 就是这么做的（trap → `CodemodeError::Script`；每次 `run` 新建 `Store`，不污染后续调用，冒烟里有断言）。
+**[实测] 但「可捕获」只在独立跑时成立**：同一段代码放进 **组件**里（rquickjs 编到 `wasm32-wasip2`、宿主用 wasmtime 同步调用）后，64 KiB 限额下深递归 **仍然是硬 trap**（`wasm trap: call stack exhausted`）——组件里 JS 的栈检查来不及在 wasm 影子栈耗尽前触发。所以宿主必须把 trap 当「脚本失败」：`tower-agent-codemode` 就是这么做的（trap → `CodemodeError::Script`；每次 `run` 新建 `Store`，不污染后续调用，冒烟里有断言）。
 
-**另注（宿主线程栈）**：wasmtime 的**同步**执行用的是**调用方线程**的栈，所以 `max_wasm_stack`（codemode 取 1 MiB）必须明显小于宿主线程栈——测试线程默认只有 2 MiB，深递归用例会先把原生栈压爆（实测 SIGABRT）。宿主要把 codemode 跑在栈够大的线程上。
+**另注（宿主线程栈）**：wasmtime 的 **同步**执行用的是 **调用方线程**的栈，所以 `max_wasm_stack`（codemode 取 1 MiB）必须明显小于宿主线程栈——测试线程默认只有 2 MiB，深递归用例会先把原生栈压爆（实测 SIGABRT）。宿主要把 codemode 跑在栈够大的线程上。
 
 ### 3.2 llrt_modules 0.9.0-beta（`~/Projects/awslabs/llrt`）
 
@@ -200,7 +383,7 @@ LLM
 
 → 规则： **新增 util 先编一遍**；命中这类 API 的，二选一： **不收**，或给它那 **一个 crate** 加一行 attribute（改动面 1 行/1 crate，不 fork 整棵 coreutils 树）。`stat` 目前也不在离线缓存里，需要单独确认。
 
-**已落地**：`wasm/coreutils-wasm`（独立 workspace，同 monty-sandbox 形态；名字里没有 sandbox——**它是被宿主调用的 wasm 工具，不是沙箱**，沙箱是 `wasm/codemode-sandbox`）。`./generate.sh` 只依赖 `wasm32-wasip2` target——**不需要 wasi-sdk / wasm-opt / wasm-tools**（rustc 直出组件）；产物 `dist/coreutils.wasm`（工具名 `coreutils`；`dist/` 不入库）。加命令 = `Cargo.toml` + `src/main.rs` 各一行。
+**已落地**：`wasm/coreutils-wasm`（独立 workspace，同 monty-sandbox 形态；名字里没有 sandbox—— **它是被宿主调用的 wasm 工具，不是沙箱**，沙箱是 `wasm/rquickjs-sandbox`）。`./generate.sh` 只依赖 `wasm32-wasip2` target—— **不需要 wasi-sdk / wasm-opt / wasm-tools**（rustc 直出组件）；产物 `dist/coreutils.wasm`（工具名 `coreutils`；`dist/` 不入库）。加命令 = `Cargo.toml` + `src/main.rs` 各一行。
 
 **[实测] profile 有效**：`opt-level="z" + lto=true + strip=true` 把裸构建的 11 MB 压到 **7.4 MB**（`wasm-opt` 处理不了组件，所以这是唯一的压缩手段）。冒烟全过：`argv[0]` 分发、`--version` 里 `util_name()` 正确、未知命令退出码 127、无尾换行文件的尾巴不丢。
 
@@ -217,14 +400,14 @@ LLM
 ### 4.1 组件形状
 
 - **两个**独立 workspace，都放在 `wasm/` 下，照 `wasm/monty-sandbox` 的形态（不进主 workspace，`generate.sh` 一条链路出组件）：
-    - `wasm/codemode-sandbox`：rquickjs + 我们的 API 层 → JS guest 组件；
+    - `wasm/rquickjs-sandbox`：rquickjs + 我们的 API 层 → JS guest 组件；
     - `wasm/coreutils-wasm`：uutils wrapper crate（§3.5）→ multicall 命令组件，产物 `dist/coreutils.wasm`。
 
-  两者都是普通 wasm 组件，由宿主 `crates/tower-agent-codemode` 用 `tower-agent-wasmtime` 驱动。`codemode-sandbox` 的导出面（已核对）：import `tower-agent:codemode/host` + `wasi:*@0.2.12`，export `tower-agent:codemode/sandbox`，产物 `dist/codemode.wasm`（**796 KB**）。
+  两者都是普通 wasm 组件，由宿主 `crates/tower-agent-codemode` 用 `tower-agent-wasmtime` 驱动。`rquickjs-sandbox` 的导出面（已核对）：import `tower-agent:codemode/host` + `wasi:*@0.2.12`，export `tower-agent:codemode/sandbox`，产物 `dist/codemode.wasm`（ **796 KB**）。
 
   **两个产物都入库并内嵌**（决定：内嵌）：`generate.sh` 直接写到 `crates/tower-agent-codemode/assets/{coreutils.wasm,codemode.wasm}`，宿主用 `include_bytes!`（`EMBEDDED_COREUTILS` / `EMBEDDED_SANDBOX`）。形状与 monty-sandbox 一致，代价是仓库 +8.2 MB、二进制 +8.2 MB。
 
-  **工具（M2，已落地）**：`CodemodeTool` 实现 `AgentTool`——`into_agent_tool()` 给出 `codemode` 工具，schema = `{code, timeout_ms?}`；结果 `content` 是 stdout（+ `return:` 值），`structured_content` = `{ok, value, stdout, commands[], truncated, duration_ms}`；**命令级进度**（`command-start` + name/args）作为 `ToolResultStream` 的中间项推给 UI，终态结果在最后一项。沙箱跑在工具自带的 32 MiB worker 线程上（wasmtime 同步执行用调用方线程栈）。
+  **工具（M2，已落地）**：`CodemodeTool` 实现 `AgentTool`——`into_agent_tool()` 给出 `codemode` 工具，schema = `{code, timeout_ms?}`；结果 `content` 是 stdout（+ `return:` 值），`structured_content` = `{ok, value, stdout, commands[], truncated, duration_ms}`； **命令级进度**（`command-start` + name/args）作为 `ToolResultStream` 的中间项推给 UI，终态结果在最后一项。沙箱跑在工具自带的 32 MiB worker 线程上（wasmtime 同步执行用调用方线程栈）。
 - 目标 `wasm32-wasip2`：rustc **直出组件**（不需要 `wasm-tools component new`）。代价是 **`wasm-opt` 处理不了组件**（Binaryen 不支持），体积只能靠 profile（`opt-level="z"` + `lto` + `strip`）压。
 - WIT world 草案：
 
@@ -255,7 +438,7 @@ import exec: func(name: string, args: list<string>, opts: exec-opts
 ### 4.2 JS 可见表面（M3 已落地）
 
 ```js
-// 1) 命令函数：11 个 coreutil 各一个，返回 thenable 的 Cmd，可链式
+// 1) 命令函数：`COMMANDS` 里的 60 个 coreutil 各一个，返回 thenable 的 Cmd，可链式
 const n = await wc("-l", "data/nums.txt");        // await 得 stdout
 const top = await sort("data/nums.txt").head(3);    // 链式 = 宿主侧 pipeline
 const out = await ls("/data", {l: true});
@@ -276,7 +459,7 @@ return {total: rows.length, top: rows.slice(0, 10)};
 实现要点：
 
 - 原生侧只暴露 **7 个**同步函数（`__exec`、`__readFile`、`__writeFile`、`__readdir`、`__exists`、`__mkdir`、`__rm`），其余（`Cmd` 链式、pipeline、`fs` 门面、`exec` 的 Promise 包装）用随 runtime 预载的 **JS 层**实现——API 迭代不需要重编组件。
-- **命令名由宿主注入**：`run-opts.utils`（宿主的 `COMMANDS` 常量）传给 guest，由它生成 `cat()` 与 `Cmd.prototype.cat`——JS 侧不抄命令表；`tower-agent-codemode` 里有个**漂移测试**直接拿 `wasm/coreutils-wasm/src/main.rs` 的登记表比对。
+- **命令名由宿主注入**：`run-opts.utils`（宿主的 `COMMANDS` 常量）传给 guest，由它生成 `cat()` 与 `Cmd.prototype.cat`——JS 侧不抄命令表；`tower-agent-codemode` 里有个 **漂移测试**直接拿 `wasm/coreutils-wasm/src/main.rs` 的登记表比对。
 - **pipeline 语义**：链式 = 宿主侧顺序执行，每段 stdout 作为下一段的 stdin（内存缓冲，非流式）；某段非零退出就中断并交回该段结果。`await cmd` 得 stdout（非零退出抛 JS 异常），`.result()` 得 `{code, stdout, stderr}`（不抛）。
 - **API 是 async 形状，实现是同步的**：host import 是同步调用（wasmtime sync linker），JS 侧包一层 Promise，将来换真正的异步 import 时脚本不用改。
 - `console.log` 收进 `run-result.stdout`（TUI 可见），不混进命令输出。
@@ -387,17 +570,17 @@ exec: func(name: string, args: list<string>, opts: exec-opts
 
 ### 7.1 默认限额（已定，Q8）
 
-| 项         | 默认值                                 | 实现处                                               |
-|------------|----------------------------------------|------------------------------------------------------|
-| 脚本总超时 | 30 s                                   | `Runtime::set_interrupt_handler`（纯计算死循环也管） |
-| 单命令超时 | 10 s                                   | 命令侧 epoch（M5 给 `tower-agent-wasmtime` 加）      |
-| 脚本大小   | 64 KiB                                 | 工具入参校验                                         |
-| JS 堆上限  | 64 MiB                                 | `Runtime::set_memory_limit`                          |
-| JS 栈上限  | **64 KiB**（不是上游建议的 256 KiB，见 §3.1） | `Runtime::set_max_stack_size`（wasm 上必设；组件里超限是 trap，宿主降级成脚本失败） |
-| wasm 影子栈 | 1 MiB                                        | `SandboxOptions::max_wasm_stack`（须 < 宿主线程栈） |
-| 命令内存   | 256 MiB                                | `SandboxOptions`（沿用现有默认值）                   |
-| 命令条数   | 100                                    | 命令层计数                                           |
-| 输出上限   | 每流 1 MiB（超限截断并置 `truncated`） | 工具层                                               |
+| 项          | 默认值                                        | 实现处                                                                              |
+|-------------|-----------------------------------------------|-------------------------------------------------------------------------------------|
+| 脚本总超时  | 30 s                                          | `Runtime::set_interrupt_handler`（纯计算死循环也管）                                |
+| 单命令超时  | 10 s                                          | 命令侧 epoch（M5 给 `tower-agent-wasmtime` 加）                                     |
+| 脚本大小    | 64 KiB                                        | 工具入参校验                                                                        |
+| JS 堆上限   | 64 MiB                                        | `Runtime::set_memory_limit`                                                         |
+| JS 栈上限   | **64 KiB**（不是上游建议的 256 KiB，见 §3.1） | `Runtime::set_max_stack_size`（wasm 上必设；组件里超限是 trap，宿主降级成脚本失败） |
+| wasm 影子栈 | 1 MiB                                         | `SandboxOptions::max_wasm_stack`（须 < 宿主线程栈）                                 |
+| 命令内存    | 256 MiB                                       | `SandboxOptions`（沿用现有默认值）                                                  |
+| 命令条数    | 100                                           | 命令层计数                                                                          |
+| 输出上限    | 每流 1 MiB（超限截断并置 `truncated`）        | 工具层                                                                              |
 
 这些值都做成工具参数可覆盖；M1 先写死默认值。另两条本轮定下： **Q9 = 不引入 sqlite 模块**； **Q10 = 阶段一会话即焚**（跑完即丢，不写任何持久位置），全部跑通后再开放「保存与复用」（§9 M7）。
 
@@ -417,7 +600,7 @@ exec: func(name: string, args: list<string>, opts: exec-opts
 | Q8  | 默认限额         | ✅ **已定：§7.1**                                                                                                |
 | Q9  | sqlite 模块      | ✅ **已定：不要**                                                                                                |
 | Q10 | 持久化           | ✅ **已定：阶段一会话即焚**；全部跑通后再开放保存 / 复用（§9 M7）                                                |
-| Q11 | 并发（新增）     | ✅ 已定：**不走 p3**（rquickjs 的 wasip3 不成熟），做 ticket + join（`execStart`/`execJoin`，留在 p2），见 §9.4 |
+| Q11 | 并发（新增）     | ✅ 已定：**不走 p3**（rquickjs 的 wasip3 不成熟），做 ticket + join（`execStart`/`execJoin`，留在 p2），见 §9.4  |
 
 ### 8.1 Q5 的硬约束（需要在两条路里选一条）
 
@@ -438,30 +621,30 @@ exec: func(name: string, args: list<string>, opts: exec-opts
 
 ## 9. 里程碑
 
-| 里程碑 | 内容                                                                                                                                                                                                                     | 依赖                                |
-|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
-| M0     | ✅ 完成：uutils 0.12.0 → wasip2 multicall（零补丁 wrapper；**已扩到 60 util / 11 MB**，§3.5；§6 的坑全部实测）                                                                                                           | —                                   |
-| M1.0   | ✅ 完成：rquickjs 0.14 → `wasm32-wasip2` 组件在 wasmtime 上跑起 JS（1.26 MB；栈/trap 已定性，§3.1）                                                                   | —                                   |
-| M1.1   | ✅ 完成：`wasm/coreutils-wasm` 落地（60 util，7.4 MB，`./generate.sh` 一键重建；argv[0] 分发 + `coreutils <util>` 调试形式；冒烟通过，§3.5）                            | —                                   |
-| M1.2   | ✅ 完成：`wasm/codemode-sandbox` 落地（rquickjs + WIT `run`/`exec`，796 KB；`./generate.sh` 一键重建，crates.io rquickjs 无需子模块/vendor）                              | —                                   |
-| M1.3   | ✅ 完成：`crates/tower-agent-codemode` 宿主落地——`bindgen!` 绑定 + 实现 `exec`（起 coreutils 组件、内存 stdio、`argv[0]`=裸命令名）+ 会话根 preopen 成 guest `/`；**6 个冒烟全过** | —   |
-| M2     | ✅ 完成：`CodemodeTool`（`AgentTool`：schema、超时、`commands[]` 审计、命令级进度流）+ 产物内嵌（`include_bytes!`，测试不再需要 generate.sh） | M1.3 |
-| M3     | ✅ 完成：JS 可见表面——命令函数 + thenable `Cmd` 链式 pipeline、`.result()`/抛异常两种取值、`fs` 门面扩到 `mkdir`/`exists`/`rm`、命令表由宿主注入并加**漂移测试**；**13 个测试全过**（新增 4 个）                                | M2                                  |
-| M4     | ✅ 完成：挂载策略（会话根可写映射 `/`、额外挂载默认只读、JS 与命令共用同一套 preopen、越界拒绝）+ **CLI 接线**（见 §9.1） | M3 |
-| M5     | ✅ 完成：超时改**硬取消**（异步链路）+ epoch 兜底；JIT 缓存不再静默降级；命令引擎进程内共享（套件 96 s → 22 s，见 §9.2） | M4 |
-| M6     | 📋 下一阶段：并发——**不走 p3**，做 ticket + join（`execStart`/`execJoin`，见 §9.4）；另加命令组件 rg / sd | M5 |
-| M7     | 🟡 第一层完成：命名会话根跨进程复用（默认即焚）+ 列出/清理（`--codemode-sessions` / `--codemode-session-clear`，见 §9.3） | M5 |
+| 里程碑 | 内容                                                                                                                                                                                             | 依赖 |
+|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|
+| M0     | ✅ 完成：uutils 0.12.0 → wasip2 multicall（零补丁 wrapper；**已扩到 60 util / 11 MB**，§3.5；§6 的坑全部实测）                                                                                   | —    |
+| M1.0   | ✅ 完成：rquickjs 0.14 → `wasm32-wasip2` 组件在 wasmtime 上跑起 JS（1.26 MB；栈/trap 已定性，§3.1）                                                                                              | —    |
+| M1.1   | ✅ 完成：`wasm/coreutils-wasm` 落地（60 util，7.4 MB，`./generate.sh` 一键重建；argv[0] 分发 + `coreutils <util>` 调试形式；冒烟通过，§3.5）                                                     | —    |
+| M1.2   | ✅ 完成：`wasm/rquickjs-sandbox` 落地（rquickjs + WIT `run`/`exec`，796 KB；`./generate.sh` 一键重建，crates.io rquickjs 无需子模块/vendor）                                                     | —    |
+| M1.3   | ✅ 完成：`crates/tower-agent-codemode` 宿主落地——`bindgen!` 绑定 + 实现 `exec`（起 coreutils 组件、内存 stdio、`argv[0]`=裸命令名）+ 会话根 preopen 成 guest `/`；**6 个冒烟全过**               | —    |
+| M2     | ✅ 完成：`CodemodeTool`（`AgentTool`：schema、超时、`commands[]` 审计、命令级进度流）+ 产物内嵌（`include_bytes!`，测试不再需要 generate.sh）                                                    | M1.3 |
+| M3     | ✅ 完成：JS 可见表面——命令函数 + thenable `Cmd` 链式 pipeline、`.result()`/抛异常两种取值、`fs` 门面扩到 `mkdir`/`exists`/`rm`、命令表由宿主注入并加**漂移测试**；**13 个测试全过**（新增 4 个） | M2   |
+| M4     | ✅ 完成：挂载策略（会话根可写映射 `/`、额外挂载默认只读、JS 与命令共用同一套 preopen、越界拒绝）+ **CLI 接线**（见 §9.1）                                                                        | M3   |
+| M5     | ✅ 完成：超时改**硬取消**（异步链路）+ epoch 兜底；JIT 缓存不再静默降级；命令引擎进程内共享（套件 96 s → 22 s，见 §9.2）                                                                         | M4   |
+| M6     | 📋 下一阶段：并发——**不走 p3**，做 ticket + join（`execStart`/`execJoin`，见 §9.4）；另加命令组件 rg / sd                                                                                        | M5   |
+| M7     | 🟡 第一层完成：命名会话根跨进程复用（默认即焚）+ 列出/清理（`--codemode-sessions` / `--codemode-session-clear`，见 §9.3）                                                                        | M5   |
 
-M5 补记：**超时已改成「硬取消」（异步链路）**
+M5 补记： **超时已改成「硬取消」（异步链路）**
 
-- 问题：`epoch` / `fuel` 只在**执行 wasm 指令**时被检查，所以打不断「卡在宿主调用里」的 guest——`sleep`（`wasi:clocks` 阻塞）、阻塞读写都算，上一版表现为「睡满了才失败」。
+- 问题：`epoch` / `fuel` 只在 **执行 wasm 指令**时被检查，所以打不断「卡在宿主调用里」的 guest——`sleep`（`wasi:clocks` 阻塞）、阻塞读写都算，上一版表现为「睡满了才失败」。
 - 解法：`wasmtime-wasi` 的 `p2` 本身带 `wasmtime/async`，于是把这条链改成异步——
   `bindgen!` 加 `exports: { default: async }`；宿主 import `exec` 用 `func_wrap_async`；
   命令走 `Command::instantiate_async` + `tokio::time::timeout`；`CodemodeHost::run_async`
   给整段脚本再套一层超时（`run` 是同步包装，内部起 current-thread runtime）。
-- 语义：超时 = **取消**（future 丢弃、`Store` 随即销毁，不留悬挂线程）。**没有**「半截结果」。
+- 语义：超时 = **取消**（future 丢弃、`Store` 随即销毁，不留悬挂线程）。 **没有**「半截结果」。
 - 两条硬上限：脚本总超时（默认 30 s）、单条命令（默认 10 s，`exec(..., { timeoutMs })` 可覆盖）。
-- `epoch_timeout` 保留为**次要兜底**（纯 wasm 死循环的更廉价路径）。
+- `epoch_timeout` 保留为 **次要兜底**（纯 wasm 死循环的更廉价路径）。
 - 坑：wasmtime 49 里 `Config::async_support` **已废弃（无效果）**；真正决定行为的是 linker 用
   `add_to_linker_sync` 还是 `add_to_linker_async`（后者才把 WASI 的等待变成 await 点）。
 
@@ -470,7 +653,7 @@ M5 补记：**超时已改成「硬取消」（异步链路）**
 默认布局用 `CodemodeTool::for_workspace_with(workspace, SessionRoot, mounts)`：
 
 - **工作区只读挂到 `/work`**（模型能读、改不到）；
-- **会话根**（可写，映射成 guest 的 `/`）按 `SessionRoot` 分两种：`Ephemeral` = 临时目录、**由工具持有、drop 即删**（会话即焚，默认）；`Persistent(dir)` = 固定目录、跨进程复用（M7）；
+- **会话根**（可写，映射成 guest 的 `/`）按 `SessionRoot` 分两种：`Ephemeral` = 临时目录、 **由工具持有、drop 即删**（会话即焚，默认）；`Persistent(dir)` = 固定目录、跨进程复用（M7）；
 - `mounts` 是追加的挂载（`Mount::parse("<dir>[:<guest>][:ro|rw]")`，缺省 `/work` + 只读）。
 
 CLI 三个开关（`crates/tower-agent-cli/src/args.rs`）：
@@ -481,13 +664,13 @@ tower-agent --codemode --codemode-session demo           # 会话根 = <config>/
 tower-agent --codemode --codemode-mount /data:/data:ro   # 额外只读挂载；:rw 才可写
 ```
 
-接线在 `Session::enable_codemode(...)`（`session.rs`）：解析挂载 → 构造工具 → 推入 `base_tools` → `refresh_tools()`（下一轮 turn 生效）；失败只告警、不致命。`--list-tools --codemode` 也会列出它（只读名字与描述，**不构造工具**，否则为了列个名字要编译 7.4 MB）。
+接线在 `Session::enable_codemode(...)`（`session.rs`）：解析挂载 → 构造工具 → 推入 `base_tools` → `refresh_tools()`（下一轮 turn 生效）；失败只告警、不致命。`--list-tools --codemode` 也会列出它（只读名字与描述， **不构造工具**，否则为了列个名字要编译 7.4 MB）。
 
 **刻意没动 `default_tools`**：它被很多测试用到，而构造 codemode 要编译组件——放进默认列表会让每个用默认工具的测试都变慢；所以 codemode 只在开关打开时才构造。
 
 > **插件化（已接线）**：codemode 是一个 **静态插件**（`CodemodePlugin`：`protected` + `provides tool.codemode`），
 > 与 `tower-agent-wasmtime` 的 `WasmtimePlugin`（`protected` + 能力 `sandbox.wasmtime`）一起不允许被
-> 动态/JIT 插件同名覆盖。两者都由**组装层** `tower-agent::assembly::HostPlugins` 登记
+> 动态/JIT 插件同名覆盖。两者都由 **组装层** `tower-agent::assembly::HostPlugins` 登记
 > （依赖 `tower-agent` 的宿主，如 axum，也用同一入口）；CLI 的 `--codemode` 在运行时通过
 > `ModManager::register_static_plugin` 追加。名字与能力都进 `protected_*`。
 > 当前完成度与 **剩余待办** 见 [`plugins.md` §16](./plugins.md)。
@@ -501,41 +684,41 @@ cargo test -p tower-agent-codemode --offline --test measure -- --ignored --nocap
 XDG_CACHE_HOME=/tmp/cm-cache cargo test -p tower-agent-codemode --offline --test measure -- --ignored --nocapture
 ```
 
-| 项 | 耗时 |
-|----|------|
-| 编译两个组件（冷，无缓存） | ~10 s |
-| 脚本（不含命令） | ~3 ms |
-| 脚本 + 1 条命令 | ~7 ms（≈4 ms：实例化 + 跑完） |
-| 脚本 + 5 条命令 | ~15 ms（≈2.3 ms/条） |
-| 第二个 host（**缓存可写**） | 196 ms（vs 不可写 9.4 s） |
+| 项                                          | 耗时                             |
+|---------------------------------------------|----------------------------------|
+| 编译两个组件（冷，无缓存）                  | ~10 s                            |
+| 脚本（不含命令）                            | ~3 ms                            |
+| 脚本 + 1 条命令                             | ~7 ms（≈4 ms：实例化 + 跑完）    |
+| 脚本 + 5 条命令                             | ~15 ms（≈2.3 ms/条）             |
+| 第二个 host（**缓存可写**）                 | 196 ms（vs 不可写 9.4 s）        |
 | 第二个 host（进程内共享引擎后，即便无缓存） | **1.3 s**（只剩 guest 组件要编） |
 
 结论：
 
 1. **成本几乎全在「编译组件」**；实例化与每条命令都是毫秒级 → **cwasm 预热 / 实例池化不做**（conch 那条「必须 cwasm」是它每段管道新起进程/组件的架构使然，不是我们这条）。
-2. **JIT 缓存本身有效**（196 ms），但**不可写时是静默降级**——测试在受限环境里跑了很久就是这个原因，所以 `configure_cache` 现在会打一次警告，`CodemodeOptions::with_cache_dir` 也能显式指定。
+2. **JIT 缓存本身有效**（196 ms），但 **不可写时是静默降级**——测试在受限环境里跑了很久就是这个原因，所以 `configure_cache` 现在会打一次警告，`CodemodeOptions::with_cache_dir` 也能显式指定。
 3. **引擎进程内共享**（`exec.rs` 的 `COMMAND_ENGINES`，键 = coreutils 字节 + 单命令超时）把同进程后续 host 从 9.4 s 降到 1.3 s；会话根/挂载是 per-`Store` 的，不参与缓存。
-4. 只有「冷启动必须 <1 s」才需要**拆组件**（~10 s 与 7.4 MB 基本成正比）。
+4. 只有「冷启动必须 <1 s」才需要 **拆组件**（~10 s 与 7.4 MB 基本成正比）。
 
 ### 9.3 CLI 开关与会话管理
 
-| 开关 | 作用 |
-|------|------|
-| `--codemode` | 启用 codemode（工作区只读挂 `/work` + 会话根可写） |
-| `--codemode-session <name>` | 会话根持久化在 `<config>/tower-agent/codemode/<name>`，跨进程复用；不传则临时（即焚） |
-| `--codemode-mount <dir>[:<guest>][:ro\|rw]` | 追加挂载（可重复）；缺省 guest `/work`、只读 |
-| `--codemode-sessions` | 列出持久化会话后退出（只读目录，不构造工具） |
-| `--codemode-session-clear <name>` | 删掉一个持久化会话（连同产物）后退出 |
+| 开关                                        | 作用                                                                                  |
+|---------------------------------------------|---------------------------------------------------------------------------------------|
+| `--codemode`                                | 启用 codemode（工作区只读挂 `/work` + 会话根可写）                                    |
+| `--codemode-session <name>`                 | 会话根持久化在 `<config>/tower-agent/codemode/<name>`，跨进程复用；不传则临时（即焚） |
+| `--codemode-mount <dir>[:<guest>][:ro\|rw]` | 追加挂载（可重复）；缺省 guest `/work`、只读                                          |
+| `--codemode-sessions`                       | 列出持久化会话后退出（只读目录，不构造工具）                                          |
+| `--codemode-session-clear <name>`           | 删掉一个持久化会话（连同产物）后退出                                                  |
 
 会话名会被校验成「一层普通名字」，`/`、`..` 之类一律拒绝（`session_name_is_valid`），所以清理不会跑到基目录外面；`tests/sessions.rs` 守着列表、清理与这条越界防护（不碰真实 config，全在临时目录里做）。
 
 ### 9.4 M6 调研：并发要不要 p3
 
-**wasmtime 49 的 p3 状态（本机源码核对）**：`wasmtime-wasi` 49 有 `p3` feature（开出来是 `wasmtime/component-model-async` + `wasmtime/component-model-bytes`）；wasmtime 49 本身有 `component-model-async` feature、`Config::wasm_component_model_async`、`func_wrap_concurrent`，p3 的 bindings 也在。**我们当前没开**：workspace 的 wasmtime features 只有 `async`，wasmtime-wasi 只开 `p2`。
+**wasmtime 49 的 p3 状态（本机源码核对）**：`wasmtime-wasi` 49 有 `p3` feature（开出来是 `wasmtime/component-model-async` + `wasmtime/component-model-bytes`）；wasmtime 49 本身有 `component-model-async` feature、`Config::wasm_component_model_async`、`func_wrap_concurrent`，p3 的 bindings 也在。 **我们当前没开**：workspace 的 wasmtime features 只有 `async`，wasmtime-wasi 只开 `p2`。
 
-**rquickjs 的硬约束**：支持矩阵是 `wasm32-wasip1` / `wasm32-wasip2` / `wasm32-unknown-unknown`，**没有 `wasm32-wasip3`** → 「JS guest 直接跑在 p3」目前不可行（除非上游加目标，或把 JS 挪出 guest）。
+**rquickjs 的硬约束**：支持矩阵是 `wasm32-wasip1` / `wasm32-wasip2` / `wasm32-unknown-unknown`， **没有 `wasm32-wasip3`** → 「JS guest 直接跑在 p3」目前不可行（除非上游加目标，或把 JS 挪出 guest）。
 
-**但「并发」不等于「必须 p3」。** 脚本真正想要的并行是**命令级并行**，不用等 p3，在现在的 p2 + 同步 host import 上就能做到——把 `exec` 拆成两步：
+**但「并发」不等于「必须 p3」。** 脚本真正想要的并行是 **命令级并行**，不用等 p3，在现在的 p2 + 同步 host import 上就能做到——把 `exec` 拆成两步：
 
 ```js
 const t1 = execStart("cat", ["/a"]);   // 立刻返回 ticket，宿主后台已开跑
@@ -548,23 +731,23 @@ const [a, b] = [execJoin(t1), execJoin(t2)].map((r) => r);  // 或 parallel([t1,
 
 **什么时候才真需要 p3**：流式 stdio（边跑边喂/边读，而不是内存缓冲）、结构化并发的取消传播、以及 Go 组件（其运行时要 wasip3）。这些都与「脚本里跑并行命令」正交。
 
-**结论（已定）**：并发**不走 p3**——rquickjs 的 wasip3 目标不成熟（明确不做），而脚本要的并行是命令级并行，用 ticket + join 留在 p2 就能拿到。p3 只在将来真要「流式 stdio / Go 组件」时另议，那时 JS 大概率要挪回宿主。
+**结论（已定）**：并发 **不走 p3**——rquickjs 的 wasip3 目标不成熟（明确不做），而脚本要的并行是命令级并行，用 ticket + join 留在 p2 就能拿到。p3 只在将来真要「流式 stdio / Go 组件」时另议，那时 JS 大概率要挪回宿主。
 
 ## 10. 风险与缓解
 
-| 风险                                                  | 影响                               | 缓解                                                                     |
-|-------------------------------------------------------|------------------------------------|--------------------------------------------------------------------------|
-| rquickjs 的 wasip2 路径                              | ✅ 已实测跑通（§3.1，1.26 MB）     | 但**深递归会 trap**：限额取 64 KiB（可捕获）+ 宿主把 trap 当脚本失败并丢弃实例 |
-| 构建要 wasi-sdk（curl 下载）                          | 离线/CI 失败                       | 预置 `WASI_SDK=<path>`（本机已有 34）或 vendor 一份；另需初始化 quickjs-ng 子模块 |
-| 构建要 wasi-sdk（curl 下载）                          | 离线/CI 失败                       | 预置 `WASI_SDK=<path>` 或 vendor 一份；写进构建文档                      |
-| guest 里的 tokio 不含 `fs`/`process`               | 异步/并发受限；`fs` 必须自写       | 首版同步 import；`fs` 按 §8.1 R1 自写；并发按 Q11：ticket + join（p2），不上 p3 |
-| API 全靠自研，模型可能写不顺                          | 一次往返失败率升高                 | 工具描述里放 API 摘要 + 范例；`exec` 作降级路径；错误信息带行号与片段    |
-| rquickjs 是 C 引擎，但**在 wasm 里**                  | 边界强，但引擎自身 bug 会 trap     | 命令实例池 + 复用；trap 归一化成「脚本执行失败」而不是宿主错误           |
+| 风险                                                  | 影响                               | 缓解                                                                                     |
+|-------------------------------------------------------|------------------------------------|------------------------------------------------------------------------------------------|
+| rquickjs 的 wasip2 路径                               | ✅ 已实测跑通（§3.1，1.26 MB）     | 但**深递归会 trap**：限额取 64 KiB（可捕获）+ 宿主把 trap 当脚本失败并丢弃实例           |
+| 构建要 wasi-sdk（curl 下载）                          | 离线/CI 失败                       | 预置 `WASI_SDK=<path>`（本机已有 34）或 vendor 一份；另需初始化 quickjs-ng 子模块        |
+| 构建要 wasi-sdk（curl 下载）                          | 离线/CI 失败                       | 预置 `WASI_SDK=<path>` 或 vendor 一份；写进构建文档                                      |
+| guest 里的 tokio 不含 `fs`/`process`                  | 异步/并发受限；`fs` 必须自写       | 首版同步 import；`fs` 按 §8.1 R1 自写；并发按 Q11：ticket + join（p2），不上 p3          |
+| API 全靠自研，模型可能写不顺                          | 一次往返失败率升高                 | 工具描述里放 API 摘要 + 范例；`exec` 作降级路径；错误信息带行号与片段                    |
+| rquickjs 是 C 引擎，但**在 wasm 里**                  | 边界强，但引擎自身 bug 会 trap     | 命令实例池 + 复用；trap 归一化成「脚本执行失败」而不是宿主错误                           |
 | 组件体积（rquickjs + 60 util，`wasm-opt` 对组件无效） | 内嵌体积增大                       | `opt-level="z"` + lto + strip（11 MB → 7.4 MB）；真要瘦身就把 util 拆成「核心集/扩展集」 |
-| 产物已内嵌进仓库（`assets/` 共 ~8.2 MB）           | 仓库与二进制各 +8.2 MB              | 有意为之（免去构建期跑 generate.sh）；若嫌大就走上面的拆组件路线          |
-| preopen / VFS 语义与脚本直觉不一致（§6 坑 3）         | 命令静默失败或越界                 | 会话根 = guest 根；M4 上 VFS 后语义统一；冒烟覆盖 `mv`/`cp`/相对路径     |
-| `llrt_fs` 进不了 guest（tokio 禁用 `fs`）             | 需要自写 fs 子集，或把 JS 挪回宿主 | 按 §8.1 R1：自写 guest `fs`，复用 `llrt_path`/`llrt_encoding`（不 fork） |
-| llrt_modules 是 `0.9.0-beta`                          | 上游变更带来 rebase 成本           | 只取用到的模块（`fs`/`child_process` 已排除）；升级走 rebase + 冒烟      |
+| 产物已内嵌进仓库（`assets/` 共 ~8.2 MB）              | 仓库与二进制各 +8.2 MB             | 有意为之（免去构建期跑 generate.sh）；若嫌大就走上面的拆组件路线                         |
+| preopen / VFS 语义与脚本直觉不一致（§6 坑 3）         | 命令静默失败或越界                 | 会话根 = guest 根；M4 上 VFS 后语义统一；冒烟覆盖 `mv`/`cp`/相对路径                     |
+| `llrt_fs` 进不了 guest（tokio 禁用 `fs`）             | 需要自写 fs 子集，或把 JS 挪回宿主 | 按 §8.1 R1：自写 guest `fs`，复用 `llrt_path`/`llrt_encoding`（不 fork）                 |
+| llrt_modules 是 `0.9.0-beta`                          | 上游变更带来 rebase 成本           | 只取用到的模块（`fs`/`child_process` 已排除）；升级走 rebase + 冒烟                      |
 
 ## 11. 附录
 

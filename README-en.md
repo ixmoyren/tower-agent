@@ -145,7 +145,7 @@ tower-agent/
 └── wasm/                    # independent wasm component workspaces
     ├── monty-sandbox/       #   compiles the monty interpreter into a wasm component
     ├── coreutils-wasm/      #   codemode's command layer (uutils multicall, 60 commands)
-    └── codemode-sandbox/    #   codemode's JS sandbox (rquickjs -> wasip2)
+    └── rquickjs-sandbox/    #   codemode's JS sandbox (rquickjs -> wasip2)
 ```
 
 ### Documentation
@@ -178,22 +178,22 @@ them** — otherwise `include_bytes!` fails with `couldn't read …/assets/*.was
 |------------------------------------------------------|------------------------|------------------------------------------------------|
 | `crates/tower-agent-monty/assets/monty-sandbox.wasm` | `tower-agent-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
 | `crates/tower-agent-codemode/assets/coreutils.wasm`  | `tower-agent-codemode` | `./wasm/coreutils-wasm/generate.sh`                  |
-| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/codemode-sandbox/generate.sh` |
+| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/rquickjs-sandbox/generate.sh` |
 
 Toolchain (needed only when building wasm, not for everyday `cargo build`):
 
 ```sh
 rustup target add wasm32-wasip2          # all three artifacts
 rustup target add wasm32-wasip1          # monty-sandbox: p1 + wasm-opt + componentize
-cargo install cargo-component --locked   # monty-sandbox + codemode-sandbox
+cargo install cargo-component --locked   # monty-sandbox + rquickjs-sandbox
 cargo install wasm-tools --locked        # monty-sandbox (embed/new)
 # wasm-opt (binaryen)                    # monty-sandbox size
-# WASI_SDK (wasi-sdk 24+)               # codemode-sandbox: rquickjs compiles quickjs's C sources
+# WASI_SDK (wasi-sdk 24+)               # rquickjs-sandbox: rquickjs compiles quickjs's C sources
 ```
 
 - **coreutils-wasm** is the simplest: only `wasm32-wasip2` is needed; rustc emits the component
   directly (no wasi-sdk / wasm-opt / wasm-tools).
-- **codemode-sandbox** needs `WASI_SDK`; the crates.io `rquickjs-sys` ships quickjs's C sources, so **no submodule or vendoring is required**.
+- **rquickjs-sandbox** needs `WASI_SDK`; the crates.io `rquickjs-sys` ships quickjs's C sources, so **no submodule or vendoring is required**.
 - The first build of a lane pulls dependencies from crates.io; afterwards each workspace's
   `Cargo.lock` pins them, so `--offline` works.
 - Per-workspace details: `wasm/*/README.md`.

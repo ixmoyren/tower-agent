@@ -5266,6 +5266,7 @@ dependencies = [
  "tower-agent-core",
  "tower-agent-plugins",
  "tower-agent-provider",
+ "tower-agent-tools",
  "tower-agent-wasmtime",
  "wasmtime",
  "wasmtime-wasi",
