@@ -28,8 +28,8 @@
   每个工具本身就是一个可组合的 tower `Layer`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)
   ——bash 兼容的 Rust shell，在进程内解释执行，跨平台行为一致）。
 - **三种插件形态**：静态（编译期 tower `Layer`）、动态（stabby `cdylib`，运行时加载 / 卸载）、
-  热重载（monty 脚本，跑在 wasmtime 沙箱里），覆盖从「零开销内置」到「热加载 mods」的整条光谱。
-- **mods 模式**：让 LLM 自己编写、热重载、卸载 monty 脚本，从而动态扩展宿主能力、注册工具、贡献 UI。
+  热重载（monty 脚本，跑在 wasmtime 沙箱里），覆盖从「零开销内置」到「热加载 codemode 脚本」的整条光谱。
+- **codemode Python 脚本**：让 LLM 自己编写、热重载、卸载 monty 脚本，从而动态扩展宿主能力、注册工具、贡献 UI。
 - **稳定协议**：帧格式 / 严格 CBOR 子集 / RPC 信封（`tower-agent-protocol`）。
 
 ### 架构
@@ -45,7 +45,7 @@
 | `tower-agent-tools`      | **内置工具**：read / shell / edit / write / grep / find / ls                                          |
 | `tower-agent-plugins`    | **插件宿主**：注册表、生命周期、HostApi、权限、三类加载器                                             |
 | `tower-agent-plugin-sdk` | **插件作者 SDK**：`declare_plugin!`、静态 / 动态 ABI 契约                                             |
-| `tower-agent-monty`      | **热重载后端**：内嵌 monty（Python 子集）沙箱插件 + mods 管理器                                       |
+| `tower-agent-monty`      | **热重载后端**：内嵌 monty（Python 子集）沙箱插件 + codemode 脚本管理器                              |
 | `tower-agent-wasmtime`   | **wasm 沙箱底座**：wasmtime 引擎 / 组件、WASI、资源上限、JIT 缓存与实例池                             |
 | `tower-agent-protocol`   | **协议**：帧、严格 CBOR 子集、RPC 信封                                                                |
 | `tower-agent-tui`        | **终端前端**：基于 Agent 事件流的差分渲染 TUI                                                         |
@@ -63,7 +63,7 @@
 | 加载     | 编译期                      | `libloading` 运行时加载     | 运行时编译 + 原子换绑           |
 | 卸载     | 不卸载（随进程）            | 支持卸载                    | 支持热替换                      |
 | 调用开销 | 零（直接函数调用）          | 一次间接调用 + ABI 编解码   | 编译后接近原生                  |
-| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemod | `mods`、用户脚本、轻量扩展      |
+| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemod | codemode Python 脚本、轻量扩展  |
 
 静态插件实现 `StaticPlugin`，可贡献 **能力**、 **工具** 以及三层中间件
 （`agent_layers()` / `tool_layers()` / `event_handlers()`）。动态插件用

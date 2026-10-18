@@ -34,8 +34,8 @@ used directly as a library.
   commands in-process for consistent cross-platform behavior).
 - **Three plugin forms**: static (compile-time tower `Layer`), dynamic (stabby `cdylib`
   loaded/unloaded at runtime), and hot-reload (monty scripts running inside a wasmtime
-  sandbox) — spanning the whole spectrum from zero-overhead built-ins to hot-loaded mods.
-- **mods mode**: let the LLM write, hot-reload, and unload monty scripts that extend host
+  sandbox) — spanning zero-overhead built-ins through hot-loaded codemode scripts.
+- **codemode Python scripts**: let the LLM write, hot-reload, and unload monty scripts that extend host
   capabilities, register tools, and contribute UI.
 - **Stable protocol**: framing, a strict CBOR subset, and RPC envelopes (`tower-agent-protocol`).
 
@@ -53,7 +53,7 @@ dependencies are declared once through workspace dependencies.
 | `tower-agent-tools`      | **Built-in tools**: read / shell / edit / write / grep / find / ls                                                                 |
 | `tower-agent-plugins`    | **Plugin host**: registry, lifecycle, HostApi, permissions, three loaders                                                          |
 | `tower-agent-plugin-sdk` | **Plugin author SDK**: `declare_plugin!`, static / dynamic ABI contracts                                                           |
-| `tower-agent-monty`      | **Hot-reload backend**: embedded monty (Python subset) sandbox plugins + mods manager                                              |
+| `tower-agent-monty`      | **Hot-reload backend**: embedded monty (Python subset) sandbox plugins + codemode script manager                                    |
 | `tower-agent-wasmtime`   | **wasm sandbox base**: wasmtime engine/component, WASI, resource limits, JIT cache and instance pool                               |
 | `tower-agent-protocol`   | **Protocol**: framing, strict CBOR subset, RPC envelopes                                                                           |
 | `tower-agent-tui`        | **Terminal frontend**: differential-rendering TUI over the agent event stream                                                      |
@@ -72,7 +72,7 @@ providers, tools and plugins each live in their own crate.
 | Loading     | compile time                             | `libloading` at runtime                | runtime compile + atomic rebind        |
 | Unloading   | none (lives with the process)            | supported                              | hot replacement                        |
 | Call cost   | zero (direct call)                       | one indirect call + ABI codec          | near-native after JIT                  |
-| Typical use | built-in tools, providers, observability | sandbox, memory, persistence, codemode | `mods`, user scripts, light extensions |
+| Typical use | built-in tools, providers, observability | sandbox, memory, persistence, codemode | codemode Python scripts, light extensions |
 
 A static plugin implements `StaticPlugin` and can contribute **capabilities**, **tools**,
 and three middleware layers (`agent_layers()` / `tool_layers()` / `event_handlers()`).

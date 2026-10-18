@@ -10,8 +10,8 @@
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
 | 当前阶段   | **Phase 3（合并 feature / CLI / 词汇）**       |
-| 下一个任务 | **T3.3**                                       |
-| 代码状态   | **T1–T3.2 已完成**：能力层、feature 与 CLI 开关已收敛 |
+| 下一个任务 | **T3.4**                                       |
+| 代码状态   | **T1–T3.3 已完成**：能力层、CLI 与作者工具词汇已收敛 |
 
 ---
 
@@ -160,7 +160,7 @@
     3. 帮助文本更新 + 二进制测试。
 - **验收**：`cargo test -p tower-agent-cli`；`--help` 快照/断言包含新开关且不含 `mods`。
 
-### [ ] T3.3 作者工具改名
+### [x] T3.3 作者工具改名
 
 - **依赖**：T3.1、T4.1（脚本仓库）——也可以先改名字、后接仓库
 - **做什么**：`mod_write` / `mod_reload` / `mod_list` / `mod_remove` → `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove`；保留名列表、prompt、测试同步。
@@ -274,3 +274,4 @@
 | 2026-10-18 | T2.2 | 新增 `--codemode-engine monty\|js`、`codemode.engine` 有效配置与 `ScriptMetadata.language`；脚本 > CLI > 配置 > 默认 JS，CLI 50 测试通过 |
 | 2026-10-18 | T3.1 | 删除 `mods` feature；门面与 CLI 统一为 `codemode` + `codemode-python` + `codemode-js`；默认、无默认及单引擎组合全部编译通过 |
 | 2026-10-18 | T3.2 | CLI 新增 `--no-codemode` 并与 `--codemode` 互斥；删除 `TPA_NO_MODS`，`--no-mods` 不再识别；帮助/二进制测试通过 |
+| 2026-10-18 | T3.3 | 六个作者工具统一为 `codemode_*`；保留名、描述、测试、README 与设计文档同步；源码/用户文档旧 tool 名清零 |

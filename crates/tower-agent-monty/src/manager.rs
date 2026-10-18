@@ -92,7 +92,7 @@ pub struct ModOptions {
     pub requires: Vec<String>,
 }
 
-/// 一个已加载 mod 的摘要（用于 `mod_list` / UI 展示）。
+/// 一个已加载 codemode Python 脚本的摘要（用于 `codemode_list` / UI 展示）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModSummary {
     /// mod 名。
@@ -656,7 +656,7 @@ impl ModManager {
 
     /// 阻断会遮蔽「JIT 运行时地基」或其它 mod 工具的 JIT 插件。
     ///
-    /// - 插件名 / 工具名命中保留名（`mod_write` 等）→ 阻断；
+    /// - 插件名 / 工具名命中保留名（`codemode_write` 等）→ 阻断；
     /// - 工具名与**另一个 mod** 提供的工具重名 → 阻断（JIT 不能遮蔽 JIT 的基础设施）。
     fn check_shadowing(&self, name: &str) -> Result<(), PluginError> {
         let protected_tools: BTreeSet<String> = {

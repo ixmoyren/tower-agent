@@ -9,10 +9,10 @@
 把 tower-agent 从「编译期内置能力集合」升级为「可组合、可扩展、可热插拔的能力平台」，满足：
 
 1. **内置能力插件化**：核心插件与内置 tool 走统一注册/解析体系，而不是写死在 `tower_agent_tools::default_tools()`。
-2. **三种插件形态**：静态（tower Layer）、动态（stabby `cdylib`）、热重载（monty，Python 子集沙箱），覆盖从「零开销内置」到「热加载的 mods」的整条光谱。
+2. **三种插件形态**：静态（tower Layer）、动态（stabby `cdylib`）、热重载（monty，Python 子集沙箱），覆盖从「零开销内置」到「热加载的 codemode 脚本」的整条光谱。
 3. **跨形态能力调用**：动态与 JIT 插件可以互相调用对方提供的能力。
 4. **确定性解析**：无循环依赖；菱形依赖用版本机制收敛；同名插件按形态优先级覆盖。
-5. **可卸载 / 可热更**：动态插件可加载可卸载；JIT 插件可热加载，服务于后续 cc `mods` 模式。
+5. **可卸载 / 可热更**：动态插件可加载可卸载；JIT 插件可热加载，服务于 codemode Python 脚本。
 
 ## 2. 术语
 
@@ -56,7 +56,7 @@
 | 卸载     | 不卸载（随进程）               | 支持卸载                        | 支持热替换                      |
 | 热更新   | 不支持（重新构建）             | 需 stop→unload→load（可选实现） | 原生热加载                      |
 | 调用开销 | 零（直接函数调用）             | 一次间接调用 + ABI 编解码       | 编译后接近原生                  |
-| 典型用途 | 内置 tool、provider 层、观测层 | 沙箱、记忆、持久化、codemode    | cc `mods`、用户脚本、轻量扩展   |
+| 典型用途 | 内置 tool、provider 层、观测层 | 沙箱、记忆、持久化、codemode    | codemode Python 脚本、轻量扩展  |
 | feature  | 默认开启                       | `dynamic`                       | `jit`                           |
 
 ### 4.1 静态插件（tower Layer）
@@ -79,27 +79,27 @@
 
 ### 4.3 热重载插件（monty）
 
-> **v2 提案（待评审）**：`mods`（本节的 JIT 形态）与 `codemode` 本质是同一件事——*agent 可以编程*：LLM 生成脚本、沙箱执行、脚本既能组合工具也能扩展 agent。计划合并为统一的 `codemode`（解释器可选：monty/Python 或 rquickjs/JS），脚本侧扩展点落在 `tower-agent-plugin-sdk` 上（不新增 crate）。见 [`codemode.md`](./codemode.md) §0 与 [`sdk.md`](./sdk.md)。
+> **codemode 统一形态**：本节 JIT 形态是 codemode 的 Python 引擎——*agent 可以编程*：LLM 生成脚本、沙箱执行、脚本既能组合工具也能扩展 agent。它与 rquickjs/JS 引擎共享能力层；脚本侧扩展点落在 `tower-agent-plugin-sdk` 上（不新增 crate）。见 [`codemode.md`](./codemode.md) §0 与 [`sdk.md`](./sdk.md)。
 
 - 用 monty（Python 子集）编写脚本；宿主把 monty 解释器编译成 **wasm 组件**（`wasm/monty-sandbox`）内嵌进二进制，用 wasmtime 在沙箱里执行（崩溃/越界/内存超限转成 trap，不波及宿主）；脚本调用的未定义外部函数即宿主能力调用（组件返回 `function-call` → `MontyHost` 回调 → `resume`）。
 - 原子换绑实现 **热加载**：试跑新版本 → 成功才替换源码槽位 → 旧版本等待 in-flight 完成后释放；失败保留旧版本并回报错误。
-- 目标场景：cc 的 `mods` 模式（用户/LLM 可写、可热更的轻量逻辑）。
+- 目标场景：codemode Python 脚本（用户/LLM 可写、可热更的轻量逻辑）。
 
-> 实现状态（M3 已落地，mods 作者闭环见下）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload`。 **执行在 wasm 沙箱里**：`wasm/monty-sandbox` 把 monty 解释器（及其 ruff 解析器依赖）编译成 `wasm32-wasip2` 组件，经 `wasm-opt -Oz --strip-debug` 优化后内嵌进 `tower-agent-monty`（`assets/monty-sandbox.wasm`，约 6.5 MB），宿主用 wasmtime 的 **组件绑定**驱动，开启 JIT + JIT 缓存（缓存键含 wasmtime 版本，升级后自动失效）。没有外部 `monty`
-> CLI、没有子进程、不需要 `TPA_MONTY_BIN`；mods 代码的越界/栈溢出/内存超限被 wasmtime 转成 trap 错误，不会带走宿主进程。WIT 接口是宿主驱动的 REPL 状态机（`start` + `resume-*`），参数/返回值都是 JSON；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主，热加载用 `reload_checked` 试跑成功后原子替换源码。重新生成组件：`./wasm/monty-sandbox/generate.sh`。
+> 实现状态（M3 已落地，codemode Python 作者闭环见下）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload`。 **执行在 wasm 沙箱里**：`wasm/monty-sandbox` 把 monty 解释器（及其 ruff 解析器依赖）编译成 `wasm32-wasip2` 组件，经 `wasm-opt -Oz --strip-debug` 优化后内嵌进 `tower-agent-monty`（`assets/monty-sandbox.wasm`，约 6.5 MB），宿主用 wasmtime 的 **组件绑定**驱动，开启 JIT + JIT 缓存（缓存键含 wasmtime 版本，升级后自动失效）。没有外部 `monty`
+> CLI、没有子进程、不需要 `TPA_MONTY_BIN`；脚本代码的越界/栈溢出/内存超限被 wasmtime 转成 trap 错误，不会带走宿主进程。WIT 接口是宿主驱动的 REPL 状态机（`start` + `resume-*`），参数/返回值都是 JSON；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主，热加载用 `reload_checked` 试跑成功后原子替换源码。重新生成组件：`./wasm/monty-sandbox/generate.sh`。
 >
-> **mods（cc `mods` 模式）**：`ModManager` 管理一组 monty mod，对 LLM 暴露 `mod_write` / `mod_reload` / `mod_list` / `mod_remove` 作者工具。mod 脚本可：
+> **codemode Python 脚本**：`ModManager` 管理一组 monty 脚本，对 LLM 暴露 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` 作者工具。脚本可：
 > 1. **调宿主能力**：`exec(name, args, opts)` / `tool_call(name, args)` / `log` / `state_get` / `state_set`；
 > 2. **提供工具**：安装期 `tool_register(name, function, description, parameters)` 把 Python 函数包成 `ModTool`，运行时动态注册进 `HostApi` 与 agent 工具集（`tool_unregister` 注销）；
 > 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据。
 >
 > 沙箱侧还提供： **实例池**（`SandboxPool`，一次运行借出、跑完归还）+ **预热**（`ModManager::warmup` / `spawn_warmup` 后台编译组件、预建实例）、 **文件系统挂载**（`ModManager::mount*` 用 `monty-fs` 的 `MountTable` 在宿主侧服务 OS 调用：`ReadOnly` / `OverlayMemory` / `ReadWrite`）与 **每-mod 权限**（`ModPermissions` 现为 `ScriptPermissions` 别名：`exec` / `fs` / `tools` / `register_tools` / `hooks` / `commands` / `ui` / `state`，在派发与 OS 处理时强制）。CLI 默认把工作目录只读挂到 `/work`。
 >
-> **三形态同表（解析规则一致）**：mod 以 `PluginKind::Jit` 载荷注册进 **同一个 `PluginRegistry`**（内置工具是同一注册表里的静态插件），因此覆盖优先级（静态 < 动态 < JIT）、能力级覆盖、依赖图/拓扑排序、版本收敛与被遮蔽记录（`ModManager::shadows`）对三形态统一生效——同名 JIT mod 会遮蔽同名静态插件。工具目录的唯一来源是「解析 + 安装」的结果（`ModManager::tools`），`HostApi` 同步获得同一份工具集；`--tools` / `--exclude-tools` / `--no-tools` 以 `ToolFilter` 作用在该目录之上。
+> **三形态同表（解析规则一致）**：Python codemode 脚本以 `PluginKind::Jit` 载荷注册进 **同一个 `PluginRegistry`**（内置工具是同一注册表里的静态插件），因此覆盖优先级（静态 < 动态 < JIT）、能力级覆盖、依赖图/拓扑排序、版本收敛与被遮蔽记录（`ModManager::shadows`）对三形态统一生效——同名 JIT 脚本会遮蔽同名静态插件。工具目录的唯一来源是「解析 + 安装」的结果（`ModManager::tools`），`HostApi` 同步获得同一份工具集；`--tools` / `--exclude-tools` / `--no-tools` 以 `ToolFilter` 作用在该目录之上。
 >
-> **`protected` 标记与遮蔽规则**：`PluginManifest.protected` 的实现 **永不被遮蔽**——JIT 运行时（agent-monty）就以一张 protected 插件清单注册（提供 `tool.mod_*` 与 `jit.run`），任何试图用同名插件/同名工具遮蔽它的 mod 会被 `ModManager` **阻断**并回滚。除它之外：JIT 可以遮蔽静态与动态插件， **JIT 之间也允许**，规则是「后写覆盖先写」，工具目录按名去重并登记 `ModManager::shadowed_tools()`。
+> **`protected` 标记与遮蔽规则**：`PluginManifest.protected` 的实现 **永不被遮蔽**——JIT 运行时（agent-monty）就以一张 protected 插件清单注册（提供 `tool.codemode_*` 与 `jit.run`），任何试图用同名插件/同名工具遮蔽它的脚本会被 `ModManager` **阻断**并回滚。除它之外：JIT 可以遮蔽静态与动态插件， **JIT 之间也允许**，规则是「后写覆盖先写」，工具目录按名去重并登记 `ModManager::shadowed_tools()`。
 >
-> **持久化（`dirs`）**：mod 默认只活在会话内，源码同时写到 `dirs::cache_dir()/tower-agent/mods`（临时，不算保存）；`mod_persist` 把它复制到 `dirs::config_dir()/tower-agent/mods`（跨会话保留，启动时自动加载），`mod_discard` 卸载并从 config/cache 删除。动态插件从 `dirs::config_dir()/tower-agent/plugins` 加载（`.so`/`.dll`/`.dylib`，其 `tool.<name>` 能力被包装成工具，因此可被更高优先级的 JIT mod 遮蔽）。
+> **持久化（`dirs`）**：Python codemode 脚本默认只活在会话内，源码同时写到 `dirs::cache_dir()/tower-agent/mods`（临时，不算保存）；`codemode_persist` 把它复制到 `dirs::config_dir()/tower-agent/mods`（跨会话保留，启动时自动加载），`codemode_discard` 卸载并从 config/cache 删除。动态插件从 `dirs::config_dir()/tower-agent/plugins` 加载（`.so`/`.dll`/`.dylib`，其 `tool.<name>` 能力被包装成工具，因此可被更高优先级的 JIT 脚本遮蔽）。
 
 ## 5. 插件模型
 
@@ -350,7 +350,7 @@ pub enum PluginError {
 | M1 ✅  | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移；生命周期 / 宿主 API / 权限 / 错误已落地 |
 | M2 ✅  | `plugins-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `../examples/plugin-dyn` 示例 cdylib + 端到端测试                          |
 | M3 ✅  | `tower-agent-monty`（monty + monty-pool）：宿主函数回调、原子换绑热加载与失败回滚                                                                                    |
-| M4 ◐   | 沙箱（`tower-agent-wasmtime`）/ 记忆 / 持久化 / codemode 已各自落地为静态插件；**未完成**：动态形态的沙箱与记忆、`mods` 与 `codemode` 的统一（见 [`codemode.md`](./codemode.md) §0）。其余未完成项见 [`roadmap.md`](./roadmap.md)。 |
+| M4 ◐   | 沙箱（`tower-agent-wasmtime`）/ 记忆 / 持久化 / codemode 已落地；Python / JS 引擎共享 capability、提示词、feature 与 CLI 开关。**未完成**：动态形态的沙箱与记忆、统一脚本仓库。其余未完成项见 [`roadmap.md`](./roadmap.md)。 |
 
 ## 16. 已确认决策
 
@@ -394,9 +394,8 @@ pub enum PluginError {
   `with_codemode(session, mounts)`〕）—— **与会话无关**，CLI / axum / 测试同一入口。
   `ModManager::new` 只再叠加自己的 JIT 运行时地基，不再自己塞 wasmtime；
   `ModManager::register_static_plugin(&self, Arc<dyn StaticPlugin>)` 保留，供运行时追加插件
-  （CLI 的 `--codemode` 走它；未启用 mods 时退化为直接追加工具）。
-  —— 这条同时修掉了一个真实缺口：mods 默认启用时工具目录来自 `mods.tools()`，旧的
-  `base_tools.push` 根本不会生效，`--codemode` 会静默失灵。
+  （CLI 的 `--codemode` 走它；JavaScript 引擎未启用时退化为直接追加工具）。
+  —— 这条同时修掉了工具目录与静态插件表不同源的问题。
 - [x] **2. 抽出可测的检查**：`PluginRegistry::ensure_not_protected(name)` 成为唯一规则实现，
   `dynamic::load_from_dir` 与 JIT 的 `check_shadowing` 都调它（不再两处漂移）；
   `tests/resolution.rs` 覆盖「保护名 → Err / 普通名 → Ok」，monty 侧补 `register_static_plugin` 用例，
@@ -405,15 +404,14 @@ pub enum PluginError {
   `select_providers` 对受保护能力只考虑受保护提供者（JIT 形态优先级 / 更高版本不再能顶掉），
   `CapabilityOverride` 指向非受保护实现时返回新错误 `PluginError::OverrideProtected`
   （与「未知实现」的 `OverrideTargetMissing` 区分）；`tests/resolution.rs` 补三条断言。
-- [x] **4. 静态插件与 cargo feature 联动**：`tower-agent` 门面加 optional 依赖 +
-  `[features] default = ["sandbox-wasmtime", "codemode"]`、`sandbox-wasmtime = ["dep:tower-agent-wasmtime"]`、
-  `codemode = ["dep:tower-agent-codemode", "sandbox-wasmtime"]`；组装层用 `#[cfg(feature = "…")]`
-  决定注册哪些插件，`--no-default-features` 下只剩内置工具（已验证编译）。见 §11。
+- [x] **4. 静态插件与 cargo feature 联动**：`tower-agent` 门面使用
+  `sandbox-wasmtime` / `codemode` / `codemode-python` / `codemode-js`；组装层按 feature
+  注册插件，`--no-default-features` 下只剩内置工具。见 §11。
 - [x] **5. Python / JavaScript 引擎 feature 化**：`codemode` 是共享入口，
   `codemode-python = ["codemode", "dep:tower-agent-monty"]`、
   `codemode-js = ["codemode", "dep:tower-agent-codemode"]`；默认三者都开，两个引擎也可各自单独编译。
 - [x] **6. CLI 二进制的 feature 化**：`tower-agent-cli` 使用同名三 feature，并通过
   `tower-agent/codemode-*` 继续传递引擎选择；无默认时只剩内置工具，单 Python / 单 JS
-  以及共享层单独启用均已验证编译。CLI 开关收敛与旧 mods 环境变量清理留到 T3.2。
+  以及共享层单独启用均已验证编译。CLI 已用 `--no-codemode` 收敛开关，并移除旧环境变量。
   `tokio` 补 `rt-multi-thread`（少了 monty 的隐式 feature 后，`main` 的多线程 runtime 才成立）。
   `cargo check/test -p tower-agent-cli --no-default-features` 已验证（只剩内置工具）。

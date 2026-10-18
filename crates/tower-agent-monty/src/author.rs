@@ -1,10 +1,10 @@
-//! 暴露给 LLM 的 mods 作者工具（cc `mods` 的作者闭环）。
+//! 暴露给 LLM 的 codemode Python 作者工具。
 //!
-//! 模型自己生成 monty Python 代码，通过 `mod_write` 校验/加载；mod 再用宿主函数
+//! 模型自己生成 monty Python 代码，通过 `codemode_write` 校验/加载；脚本再用宿主函数
 //! 调能力（`tool_call`）、提供工具（`tool_register`）、改界面（`ui_*`）。
 //!
 //! 这些工具由 **JIT 运行时地基插件**（protected）在 `install` 时装进工具目录，因此
-//! 和 mod 工具同表。工具句柄用 [`Weak`] 指向 `ModManager`，避免
+//! 和脚本工具同表。工具句柄用 [`Weak`] 指向 `ModManager`，避免
 //! 「管理器 → 注册表 → 地基插件 → 工具 → 管理器」的强引用环。
 
 use std::sync::Weak;
@@ -15,33 +15,33 @@ use tower_agent_core::{AgentTool, AgentToolResult, ToolRegistration};
 
 use crate::manager::{ModManager, ModOptions, ModPermissions, ModSummary};
 
-/// `mod_write`：创建/热重载 mod。
-pub const MOD_WRITE: &str = "mod_write";
-/// `mod_reload`：热重载 mod。
-pub const MOD_RELOAD: &str = "mod_reload";
-/// `mod_list`：列出 mod。
-pub const MOD_LIST: &str = "mod_list";
-/// `mod_remove`：卸载 mod。
-pub const MOD_REMOVE: &str = "mod_remove";
-/// `mod_persist`：把 mod 持久化到 `dirs` 的 config 目录。
-pub const MOD_PERSIST: &str = "mod_persist";
-/// `mod_discard`：丢弃 mod（卸载 + 删除持久化/临时副本）。
-pub const MOD_DISCARD: &str = "mod_discard";
+/// `codemode_write`：创建/热重载 codemode Python 脚本。
+pub const CODEMODE_WRITE: &str = "codemode_write";
+/// `codemode_reload`：热重载 codemode Python 脚本。
+pub const CODEMODE_RELOAD: &str = "codemode_reload";
+/// `codemode_list`：列出 codemode Python 脚本。
+pub const CODEMODE_LIST: &str = "codemode_list";
+/// `codemode_remove`：卸载 codemode Python 脚本。
+pub const CODEMODE_REMOVE: &str = "codemode_remove";
+/// `codemode_persist`：把脚本持久化到 `dirs` 的 config 目录。
+pub const CODEMODE_PERSIST: &str = "codemode_persist";
+/// `codemode_discard`：丢弃脚本（卸载 + 删除持久化/临时副本）。
+pub const CODEMODE_DISCARD: &str = "codemode_discard";
 
 /// JIT 运行时自带的作者工具名（保留，不允许被 JIT 插件遮蔽）。
 pub const AUTHORING_TOOL_NAMES: [&str; 6] = [
-    MOD_WRITE,
-    MOD_RELOAD,
-    MOD_LIST,
-    MOD_REMOVE,
-    MOD_PERSIST,
-    MOD_DISCARD,
+    CODEMODE_WRITE,
+    CODEMODE_RELOAD,
+    CODEMODE_LIST,
+    CODEMODE_REMOVE,
+    CODEMODE_PERSIST,
+    CODEMODE_DISCARD,
 ];
 
-/// `mod_write` / `mod_reload` 的参数。
+/// `codemode_write` / `codemode_reload` 的参数。
 #[derive(Debug, Deserialize, JsonSchema)]
 struct WriteParams {
-    /// mod 名（唯一）。
+    /// 脚本名（唯一）。
     name: String,
     /// monty Python 源码。
     code: String,
@@ -56,7 +56,7 @@ struct WriteParams {
 /// 只带名字的参数。
 #[derive(Debug, Deserialize, JsonSchema)]
 struct NameParams {
-    /// mod 名。
+    /// 脚本名。
     name: String,
 }
 
@@ -64,15 +64,15 @@ struct NameParams {
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct ListParams {}
 
-/// 构造一组作者工具（由地基插件 `install`）：`mod_write` / `mod_reload` / `mod_list`
-/// / `mod_remove` / `mod_persist` / `mod_discard`。
+/// 构造一组作者工具（由地基插件 `install`）：`codemode_write` / `codemode_reload` /
+/// `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard`。
 #[must_use]
 pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
     let write = {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<WriteParams, _, _>(
-            MOD_WRITE,
-            "创建或热重载一个 monty mod：模型生成 Python 代码，代码可调用宿主函数 \
+            CODEMODE_WRITE,
+            "创建或热重载一个 codemode Python 脚本：模型生成 Python 代码，代码可调用宿主函数 \
              （exec/tool_call/log/state_*）、注册工具（tool_register）、贡献 UI（ui_status/ui_panel/ui_tool_render）。\
              可用 `requires` 声明依赖的宿主能力（如 `tool.read`），`permissions` 收窄权限。",
             move |params, _request| {
@@ -100,8 +100,8 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
     let reload = {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<WriteParams, _, _>(
-            MOD_RELOAD,
-            "热重载一个已存在的 mod；新代码校验通过才替换，失败保留旧版本。",
+            CODEMODE_RELOAD,
+            "热重载一个已存在的 codemode Python 脚本；新代码校验通过才替换，失败保留旧版本。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
@@ -116,8 +116,8 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
     let list = {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<ListParams, _, _>(
-            MOD_LIST,
-            "列出当前已加载的 mod 及其提供的工具。",
+            CODEMODE_LIST,
+            "列出当前已加载的 codemode Python 脚本及其提供的工具。",
             move |_params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
@@ -132,8 +132,8 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
     let remove = {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
-            MOD_REMOVE,
-            "卸载一个 mod，并注销它注册的工具。",
+            CODEMODE_REMOVE,
+            "卸载一个 codemode Python 脚本，并注销它注册的工具。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
@@ -142,11 +142,11 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
                     };
                     match manager.remove(&params.name) {
                         Ok(true) => Ok(AgentToolResult::text(format!(
-                            "removed mod `{}`",
+                            "removed codemode script `{}`",
                             params.name
                         ))),
                         Ok(false) => Ok(AgentToolResult::error(format!(
-                            "unknown mod `{}`",
+                            "unknown codemode script `{}`",
                             params.name
                         ))),
                         Err(error) => Ok(AgentToolResult::error(error.to_string())),
@@ -158,8 +158,8 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
     let persist = {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
-            MOD_PERSIST,
-            "把一个 mod 持久化到用户配置目录（跨会话保留）。",
+            CODEMODE_PERSIST,
+            "把一个 codemode Python 脚本持久化到用户配置目录（跨会话保留）。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
@@ -168,7 +168,7 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
                     };
                     match manager.persist(&params.name) {
                         Ok(()) => Ok(AgentToolResult::text(format!(
-                            "persisted mod `{}`",
+                            "persisted codemode script `{}`",
                             params.name
                         ))),
                         Err(error) => Ok(AgentToolResult::error(error.to_string())),
@@ -180,8 +180,8 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
     let discard = {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
-            MOD_DISCARD,
-            "丢弃一个 mod：卸载它并删除持久化/临时副本。",
+            CODEMODE_DISCARD,
+            "丢弃一个 codemode Python 脚本：卸载它并删除持久化/临时副本。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
@@ -190,11 +190,11 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
                     };
                     match manager.discard(&params.name) {
                         Ok(true) => Ok(AgentToolResult::text(format!(
-                            "discarded mod `{}`",
+                            "discarded codemode script `{}`",
                             params.name
                         ))),
                         Ok(false) => Ok(AgentToolResult::error(format!(
-                            "unknown mod `{}`",
+                            "unknown codemode script `{}`",
                             params.name
                         ))),
                         Err(error) => Ok(AgentToolResult::error(error.to_string())),
@@ -207,7 +207,7 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
 }
 
 fn host_gone() -> AgentToolResult {
-    AgentToolResult::error("mods host is gone")
+    AgentToolResult::error("codemode Python host is gone")
 }
 
 /// 把写/重载结果渲染成模型可见文本。
@@ -220,10 +220,13 @@ fn render(result: Result<ModSummary, tower_agent_plugins::PluginError>) -> Agent
 
 fn render_summary(summary: &ModSummary) -> String {
     if summary.tools.is_empty() {
-        format!("loaded mod `{}` (no tools registered yet)", summary.name)
+        format!(
+            "loaded codemode script `{}` (no tools registered yet)",
+            summary.name
+        )
     } else {
         format!(
-            "loaded mod `{}` providing tools: {}",
+            "loaded codemode script `{}` providing tools: {}",
             summary.name,
             summary.tools.join(", ")
         )
@@ -232,7 +235,7 @@ fn render_summary(summary: &ModSummary) -> String {
 
 fn render_list(summaries: &[ModSummary]) -> String {
     if summaries.is_empty() {
-        return "no mods loaded".to_string();
+        return "no codemode Python scripts loaded".to_string();
     }
     summaries
         .iter()

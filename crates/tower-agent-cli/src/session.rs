@@ -511,7 +511,7 @@ impl Session {
     }
 }
 
-/// 地基作者工具名（`mod_write` 等）：不受 `--tools` 过滤影响，否则就没法写 mod 了。
+/// 地基作者工具名（`codemode_write` 等）：不受 `--tools` 过滤影响，否则就没法写脚本了。
 ///
 /// 没有编译进 mods 能力时不存在作者工具，一律不算保留名。
 fn is_host_reserved(name: &str) -> bool {
