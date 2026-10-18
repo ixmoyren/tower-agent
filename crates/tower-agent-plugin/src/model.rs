@@ -1,10 +1,8 @@
 //! 插件模型：形态、标识、能力、依赖、清单与覆盖。
 
-use std::{collections::BTreeSet, fmt};
+use std::fmt;
 
 use semver::{Version, VersionReq};
-
-use crate::error::PluginError;
 
 /// 插件形态。枚举顺序即覆盖优先级：`Static < Dynamic < Jit`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -299,25 +297,5 @@ impl PluginManifest {
             .iter()
             .find(|p| &p.id == capability)
             .map(|p| &p.version)
-    }
-
-    /// 基本校验：名字非空、`provides` 不重复。
-    pub fn validate(&self) -> Result<(), PluginError> {
-        if self.name.trim().is_empty() {
-            return Err(PluginError::Manifest {
-                plugin: self.name.clone(),
-                message: "plugin name must not be empty".into(),
-            });
-        }
-        let mut seen = BTreeSet::new();
-        for provided in &self.provides {
-            if !seen.insert(&provided.id) {
-                return Err(PluginError::Manifest {
-                    plugin: self.name.clone(),
-                    message: format!("duplicate provided capability `{}`", provided.id),
-                });
-            }
-        }
-        Ok(())
     }
 }

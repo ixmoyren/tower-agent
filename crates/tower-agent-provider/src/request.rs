@@ -2,39 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::{JsonObject, JsonValue, Message, Model};
+use crate::{json::JsonObject, message::Message, model::Model, thinking::ThinkingLevel};
 
 /// provider 作用域的请求头。值为 `None` 表示抑制同名 provider 默认头（pi `ProviderHeaders`）。
 pub type ProviderHeaders = BTreeMap<String, Option<String>>;
-
-/// pi `ThinkingLevel`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ThinkingLevel {
-    /// 最低思考预算。
-    Minimal,
-    /// 较低的思考预算。
-    Low,
-    /// 中等思考预算。
-    Medium,
-    /// 较高思考预算。
-    High,
-    /// 很高的思考预算。
-    XHigh,
-    /// 最高思考预算。
-    Max,
-}
-
-/// pi `ModelThinkingLevel`（`"off" | ThinkingLevel`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ModelThinkingLevel {
-    /// 关闭思考。
-    Off,
-    /// 使用给定的思考级别。
-    Level(ThinkingLevel),
-}
 
 /// pi `ToolChoice`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,25 +33,6 @@ pub struct ThinkingBudgets {
     pub xhigh: Option<u64>,
     /// `max` 级别的 token 预算。
     pub max: Option<u64>,
-}
-
-/// 延迟响应的持久句柄（pi `DeferredHandle`）。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DeferredHandle {
-    /// provider 标识。
-    pub provider: String,
-    /// 模型 id。
-    pub model_id: String,
-    /// API 标识。
-    pub api: String,
-    /// provider token，例如 response id 或 batch id + row id。
-    pub id: String,
-    /// 句柄的过期时间（Unix 毫秒）。
-    pub expires_at: Option<u64>,
-    /// 建议的轮询间隔，单位毫秒。
-    pub poll_after_ms: Option<u64>,
-    /// 重建最终 assistant message 所需的 provider 转换数据。
-    pub data: Option<JsonValue>,
 }
 
 /// 延迟响应窗口（pi `"15m" | "1h" | "24h"`）。

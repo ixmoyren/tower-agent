@@ -22,6 +22,7 @@ mod request;
 mod service;
 pub mod sse;
 mod stream;
+mod thinking;
 
 pub use api::{
     ANTHROPIC_MESSAGES_API, GOOGLE_GENERATIVE_AI_API, OPENAI_COMPLETIONS_API, OPENAI_RESPONSES_API,
@@ -30,9 +31,9 @@ pub use error::{BoxError, PiError};
 pub use event::{AssistantMessageEvent, DoneReason, ErrorReason};
 pub use json::{JsonObject, JsonValue};
 pub use message::{
-    Arguments, AssistantMessage, ContentBlock, ImageContent, Message, StopReason, SystemMessage,
-    TextContent, ThinkingContent, Tool, ToolCall, ToolReference, ToolResultMessage, Usage,
-    UsageCost, UserContent, UserMessage,
+    Arguments, AssistantMessage, ContentBlock, DeferredHandle, ImageContent, Message, StopReason,
+    SystemMessage, TextContent, ThinkingContent, Tool, ToolCall, ToolReference, ToolResultMessage,
+    Usage, UsageCost, UserContent, UserMessage,
 };
 pub use model::{InputModality, Model, ModelCost, ModelCostRates, ModelCostTier};
 pub use models::{ModelSource, Models, ProviderRefresh, RefreshOptions, RefreshReport};
@@ -48,9 +49,9 @@ pub use provider::{
     },
 };
 pub use request::{
-    DeferredHandle, DeferredRequest, DeferredWindow, ModelThinkingLevel, ProviderHeaders,
-    SimpleStreamOptions, StreamOptions, StreamRequest, ThinkingBudgets, ThinkingLevel, ToolChoice,
-    TranscriptContext,
+    DeferredRequest, DeferredWindow, ProviderHeaders, SimpleStreamOptions, StreamOptions,
+    StreamRequest, ThinkingBudgets, ToolChoice, TranscriptContext,
 };
 pub use service::{BoxStreamService, StreamFn, StreamService, StreamServiceExt};
 pub use stream::AssistantEventStream;
+pub use thinking::{ModelThinkingLevel, ThinkingLevel};

@@ -2,7 +2,7 @@
 
 use crate::{
     json::{JsonObject, JsonValue},
-    request::{DeferredHandle, ModelThinkingLevel},
+    thinking::ModelThinkingLevel,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, ops::Deref};
@@ -261,6 +261,25 @@ pub struct UserMessage {
     pub content: UserContent,
     /// Unix 毫秒时间戳。
     pub timestamp: i64,
+}
+
+/// 延迟响应的持久句柄（pi `DeferredHandle`）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeferredHandle {
+    /// provider 标识。
+    pub provider: String,
+    /// 模型 id。
+    pub model_id: String,
+    /// API 标识。
+    pub api: String,
+    /// provider token，例如 response id 或 batch id + row id。
+    pub id: String,
+    /// 句柄的过期时间（Unix 毫秒）。
+    pub expires_at: Option<u64>,
+    /// 建议的轮询间隔，单位毫秒。
+    pub poll_after_ms: Option<u64>,
+    /// 重建最终 assistant message 所需的 provider 转换数据。
+    pub data: Option<JsonValue>,
 }
 
 /// assistant 消息（pi `AssistantMessage`）。

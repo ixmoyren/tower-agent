@@ -1,10 +1,10 @@
 //! 插件体系的错误类型。
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 use semver::{Version, VersionReq};
 
-use crate::model::{CapabilityId, PluginId, PluginKind};
+use crate::model::{CapabilityId, PluginId, PluginKind, PluginManifest};
 
 /// 注册 / 解析 / 安装阶段的错误。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,3 +174,25 @@ impl fmt::Display for PluginError {
 }
 
 impl std::error::Error for PluginError {}
+
+impl PluginManifest {
+    /// Validate the manifest before registration.
+    pub fn validate(&self) -> Result<(), PluginError> {
+        if self.name.trim().is_empty() {
+            return Err(PluginError::Manifest {
+                plugin: self.name.clone(),
+                message: "plugin name must not be empty".into(),
+            });
+        }
+        let mut seen = BTreeSet::new();
+        for provided in &self.provides {
+            if !seen.insert(&provided.id) {
+                return Err(PluginError::Manifest {
+                    plugin: self.name.clone(),
+                    message: format!("duplicate provided capability `{}`", provided.id),
+                });
+            }
+        }
+        Ok(())
+    }
+}
