@@ -2,14 +2,14 @@
 
 | 项目     | 值                                                                                                                                                                                                  |
 |----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 状态     | 草案 v1.5（开放问题已确认；第 9 节第 2、3 步与第 4 步的四个阶段、`protocol` crate、以及 provider 层（Anthropic / OpenAI 兼容 / OpenAI Responses / Google + Models 路由与目录刷新 + 观测层）已落地） |
-| 参考基线 | pi `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03）                                                                                                                                 |
+| 状态     | 设计基线 v1.6（核心 runtime、Provider、插件、codemode、Wasmtime 沙箱与 UI 分层均已落地） |
+| 能力参考 | pi-agent `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
 | 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）                                                                                                                                            |
 | 目标仓库 | `tower-agent`（Rust，edition 2024，nightly）                                                                                                                                                        |
 
-本文档回答一个问题： **把 pi 移植成 Rust 时，tower 的 `Service` / `Layer` 模型应该承担哪些职责，pi 的每个概念落在哪里。**
+本文档回答一个问题：**在构建 tower-native agent 时，`Service` / `Layer`、流、会话与插件分别承担哪些职责。**
 
-行为对齐仍然以 pi 参考实现为准，工作流见 skill `rust-pi-agent-rewrite`；本文只规定结构，不改变行为。
+pi-agent 是 agent 能力设计的重要参考，但不是 `tower-agent` 的兼容性目标。文中的“pi 概念映射”用于对照能力边界与交互语义，具体 API、模块结构和实现以 Rust / tower 架构为准。文档后部保留的实现进度记录可能使用早期“移植”措辞，不代表当前项目定位。
 
 > 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、JIT 脚本插件）、[`codemode.md`](./codemode.md)（**agent 可以编程**：§0 是"mods/codemode 统一 + 解释器可选"的 v2 提案，§1–§11 是 JS 引擎细节）、[`sdk.md`](./sdk.md)（扩展点设计，落在 `tower-agent-plugin-sdk`）、[`roadmap.md`](./roadmap.md)（未完成事项的单一入口）。
 
@@ -20,12 +20,14 @@
 目标：
 
 - 用 tower 的 `Service` / `Layer` 作为架构骨架，让 provider 调用、工具调用、RPC 等"请求 → 响应"边界共享同一套中间件（超时、重试、限流、并发、背压、遥测）。
-- 保持 pi 的可观察行为：消息类型、事件序列、流式 chunk 语义、协议帧、默认值。
-- 用 Rust 的类型系统和 trait 边界表达 pi 里靠约定维持的契约（例如 `StreamFn` 不得抛错、错误必须编码进流）。
+- 在关键 agent 行为上参考 pi-agent 的成熟经验，同时允许根据 tower 生态与 Rust 契约调整。
+- 用 Rust 的类型系统和 trait 边界表达流式调用、错误编码、插件能力与生命周期契约。
+- 通过插件、Wasmtime 沙箱与 codemode，让宿主和 LLM 能在受控边界内扩展或调整 agent。
 
 非目标：
 
-- 不重新设计 pi 的产品行为，不新增 pi 没有的功能。
+- 不把 `tower-agent` 做成 pi-agent 的逐项移植、兼容实现或产品行为克隆。
+- 不承诺与 pi-agent 的 API、模块结构、事件名称和默认值逐项一致。
 - 不追求把 *所有*概念都塞进 tower。流式事件、订阅、会话状态不是中间件，硬套只会扭曲语义。
 - 不在本阶段做性能优化和 crate 拆分优化。
 

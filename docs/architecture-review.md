@@ -1,18 +1,15 @@
-# tower-agent 架构评审（对照新需求）
+# tower-agent 架构评审（历史快照）
 
-> 目的：把当前实现盘点清楚，并逐条对照「用 Rust/tower 构建通用 agent（tower-agent，定位类似 tower-mcp / tower-llm）」的新需求，标出差距与需要确认的冲突。
-> 说明：本文只做评审，不改代码。
+> **状态说明：本文是早期重构评审的历史快照，不代表当前架构。**
+> 当前实现已经是独立的 tower-native agent：`core/runtime/provider` 分层、通用插件宿主、SDK 能力、Wasmtime 沙箱、codemode、UI/TUI 分离均已落地。当前结构请以 [`tower-agent-architecture.md`](./tower-agent-architecture.md)、[`plugins.md`](./plugins.md)、[`providers.md`](./providers.md) 和源码为准。
 
 ## 0. 结论摘要
 
-- 当前实现本质上是 **「pi 的 Rust 移植（tower-agent）」**，已经具备 tower 骨架：Provider、Tool、Agent 三层都是 `tower::Service`，钩子是 `tower::Layer`。
-- 距离「通用 tower-agent」还差三件大事：
-    1. **定位/命名与对外契约**：现在是 `agent` / `tower-agent`，不是独立的 `tower-agent` facade 与稳定公开契约。
-    2. **与 tower 生态（axum）的良好结合**：`Agent` 是有状态单写者，`poll_ready` 恒 Ready、忙时在 `call` 里报错；缺少面向 axum 的无状态/池化包装与示例。
-    3. **插件体系与需求不一致**（后续已解决）：静态插件当时只注册工具、热重载当时是 Roto。现状：静态插件已 Layer 化（`AgentLayer` / `ToolLayer` / `EventHandler`），热重载已改用 monty（`tower-agent-monty`，基于 `monty-pool`）。
-- 另有一个 **当前仓库本地阻塞**：`crates/plugin-dyn-echo/`、`crates/plugin-sandbox/` 是空目录（只剩空 `src/`），而 `members = ["crates/*"]`，导致 `cargo metadata` 直接失败（`failed to read .../Cargo.toml`）。空目录未被 git 跟踪，属本地残留，删掉即可恢复解析。
+- 这份评审在项目早期得出：需要从单一 agent 实现演进为 **tower-native、可嵌入、可插件化的通用 agent**。
+- 当时识别的主要问题后来已经解决：facade/runtime 分层、无状态与池化 Service、静态插件 Layer 化、monty 热重载、UI/TUI 拆分、Wasmtime 与 codemode。
+- Provider 能力后来进一步归入 `tower-agent-plugin-sdk`，`tower-agent-plugin` 保持领域无关。
 
-## 1. 现状盘点
+## 1. 历史盘点（重构前）
 
 ### 1.1 crate 结构
 
@@ -21,13 +18,13 @@ crates/
   ai/           provider Service / Models 路由 / 传输层中间件 / 错误与消息类型（对应 pi packages/ai）
   agent/        agent 运行时、工具边界、事件、编排循环（对应 pi packages/agent）
   tools/        7 个内置工具实现（read/shell/edit/write/grep/find/ls）
-  plugins/      插件宿主：模型 / 注册表 / 解析 / 生命周期 / 宿主 API / 权限 / 动态加载 / JIT
-  plugins-sdk/  插件作者 SDK：declare_plugin! / declare_dynamic_plugin! / HostApi
+  tower-agent-plugin/  通用插件宿主：模型 / 注册表 / 解析 / 生命周期 / 宿主 API / 权限 / 动态加载
+  tower-agent-plugin-sdk/  插件能力 SDK：declare_plugin! / declare_dynamic_plugin! / HostApi
   protocol/     帧 / CBOR 子集 / RPC envelope（对应 pi packages/protocol）
   tui/          ratatui + termina 终端前端（纯库，附 UiPlugin 扩展点）
   tower-agent-cli/      CLI 入口 + 会话装配（原 cli）
 examples/
-  plugin-example/  示例动态插件（cdylib，独立 workspace）
+  plugin-dyn/      示例动态插件（cdylib，独立 workspace）
 ```
 
 ### 1.2 tower 骨架现状
@@ -43,9 +40,9 @@ examples/
 
 - **静态插件**：`tower_agent_plugin::StaticPlugin { manifest(); install(&mut PluginContext) }`，`install` 把 `AgentTool` 登记进上下文；`tower_agent_plugin::default_registry` 为 7 个内置工具各注册一个静态插件。注册表支持能力/依赖/版本收敛/同名覆盖（静态<动态<JIT）/环检测。
 - **生命周期/宿主 API/权限**：`Lifecycle` / `PluginState` / `InflightGuard`、`HostApi` / `PluginAccess`（`requires` 收窄 + 中介调用，目前只中介 `tool.*`）、`PermissionPolicy` / `PermissionPrompter`。
-- **动态插件（stabby）**：`plugins` 的 `dynamic` feature（`dep:stabby` + `dep:libloading`）；`crates/tower-agent-plugin/src/dynamic.rs` 定义 `AbiVersion` / `AbiCapability` / `AbiManifest` / `PluginVTable`，`LoadedPlugin::load/call/stop/unload`，做 SDK ABI major 校验。`plugins-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。
+- **动态插件（stabby）**：`tower-agent-plugin` 的 `dynamic` feature（`dep:stabby` + `dep:libloading`）；`crates/tower-agent-plugin/src/dynamic.rs` 定义 `AbiVersion` / `AbiCapability` / `AbiManifest` / `PluginVTable`，`LoadedPlugin::load/call/stop/unload`，做 SDK ABI major 校验。`tower-agent-plugin-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。
 - **热重载/JIT**：已改为 `tower-agent-monty`（早期实现是 `plugins` 的 `jit` feature + Roto，已删除）。
-- 注意：插件 ABI 类型定义在 **宿主** `tower_agent_plugin::dynamic`，`plugins-sdk` 只是再导出；因此插件作者会连带依赖 `plugins → tools → agent → ai` 整棵树。
+- 注意：插件 ABI 类型定义在 **宿主** `tower_agent_plugin::dynamic`，`tower-agent-plugin-sdk` 只是再导出。
 
 ### 1.4 cli / tui 与 agent 的耦合
 
@@ -70,8 +67,8 @@ examples/
 2. **定位：pi 移植仓 vs 通用 tower-agent**。`docs/design.md` 的目标是「行为对齐 pi、不新增 pi 没有的功能」；而 tower-agent 是通用组件。这两个目标会打架（例如流式事件、会话状态、默认值、错误类型）。需要明确这份仓库最终是「tower-agent 本体」还是「tower-agent 的一个 pi 移植参考实现」。
 3. **有状态 Agent vs axum 多请求**。`Agent` 内含 transcript 与队列，`AgentService` 目前是「同一实例的顺序服务」。axum 场景通常需要每请求无状态或从共享状态派生。
 4. **cli/tui 的调用边界**。若强行让 TUI 走 `Service`，会与「TUI 是事件流订阅、不是请求-响应」的既有决策冲突（design.md 4.1/D1）。
-5. **插件 ABI 与依赖耦合**。`plugins-sdk` 依赖 `plugins`，`plugins` 依赖 `agent/tools/ai`，导致一个最小动态插件会拖入整棵 host 依赖树；作为通用 tower-agent 的插件生态这不理想（建议独立的 `plugins-abi` crate）。
-6. **当前本地构建阻塞**：`crates/plugin-dyn-echo/`、`crates/plugin-sandbox/` 空目录使 `cargo metadata` 失败（见 §0）。`../examples/plugin-dyn` 是唯一被跟踪的示例插件。
+5. **插件 ABI 与依赖耦合**。早期 `plugin-sdk` 依赖插件宿主，宿主又依赖 runtime 等较重的 host 依赖树；这一问题后来通过职责拆分和 SDK 能力模块得到收敛。
+6. **历史本地构建阻塞**：早期空 crate 目录曾导致 `cargo metadata` 失败；这些问题已经清理。当前示例插件位于 `examples/plugin-dyn`。
 
 ## 4. 需要你确认的问题
 

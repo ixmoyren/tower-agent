@@ -49,7 +49,7 @@
 
 ✅ 已完成：静态 / 动态 / JIT 三种插件形态、能力注册表（依赖 / 版本 / 覆盖 / `protected`）、生命周期与热更、权限提示、`HostApi` 中介调用、内置工具插件化。
 
-- ❌ **pi extensions 对齐**：见 [`sdk.md`](./sdk.md) §3 的对照表（工具元数据、命令 / 快捷键 / flag、provider / virtual model、MCP、会话控制、UI 交互、资源发现）。 **P1（按 sdk.md 的分期）**
+- ◐ **扩展点补齐**：tool / hook / Provider 已落地；命令、快捷键、virtual model、MCP、会话控制、UI 交互和资源发现仍按 [`sdk.md`](./sdk.md) §3 的对照表推进。 **P1**
 - ❌ **runtime 事件面**：现在 10 个 `AgentEvent`、纯通知；pi 41 个事件且多数可 transform / block / continue。 **P0（限制"脚本改行为"）**
 - ❌ **MCP**：客户端、`mcp.json`、`registerMcpServer` 扩展点。 **P2**
 - ◐ **跨形态调用**：动态 / JIT 经 `HostApi` 走中介；存储这类"非工具能力"还没有跨形态取值路径（`StoragePlugin::storage()` 只在 Rust 侧）。 **P2**
@@ -80,7 +80,7 @@
 ## 8. 工程与文档
 
 - ❌ **ratatui 依赖**：根 `Cargo.toml` 里的 `[patch.crates-io]`（把 `ratatui-core` / `ratatui-widgets` / `ratatui-termina` 重定向到 git）是临时手段。 **正解是让 `ixmoyren/ratatui-textarea` 的 fork 依赖同一份 git ratatui**，然后删掉 patch。 **P1**
-- ◐ 文档索引：`README.md` 的"文档"一节需要补 `roadmap.md` / `sdk.md`，并把 `codemode.md` 的描述改成"统一后的 codemode（解释器可选）"。 **P1**
+- ✅ 文档索引：README 已补充 `roadmap.md` / `sdk.md`，并同步统一 codemode（解释器可选）的定位。 **P1**
 - ❌ CI：目前靠本地 `cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace`。 **P2**
 - ❌ 压测 / 长会话：compaction 与 transcript 的边界（几千轮之后）没有基准。 **P2**
 

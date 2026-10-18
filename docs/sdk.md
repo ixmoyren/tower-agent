@@ -1,8 +1,8 @@
-# 扩展点设计（落在 `tower-agent-plugin-sdk`）
+# 插件能力与扩展点（`tower-agent-plugin-sdk`）
 
 | 项目     | 值                                                                                                               |
 |----------|------------------------------------------------------------------------------------------------------------------|
-| 状态     | 提案 v0（**待评审**，未落地）；Q7 已定：**不新增 `tower-agent-sdk`，扩展点直接长在 `tower-agent-plugin-sdk` 上** |
+| 状态     | 当前实现 + 后续提案；tool / hook / Provider 能力已落地，其余扩展点按表推进 |
 | 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、[`codemode.md`](./codemode.md) §0                      |
 | 参考基线 | pi `packages/coding-agent/src/core/extensions/`（`ExtensionAPI`、41 个事件）                                     |
 
@@ -69,7 +69,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 | `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ Rust 与 codemode 脚本均支持 `tool_call` / `tool_result` hook；其余事件仍为通知面 | 其余事件                                      | `plugin_sdk::hook::on(Event, handler)`    | ✅ v0 工具前后事件               |
 | `registerCommand` / `registerShortcut` / `registerFlag`                        | ❌ 斜杠命令是硬编码表                                                                                                | 命令/快捷键/flag 注册表 + 前端接线            | `plugin_sdk::command::*`                  | ❌                               |
 | `registerProvider` / `registerVirtualModel`                                    | ◐ Provider 作为普通 Static / Dynamic 插件注册 `Arc<dyn ProviderPlugin>`；virtual model 未实现                           | virtual model 目录与动态替换                  | `plugin_sdk::provider::ProviderPluginRegistration` | ❌                               |
-| `registerMcpServer`                                                            | ❌ MCP 未移植                                                                                                        | MCP 客户端                                    | `plugin_sdk::provider::register_mcp(...)` | ❌                               |
+| `registerMcpServer`                                                            | ❌ MCP 未实现                                                                                                        | MCP 客户端                                    | `plugin_sdk::provider::register_mcp(...)` | ❌                               |
 | `sendMessage` / `sendUserMessage` / `appendEntry`                              | ❌                                                                                                                   | 会话注入入口                                  | `plugin_sdk::session::*`                  | ❌                               |
 | `ctx.ui.*`（对话框 / 状态 / widget / footer / 自定义组件）                     | ◐ `ui_status` / `ui_panel` / `ui_tool_render` 写进前端无关的 `UiState`                                               | 交互式 UI（确认框、输入框）与渲染器注册       | `plugin_sdk::ui::*`                       | ◐（monty 已有 `ui_*`）           |
 | `pi.events`（扩展间总线）                                                      | ◐ `HostApi` 中介调用（能力级）                                                                                       | 事件总线式订阅                                | `plugin_sdk::host::events()`              | ❌                               |

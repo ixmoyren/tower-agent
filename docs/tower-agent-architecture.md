@@ -1,46 +1,51 @@
-# tower-agent 目标架构与迁移计划
+# tower-agent 架构与演进
 
-> 状态：决策稿 v1（基于 `docs/architecture-review.md` 的评审结论 + 本轮确认的决策）。
-> 目标：把本仓库从「pi 的 Rust 移植（tower-agent）」重构/改名为 **tower-agent**——一个 tower-native 的通用 agent，定位类似 `tower-mcp` / `tower-llm`，可被 axum / tonic / cli / web 等宿主集成，功能尽量对齐 pi 但允许偏离。
+> 状态：当前架构与后续演进方向。
+> 目标：`tower-agent` 是独立的 tower-native 通用 agent，定位类似 `tower-mcp` / `tower-llm`，可被 axum / tonic / cli / web 等宿主集成。pi-agent 只作为 agent 能力模型的参考，不是兼容性目标。
 > 关联：[`architecture-review.md`](./architecture-review.md)（现状评审）、[`design.md`](./design.md)、[`plugins.md`](./plugins.md)。
 
 ## 1. 已确认决策（本轮）
 
 1. **TUI 做成插件**（宿主入口将来是 axum / tonic / cli / web；本轮不实现这些入口）。
-2. **热重载运行时用 monty 替代 Roto，且用 `monty-pool`**（子进程崩溃隔离）。monty 是 Python 子集、易嵌入；Roto 太新、LLM 生成代码质量难保证。
+2. **热重载运行时使用 monty**：monty 解释器编译为 wasm 组件，由 Wasmtime 在进程内沙箱执行；资源超限和 trap 被隔离为脚本失败。
 3. **本仓库重构改名为 tower-agent**。
 4. **分离出 core 箱子**（`tower-agent-core`），放置 agent 核心能力。
 5. **提供无状态/池化状态**（先给 core/runtime 用；axum 集成延后）。
 6. **cli 以 Service / Layer 组合方式集成**。
 7. **静态插件应当是 layer**。
-8. **转为通用 agent，允许偏离 pi，但功能尽量对齐 pi**； **保留 pi 对齐测试**。
+8. **以 tower-native 通用 agent 为主体**；pi-agent 只作为能力设计参考，保留对关键 agent 行为的回归测试。
 9. **所有 crate 都加 `tower-agent` 前缀**（可能发布 crates.io，全前缀是较好实践）。
 10. **本轮范围**：core / runtime / stateless（无状态 + 池化）/ cli； **mcp / tonic / web / axum 先不做**。
 11. **响应形态两种都要**：非流式 `AgentResponse` 与流式 `AgentEventStream` 都提供（非流式 = 流式的 fold）。
 
-## 2. 目标 crate 布局（提案）
+## 2. 当前 crate 布局
 
 ```text
-tower-agent/                 （facade：re-export core + runtime + provider + tools + plugins）
+tower-agent/                 （facade：re-export core + runtime + provider + tools + plugin）
   tower-agent-core/          核心能力：Request/Response、消息/事件、tool 边界、Layer 扩展点、错误
   tower-agent-runtime/       有状态运行时：编排循环、队列、事件总线；无状态/池化 Service 适配
   tower-agent-provider/      Provider 协议：消息/模型/请求/Service/Models/HTTP/SSE
   tower-agent-provider-builtin/ 具体 provider 实现与静态插件声明
   tower-agent-tools/         内置工具实现 + 七个独立静态插件声明（read/shell/edit/write/grep/find/ls）
   tower-agent-protocol/      帧 / CBOR / RPC（按需保留）
-  tower-agent-plugin/       插件宿主：注册表 / 生命周期 / HostApi / 权限 / 三类加载器
-  tower-agent-plugin-sdk/    插件作者 SDK（静态宏 / 动态 ABI / monty 契约）
-  tower-agent-plugin-abi/    （新）插件 ABI 类型，独立于宿主，避免插件拖入整棵 host
-  tower-agent-monty/         （新）基于 monty 的热重载/沙箱插件后端
+  tower-agent-plugin/        通用插件宿主：注册表 / 生命周期 / HostApi / 权限 / 三类加载器 / extension slot
+  tower-agent-plugin-sdk/    插件能力 SDK：静态宏 / 动态 ABI / Host 能力 / 可选 Provider 能力
+  tower-agent-codemode-core/ 引擎无关的脚本能力、Hook 与 Prompt 契约
+  tower-agent-codemode/      JavaScript wasm 宿主与命令层
+  tower-agent-monty/         monty/Python 沙箱与 JIT 热重载后端
+  tower-agent-wasmtime/      通用 Wasmtime 组件、WASI、资源限制与实例池
+  tower-agent-storage/       配置、凭据、会话、历史、记忆与脚本存储契约
+  tower-agent-turso/         默认嵌入式存储后端
   tower-agent-ui/            前端无关 UI 会话插件（事件归约 / 命令 / 可序列化视图）
   tower-agent-tui/           终端前端（实现 UiPlugin）
-  tower-agent-cli/           CLI 宿主（现 tower-agent-cli，改为 Service/Layer 组合）
+  tower-agent-cli/           CLI 宿主（Service/Layer 组合）
   tower-agent-axum/          （新，可选）axum 集成：handler / extractor / SSE
   tower-agent-tonic/         （新，可选）tonic 集成：gRPC 服务
 ```
 
-- 具体是「facade + 全部子 crate」还是「保留短名 + facade」见 §6 待确认 Q3。
-- `tower-agent-core` 必须 **不依赖** runtime/plugins/frontends，只放契约与类型。
+- `tower-agent` 是用户入口 facade；具体领域实现仍放在独立 crate。
+- `tower-agent-core` 必须 **不依赖** runtime/plugin/frontends，只放契约与类型。
+- `tower-agent-plugin` 不依赖 Provider 领域；Provider 注册与动态适配由 `tower-agent-plugin-sdk` 提供。
 
 ## 3. 分层与 tower 映射
 
@@ -104,12 +109,11 @@ tower-agent/                 （facade：re-export core + runtime + provider + t
 
 ### 4.6 热重载插件 = monty（替代 Roto）
 
-- 用 `monty`（crates.io 1.1.0，Python 子集沙箱）替换 `roto`：
-    - 宿主能力调用：`MontyRun::start` → `RunProgress::FunctionCall` → 宿主执行 → `resume`（支持异步 `resume_pending` / `ResolveFutures`）；这天然就是「能力中介调用」。
-    - 热更新：重新 `MontyRun::new(...)`（或 `MontyRepl` feed）后 **原子换绑**；`MontyRepl` 的 `dump()` / `Dump::load()` 提供会话快照，可用于「换绑时迁移状态」。
-    - 崩溃隔离（可选）：`monty-pool` 用子进程 worker，崩溃后替换。
-    - 资源限制：`ResourceTracker` / `ResourceLimits`（执行时长、递归、GC 调度）。
-- `plugins` 的 `jit = ["dep:roto"]` 与 `crates/tower-agent-plugin/src/jit.rs` 退役，改为 `monty` feature + 新后端。
+- 用 monty（Python 子集）作为 codemode Python 引擎，解释器编译为 wasm 组件并由 Wasmtime 执行。
+- 宿主能力调用通过 `MontyHost` 派发；脚本未定义函数会挂起为宿主动作，宿主完成后 resume。
+- 热更新使用 `reload_checked`：新版本试跑成功后原子替换，失败保留旧版本。
+- 资源限制由 Wasmtime 组件、WASI 配置、内存/栈上限和调用超时共同约束；trap 只终止本次脚本调用，不波及宿主进程。
+- 旧 `tower-agent-plugin` 的 Roto JIT 实现已退役；当前热重载由独立的 `tower-agent-monty` 提供。
 
 ### 4.7 命名与仓库
 
@@ -170,7 +174,7 @@ transcript（会话记录 / 上下文）是 **按顺序发给模型的全部消�
 - 注意：现在的 `Service<AgentRequest>` 把请求 `messages` 当「追加 prompt」用（内部 transcript 仍保留）；无状态模式要把它改成「请求即完整上下文」，两者语义要分清楚。
 - cli/tui 默认走有状态会话（贴近 pi），无状态/池化主要服务多请求宿主。
 
-## 5. 迁移计划（分阶段）
+## 5. 落地阶段
 
 **本轮（聚焦 core / runtime / stateless / cli）**
 
@@ -183,7 +187,7 @@ transcript（会话记录 / 上下文）是 **按顺序发给模型的全部消�
 **后续（本轮不做）**
 
 - **P5 ✅ 静态插件 Layer 化**：`tower-agent-plugin::layer` 提供对象安全的 `AgentLayer` / `ToolLayer` / `EventHandler`（含闭包与 tower `Layer` 适配器 `tower_agent_layer` / `tower_tool_layer`）；`PluginContext` 增加登记 + `apply_agent_layers` / `apply_tool_layers` / `dispatch_event`；`StaticPlugin` 增加 `agent_layers()` / `tool_layers()` / `tools()` / `event_handlers()` 默认方法，`Resolution::install` 统一收集。
-- **P6 ✅ monty 替换 Roto**：删除 Roto（`jit` feature + `jit.rs`），新增 `tower-agent-monty`（基于 `monty-pool` 的子进程崩溃隔离）：宿主函数经 `TurnEvent::FunctionCall` 回调 `MontyHost`，`reload` 原子替换源码、`reload_checked` 失败保留旧版本。
+- **P6 ✅ monty 替换 Roto**：删除旧 JIT 路径，新增 `tower-agent-monty`：monty 解释器编译为 wasm 组件并由 Wasmtime 执行，宿主函数经 `MontyHost` 回调，`reload` 原子替换源码、`reload_checked` 失败保留旧版本。
 - **P7 ✅ UI 后端与 TUI 拆分**：`tower-agent-ui` 提供前端无关的 `AgentUi`、事件归约、命令协议与静态插件；`tower-agent-tui` 仅保留 ratatui 页面和终端输入。门面 crate 不再依赖 `tower-agent-tui`。
 - **P8 入口适配器**：axum / tonic / mcp / web。
 
@@ -191,4 +195,4 @@ transcript（会话记录 / 上下文）是 **按顺序发给模型的全部消�
 
 1. **transcript 归属**（§4.8.3）：已按 **C（无状态契约 + 可选 `SessionStore`）** 落地；A（纯客户端持有）与 B（服务端有状态会话）也都被覆盖——不配 `SessionStore` 即为 A，配 `session_id` 即为服务端会话。
 
-（其余已确认：monty-pool；全前缀命名；本轮 core/runtime/stateless/cli；保留 pi 对齐测试；响应形态两者都要。P0、P1、P2、P3、P4 已完成。）
+（其余已确认：monty 作为 Python 热重载后端；全前缀命名；本轮 core/runtime/stateless/cli；保留关键 agent 行为回归测试；响应形态两者都要。P0、P1、P2、P3、P4 已完成。）

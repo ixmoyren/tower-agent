@@ -1,8 +1,8 @@
 # 插件 / 扩展体系（子设计）
 
 > 状态：v0.6（M1 静态插件、M2 stabby 动态插件、M3 monty 热重载已实现；静态插件已 Layer 化，见下方实现状态）。
-> 关联：[`design.md`](./design.md)（总体设计、第 4.3 节 provider 分层、第 4.i~4.iv 移植路线）。
-> 本文只描述插件体系本身的结构与规则，不改变 `agents` / `ai` / `tools` / `tui` / `tower-agent-cli` 的既有契约。
+> 关联：[`design.md`](./design.md)（总体设计、Provider 分层与关键契约）。
+> 本文只描述插件体系本身的结构与规则；当前实现以 `tower-agent-plugin`、`tower-agent-plugin-sdk` 和各领域插件 crate 为准。
 
 ## 1. 目标
 
@@ -57,7 +57,7 @@
 | 热更新   | 不支持（重新构建）             | 需 stop→unload→load（可选实现） | 原生热加载                      |
 | 调用开销 | 零（直接函数调用）             | 一次间接调用 + ABI 编解码       | 编译后接近原生                  |
 | 典型用途 | 内置 tool、provider 层、观测层 | 沙箱、记忆、持久化、codemode    | codemode Python 脚本、轻量扩展  |
-| feature  | 默认开启                       | `dynamic`                       | `jit`                           |
+| feature  | 默认开启                       | `dynamic`                       | `tower-agent-monty`             |
 
 ### 4.1 静态插件（tower Layer）
 
@@ -70,12 +70,12 @@
 
 ### 4.2 动态插件（stabby）
 
-- 用 `plugins-sdk` 编写，`crate-type = ["cdylib"]`，导出 stabby 入口（如 `__tpa_plugin_entry`），返回 `PluginVTable`。
+- 用 `tower-agent-plugin-sdk` 编写，`crate-type = ["cdylib"]`，导出 stabby 入口（`__tpa_plugin_entry`），返回 `PluginVTable`。
 - 宿主通过 `libloading` 加载，做 **ABI 版本 + 插件版本** 双重校验，再调用 `init` 拿到能力表。
 - 卸载安全：宿主以 `Arc<LoadedPlugin>` 持有模块，调用带引用计数； **存在 in-flight 调用时拒绝卸载**（`stop` 后等待归零）。
 - 大插件落在这里：`sandbox`（进程/权限隔离）、`memory`、`persist`（会话/向量/文件持久化）、`codemode`。
 
-> 实现状态（M2 已落地）：`plugins` 的 `dynamic` feature（=`dep:stabby` + `dep:libloading`）提供 `LoadedPlugin::load` / `call` / `stop` / `unload`，`#[repr(C)]` 的 `PluginVTable`（`manifest` / `init` / `call` / `shutdown`）与 stabby 的 ABI 稳定清单（`AbiManifest` / `AbiCapability` / `AbiVersion`）做 SDK ABI major 校验；`plugins-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。示例插件在 `../examples/plugin-dyn`（独立 workspace 的 cdylib）。
+> 实现状态（M2 已落地）：`tower-agent-plugin` 的 `dynamic` feature（=`dep:stabby` + `dep:libloading`）提供 `LoadedPlugin::load` / `call` / `stop` / `unload`，`#[repr(C)]` 的 `PluginVTable`（`manifest` / `init` / `call` / `shutdown`）与 stabby 的 ABI 稳定清单（`AbiManifest` / `AbiCapability` / `AbiVersion`）做 SDK ABI major 校验；`tower-agent-plugin-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。示例插件在 `examples/plugin-dyn`（独立 workspace 的 cdylib）。
 
 ### 4.3 热重载插件（monty）
 
@@ -244,10 +244,11 @@ Discover ─▶ Load ─▶ Validate(manifest/ABI/权限) ─▶ Resolve(图/版
 
 ### 8.2 SDK
 
-- `plugins-sdk` 提供：
+- `tower-agent-plugin-sdk` 提供：
     - 清单/入口宏（静态与动态共用 `declare_plugin!`）；
     - `HostApi` 句柄（能力调用的类型化封装）；
-    - 工具注册助手 `ToolRegistration`（把 `AgentTool` 暴露成 `tool.<name>` 能力）。
+    - 工具注册助手 `ToolRegistration`（把 `AgentTool` 暴露成 `tool.<name>` 能力）；
+    - 可选 `provider` 能力（Provider 注册适配、JSONL wire 与动态 Provider 桥接）。
 - 动态插件入口（stabby）示意：
 
 ```rust
@@ -260,7 +261,7 @@ stabby::export! {
 
 - **跨形态调用不直连**：无论动态还是 JIT，都通过 `HostApi` 调 `host.call(capability, args)`；宿主完成实现查找、 **调用发起时的版本绑定**与 in-flight 记账。这既统一了两者的互调，也让卸载/热更可以安全等待。
 
-> 实现状态：`plugins-sdk` crate 已落地，提供 `DeclaredPlugin` / `declare_plugin!`（静态插件路径）、`HostApi` / `ToolRegistration` 再导出、`tool::ToolMetadata` 与 typed 注册、async `hook::on(ToolCall/ToolResult, handler)`，以及共享类型。工具元数据现可声明 exposure、namespace、annotations、参数/输出 schema；Rust 与 codemode 脚本都可用 `tool_call` / `tool_result` hook。脚本 hook 已接入真实 agent 工具路径，可改写参数、脱敏结果、拦截调用，并带权限、超时、取消与卸载注销。stabby 的 `__tpa_plugin_entry` 动态入口随 `plugins` 的 `dynamic` feature 落地。
+> 实现状态：`tower-agent-plugin-sdk` crate 已落地，提供 `DeclaredPlugin` / `declare_plugin!`（静态插件路径）、`HostApi` / `ToolRegistration` 再导出、`tool::ToolMetadata` 与 typed 注册、async `hook::on(ToolCall/ToolResult, handler)`、可选 Provider 能力，以及共享类型。工具元数据现可声明 exposure、namespace、annotations、参数/输出 schema；Rust 与 codemode 脚本都可用 `tool_call` / `tool_result` hook。stabby 的 `__tpa_plugin_entry` 动态入口随 `tower-agent-plugin` 的 `dynamic` feature 落地。
 
 ## 9. 内置工具迁移到静态插件
 
@@ -287,14 +288,14 @@ stabby::export! {
 
 ```text
 crates/
-  tower-agent-plugin/      宿主核心：模型、注册表、解析、生命周期、静态插件、插件层（AgentLayer/ToolLayer/EventHandler）、动态加载器（feature = dynamic）
-  tower-agent-plugin-sdk/   插件作者 SDK：宏、HostApi、插件层类型
-  tower-agent-monty/        热重载插件宿主（monty + monty-pool，子进程崩溃隔离）
+  tower-agent-plugin/      通用宿主：模型、注册表、解析、生命周期、静态插件、插件层、动态加载器（feature = dynamic）
+  tower-agent-plugin-sdk/  插件能力 SDK：宏、HostApi、工具注册、Provider 能力（feature = provider）、动态 ABI 再导出
+  tower-agent-monty/        monty/Python 热重载宿主（内嵌 wasm 组件 + Wasmtime 沙箱）
 ```
 
-- 依赖方向：`plugins → runtime`；启用 `plugins/provider` 后额外依赖 provider；`tools → plugins + runtime + provider`；`tower-agent` 门面依赖这些插件集合并负责装配。
+- 依赖方向：`tower-agent-plugin → runtime`，不直接依赖 Provider；`tower-agent-plugin-sdk → plugin + runtime`，启用 `provider` 后额外依赖 `tower-agent-provider`；具体工具、Provider 和沙箱插件依赖对应 SDK 能力。
 - 热重载宿主独立成 crate `tower-agent-monty`（不依赖具体动态插件 ABI）。
-- `plugins` 不依赖任何具体工具实现；`tools` 实现 `StaticPlugin` 并通过 `PluginContext` 登记工具。
+- `tower-agent-plugin` 不依赖任何具体工具或 Provider 实现；领域插件通过 `PluginContext` 登记工具、Provider 等 extension。
 
 ## 11. Feature / 构建
 
@@ -303,17 +304,19 @@ crates/
 default = ["static"]
 static = []
 dynamic = ["dep:stabby", "dep:libloading"]
-# 热重载后端见 tower-agent-monty（monty + monty-pool）
+# Provider 能力在 tower-agent-plugin-sdk 中：
+# provider = ["dep:tower-agent-provider", ...]
+# 热重载后端见 tower-agent-monty
 ```
 
 - 默认只带静态插件，保证无额外平台/依赖负担。
-- 动态/JIT 为可选 feature；`plugins-sdk` 单列，供插件 crate 以 `cdylib` 形式构建。
+- 动态/JIT 为可选 feature；`tower-agent-plugin-sdk` 单列，供插件 crate 以 `cdylib` 形式构建。
 
 ## 12. 安全与隔离
 
 - 清单声明 `permissions`（如 `net`、`fs.write`、`process.spawn`）； **授权在运行时按需提示**：某能力首次被调用且需要权限时，宿主在界面上询问用户（允许一次 / 本次会话允许 / 拒绝），决定按会话缓存；无人值守模式（`--print`）默认拒绝并在错误里说明。
 - 宿主只把已授予的能力句柄交给调用方，未授予的调用直接 `PermissionDenied`。
-- 沙箱作为 **动态插件**提供 `sandbox.exec`，把不可信执行隔到子进程/受限运行时。
+- 沙箱能力把不可信执行隔离到 Wasmtime 受限运行时；需要进程隔离的插件也可以使用子进程，但通用 wasm 路径不依赖外部进程。
 - 热更/卸载的边界：只允许在引用计数归零后释放；JIT 换绑是原子操作。
 
 > 实现状态：`tower_agent_plugin::PermissionPolicy` / `PermissionPrompter` / `PermissionDecision` 已接入 codemode 的两个引擎——脚本记录里的 `ScriptPermissions` 是持久预授权集合；缺失能力首次调用时进入统一策略，`AllowOnce` 不缓存、`AllowSession` 按会话缓存、`Deny` 拒绝，无人值守（`--print` 或无 prompter）默认拒绝。`Session::with_permission_policy` / `CodemodePlugin::with_permission_policy` 是前端注入点；具体 TUI 确认框形态仍可由前端继续定制。
@@ -343,23 +346,23 @@ pub enum PluginError {
 - **单元**：插件级覆盖优先级、 **能力级覆盖**、shadow 记录、环检测、同 major 收敛、跨 major 并存、静态单实例、静态→动态拒绝。
 - **静态插件**：每个内置工具都是一个独立静态插件，经注册表解析后工具集合与迁移前等价。
 - **权限**：首次调用触发运行时提示、决定按会话缓存、无人值守模式拒绝。
-- **动态**：`dynamic` feature 下编译示例 `cdylib`（`../examples/plugin-dyn`），验证加载、调用、`UnloadBusy`、卸载。端到端用例读 `TPA_PLUGIN_EXAMPLE` 指向产物；未设置时跳过（避免与 `cargo test` 抢 target 锁）：
+- **动态**：`dynamic` feature 下编译示例 `cdylib`（`examples/plugin-dyn`），验证加载、调用、`UnloadBusy`、卸载。端到端用例读 `TPA_PLUGIN_EXAMPLE` 指向产物；未设置时跳过（避免与 `cargo test` 抢 target 锁）：
 
   ```text
-  cargo build --manifest-path examples/plugin-example/Cargo.toml
+  cargo build --manifest-path examples/plugin-dyn/Cargo.toml
   TPA_PLUGIN_EXAMPLE=<target>/debug/libtpa_plugin_example.so \
-    cargo test -p plugins --features dynamic --test dynamic
+    cargo test -p tower-agent-plugin --features dynamic --test dynamic
   ```
-- **JIT**：`jit` feature 下编译脚本、调用宿主能力（`host_call`）、源码/文件热加载、热更失败回滚。
+- **JIT / 热重载**：由 `tower-agent-monty` 编译/执行脚本，验证宿主能力调用、源码热加载和失败回滚。
 - **失败注入**：加载失败不污染既有插件；in-flight 时卸载被拒。
 
 ## 15. 里程碑
 
 | 里程碑 | 内容                                                                                                                                                                 |
 |--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| M1 ✅  | `plugins` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具（每个工具一个静态插件，都是 tower Layer）迁移；生命周期 / 宿主 API / 权限 / 错误已落地 |
-| M2 ✅  | `plugins-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `../examples/plugin-dyn` 示例 cdylib + 端到端测试                          |
-| M3 ✅  | `tower-agent-monty`（monty + monty-pool）：宿主函数回调、原子换绑热加载与失败回滚                                                                                    |
+| M1 ✅  | `tower-agent-plugin` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具以独立静态插件接入；生命周期 / 宿主 API / 权限 / 错误已落地 |
+| M2 ✅  | `tower-agent-plugin-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `examples/plugin-dyn` 示例 cdylib + 端到端测试 |
+| M3 ✅  | `tower-agent-monty`：内嵌 monty wasm 组件、宿主能力回调、原子换绑热加载与失败回滚                                                                                    |
 | M4 ◐   | 沙箱（`tower-agent-wasmtime`）/ 记忆 / 持久化 / codemode 已落地；Python / JS 引擎共享 capability、提示词、feature 与 CLI 开关。**未完成**：动态形态的沙箱与记忆、统一脚本仓库。其余未完成项见 [`roadmap.md`](./roadmap.md)。 |
 
 ## 16. 已确认决策
