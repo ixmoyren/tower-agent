@@ -771,12 +771,21 @@ impl CodemodeHost {
         code: &str,
         timeout_ms: Option<u32>,
     ) -> Result<RunResult, CodemodeError> {
+        self.run_async_with_source(code, timeout_ms, code).await
+    }
+
+    async fn run_async_with_source(
+        &self,
+        code: &str,
+        timeout_ms: Option<u32>,
+        source_context: &str,
+    ) -> Result<RunResult, CodemodeError> {
         let previous_source = self
             .backend
             .current_source
             .lock()
             .expect("codemode source poisoned")
-            .replace(code.to_owned());
+            .replace(source_context.to_owned());
         let result = async {
             let mut store = self.store()?;
             let bindings = component::Codemode::instantiate_async(
@@ -1239,7 +1248,7 @@ impl CodemodeHost {
         let args = serde_json::to_string(&args).map_err(|error| error.to_string())?;
         let code = format!("{source}\n\nreturn await {function}({args});");
         let result = self
-            .run_async(&code, None)
+            .run_async_with_source(&code, None, source)
             .await
             .map_err(|error| error.to_string())?;
         let value = result.value.unwrap_or_else(|| "null".to_owned());

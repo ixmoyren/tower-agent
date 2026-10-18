@@ -225,7 +225,7 @@ JSON 回传脚本（未授权 / 未知能力 / 引擎错误 / 超时 / 取消 / 
 |------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | S0   | 本文档 + `codemode.md` §0（评审） ✅ 决策已定：Q1/Q2/Q4/Q7                                                                                          |
 | S1 ✅ | **`tower-agent-plugin-sdk` 扩展点 v0**：`tool` + async `hook`；工具前后钩子已接 `BeforeToolCallLayer` / `AfterToolResultLayer`，Rust 侧可用 |
-| S2   | 脚本侧 host function（v0 范围）：`tool_call` / `tool_register` / `on(tool_call)` / `on(tool_result)`；权限矩阵；prompt 同步                         |
+| S2 ✅ | 脚本侧 host function（v0 范围）：`tool_call` / `tool_register` / `on(tool_call)` / `on(tool_result)`；权限矩阵；prompt 同步；两引擎已改变真实 agent 行为 |
 | S3   | `command` / `ui` 扩展点；Rust 与脚本都能注册斜杠命令                                                                                                |
 | S4   | runtime 事件面补齐（§3.1 的第 3–5 条），脚本可真的“改行为”                                                                                          |
 | S5   | `provider` / `mcp` / `resources`（对齐 pi 的主要扩展点）                                                                                            |

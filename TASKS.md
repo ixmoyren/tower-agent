@@ -9,9 +9,9 @@
 | 项目       | 值                                             |
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
-| 当前阶段   | **Phase 5（扩展点 v0）**                       |
-| 下一个任务 | **T5.4**                                       |
-| 代码状态   | **T1–T4、T5.1–T5.3 已完成**：Rust 与脚本 hook 能力已落地 |
+| 当前阶段   | **Backlog**                                    |
+| 下一个任务 | **Backlog / 新任务**                           |
+| 代码状态   | **T1–T5 已完成**：统一 codemode、脚本仓库、权限与扩展点 v0 已落地 |
 
 ---
 
@@ -242,7 +242,7 @@
     3. 权限 `hooks`；超时 / 取消；脚本卸载时注销钩子。
 - **验收**：两个引擎各一条"脚本挂钩子"测试。
 
-### [ ] T5.4 端到端：脚本改 agent 行为
+### [x] T5.4 端到端：脚本改 agent 行为
 
 - **依赖**：T5.3
 - **做什么**：写一个脚本：`on("tool_call")` 阻止危险命令 / 改写参数；`on("tool_result")` 脱敏；`tool_register` 增加一个工具。两种引擎各跑一遍。
@@ -283,3 +283,4 @@
 | 2026-10-18 | T5.1 | `AgentTool` 增加 exposure / namespace / annotations；plugin-sdk 新增 `tool::ToolMetadata`、typed 注册与元数据扩展 trait；Rust 插件完整元数据注册测试通过 |
 | 2026-10-18 | T5.2 | plugin-sdk 新增 `hook::on(ToolCall/ToolResult, async handler)`；runtime 工具前后层支持 async，拦截调用、改写入参、改写结果与 hook 失败降级测试通过 |
 | 2026-10-18 | T5.3 | 新增共享 `ScriptHookRegistry`；monty 与 JS 暴露 `on(event, handler)`，支持权限、超时、取消、替换注册与卸载注销；两引擎 hook 测试通过 |
+| 2026-10-18 | T5.4 | Session 将共享脚本 hooks 接入真实 agent 工具调用；两引擎均验证参数改写、结果脱敏、危险调用拦截和 tool_register；全 workspace 门禁通过 |

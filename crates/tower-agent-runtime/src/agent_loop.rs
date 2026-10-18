@@ -117,6 +117,8 @@ pub struct BeforeToolCallContext {
     pub args: JsonObject,
     /// 准备该调用时的 agent 上下文。
     pub context: AgentContext,
+    /// 本轮取消信号。
+    pub signal: CancellationToken,
 }
 
 /// `beforeToolCall` 的返回值（pi `BeforeToolCallResult`）。
@@ -126,6 +128,8 @@ pub struct BeforeToolCallResult {
     pub block: bool,
     /// `block` 时展示给模型的文本；缺省使用默认文案。
     pub reason: Option<String>,
+    /// 改写后的工具参数；仅在不 block 时生效。
+    pub arguments: Option<JsonObject>,
     /// 建议本批结束后终止（仅当批内所有定稿结果都为 `true` 时生效）。
     pub terminate: Option<bool>,
 }
@@ -145,6 +149,8 @@ pub struct AfterToolCallContext {
     pub is_error: bool,
     /// 定稿该调用时的 agent 上下文。
     pub context: AgentContext,
+    /// 本轮取消信号。
+    pub signal: CancellationToken,
 }
 
 /// `afterToolCall` 的部分覆盖（pi `AfterToolCallResult`）。
@@ -811,6 +817,7 @@ async fn execute_tool_calls_sequential<S: EventSink>(
                     prepared,
                     executed,
                     config,
+                    signal,
                 )
                 .await
             }
@@ -890,6 +897,7 @@ async fn execute_tool_calls_parallel<S: EventSink>(
                         prepared,
                         executed,
                         &config,
+                        &signal,
                     )
                     .await;
                     emit_tool_execution_end(&finalized, &sink).await;
@@ -938,7 +946,7 @@ async fn prepare_tool_call(
         };
     }
 
-    let args = tool.prepare(tool_call.arguments.as_object().clone());
+    let mut args = tool.prepare(tool_call.arguments.as_object().clone());
 
     if let Some(before) = &config.before_tool_call {
         let result = before(BeforeToolCallContext {
@@ -946,6 +954,7 @@ async fn prepare_tool_call(
             tool_call: tool_call.clone(),
             args: args.clone(),
             context: context.clone(),
+            signal: signal.clone(),
         })
         .await;
         if signal.is_cancelled() {
@@ -954,21 +963,24 @@ async fn prepare_tool_call(
                 is_error: true,
             };
         }
-        if let Some(result) = result
-            && result.block
-        {
-            let mut blocked = error_tool_result(
-                result
-                    .reason
-                    .unwrap_or_else(|| "Tool execution was blocked".into()),
-            );
-            if result.terminate == Some(true) {
-                blocked.terminate = Some(true);
+        if let Some(result) = result {
+            if result.block {
+                let mut blocked = error_tool_result(
+                    result
+                        .reason
+                        .unwrap_or_else(|| "Tool execution was blocked".into()),
+                );
+                if result.terminate == Some(true) {
+                    blocked.terminate = Some(true);
+                }
+                return Preparation::Immediate {
+                    result: blocked,
+                    is_error: true,
+                };
             }
-            return Preparation::Immediate {
-                result: blocked,
-                is_error: true,
-            };
+            if let Some(arguments) = result.arguments {
+                args = tool.prepare(arguments);
+            }
         }
     }
 
@@ -979,8 +991,10 @@ async fn prepare_tool_call(
         };
     }
 
+    let mut effective_call = tool_call.clone();
+    effective_call.arguments = args.clone().into();
     Preparation::Prepared(PreparedToolCall {
-        tool_call: tool_call.clone(),
+        tool_call: effective_call,
         tool,
         args,
     })
@@ -1041,6 +1055,7 @@ async fn finalize_executed_tool_call(
     prepared: PreparedToolCall,
     executed: ExecutedToolCall,
     config: &LoopConfig,
+    signal: &CancellationToken,
 ) -> FinalizedToolCall {
     let mut result = executed.result;
     let mut is_error = executed.is_error;
@@ -1053,6 +1068,7 @@ async fn finalize_executed_tool_call(
             result: result.clone(),
             is_error,
             context,
+            signal: signal.clone(),
         })
         .await;
 

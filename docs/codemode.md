@@ -195,6 +195,15 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 3. 无人值守模式（`--print` 或没有注入 prompter）不提示，直接返回结构化的 `unauthorized` 错误。
 4. monty 与 JS 共用同一个 Session 策略实例；前端通过 `Session::with_permission_policy` 注入确认 UI。
 
+脚本 hook wire 契约（T5.4）：
+
+- `tool_call` 收到 `{ "name": string, "arguments": object }`。
+- 返回 `null` / `true`：放行；返回 `false` 或字符串：拦截并作为错误结果。
+- 返回 `{ "action": "block", "message": string }`：拦截；返回 `{ "action": "allow", "arguments": object }`：改写入参后继续。
+- `tool_result` 收到 `{ "name", "arguments", "text", "is_error" }`。
+- 返回 `null`：不改；字符串或 `{ "text": string, "is_error"?: bool }`：替换模型可见文本/错误状态。
+- hook 执行错误、超时或取消会转成失败的工具结果。多个脚本按 owner 顺序执行；当前 v0 将每个脚本的同一事件视为一个可替换 registration。
+
 导出格式（v1）：
 
 ```text

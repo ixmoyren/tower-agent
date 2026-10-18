@@ -351,6 +351,7 @@ async fn before_tool_call_can_block_a_call() {
             Some(BeforeToolCallResult {
                 block: true,
                 reason: Some("denied".into()),
+                arguments: None,
                 terminate: None,
             })
         })

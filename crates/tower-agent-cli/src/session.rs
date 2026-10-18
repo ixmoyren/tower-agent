@@ -29,7 +29,8 @@ use tower_agent_storage::{ConfigScope, ProviderCredential};
 
 use crate::store::CliStore;
 use tower_agent_provider::{
-    BoxStreamService, Message, Model, ModelThinkingLevel, UserContent, UserMessage,
+    BoxStreamService, ContentBlock, Message, Model, ModelThinkingLevel, TextContent, UserContent,
+    UserMessage,
 };
 use tower_agent_runtime::{
     AgentError, AgentEvent, AgentMessage, AgentOptions, AgentRequest, AgentState, AgentTool,
@@ -265,6 +266,8 @@ impl Session {
         options.initial.system_prompt = Some(system_prompt);
         options.initial.messages = messages;
         options.compactor = compactor.clone();
+        options.before_tool_call = Some(script_before_tool_call(Arc::clone(&script_hooks)));
+        options.after_tool_call = Some(script_after_tool_result(Arc::clone(&script_hooks)));
         let (service, control) = crate::stack::assemble(options);
         Self {
             service: Mutex::new(service),
@@ -560,6 +563,190 @@ fn is_host_reserved(name: &str) -> bool {
         let _ = name;
         false
     }
+}
+
+fn script_before_tool_call(
+    hooks: Arc<ScriptHookRegistry>,
+) -> tower_agent_runtime::agent_loop::BeforeToolCall {
+    Arc::new(move |context| {
+        let hooks = Arc::clone(&hooks);
+        Box::pin(async move {
+            if hooks.is_empty() {
+                return None;
+            }
+            let mut arguments = serde_json::Value::Object(context.args.clone());
+            let results = hooks
+                .invoke(
+                    tower_agent_codemode_core::ScriptHookEvent::ToolCall,
+                    serde_json::json!({
+                        "name": context.tool_call.name,
+                        "arguments": arguments,
+                    }),
+                    Some(context.signal.clone()),
+                )
+                .await;
+            let mut changed = false;
+            for hook in results {
+                let value = match hook.value {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return Some(tower_agent_runtime::agent_loop::BeforeToolCallResult {
+                            block: true,
+                            reason: Some(error.to_string()),
+                            ..tower_agent_runtime::agent_loop::BeforeToolCallResult::default()
+                        });
+                    }
+                };
+                match value {
+                    serde_json::Value::Null | serde_json::Value::Bool(true) => {}
+                    serde_json::Value::Bool(false) => {
+                        return Some(tower_agent_runtime::agent_loop::BeforeToolCallResult {
+                            block: true,
+                            reason: Some("blocked by script tool_call hook".to_owned()),
+                            ..tower_agent_runtime::agent_loop::BeforeToolCallResult::default()
+                        });
+                    }
+                    serde_json::Value::String(reason) => {
+                        return Some(tower_agent_runtime::agent_loop::BeforeToolCallResult {
+                            block: true,
+                            reason: Some(reason),
+                            ..tower_agent_runtime::agent_loop::BeforeToolCallResult::default()
+                        });
+                    }
+                    serde_json::Value::Object(object) => {
+                        if object.get("action").and_then(serde_json::Value::as_str) == Some("block")
+                        {
+                            return Some(tower_agent_runtime::agent_loop::BeforeToolCallResult {
+                                block: true,
+                                reason: Some(
+                                    object
+                                        .get("message")
+                                        .and_then(serde_json::Value::as_str)
+                                        .unwrap_or("blocked by script tool_call hook")
+                                        .to_owned(),
+                                ),
+                                ..tower_agent_runtime::agent_loop::BeforeToolCallResult::default()
+                            });
+                        }
+                        if let Some(next) = object.get("arguments") {
+                            if !next.is_object() {
+                                return Some(tower_agent_runtime::agent_loop::BeforeToolCallResult {
+                                    block: true,
+                                    reason: Some(
+                                        "tool_call hook arguments must be an object".to_owned(),
+                                    ),
+                                    ..tower_agent_runtime::agent_loop::BeforeToolCallResult::default()
+                                });
+                            }
+                            arguments = next.clone();
+                            changed = true;
+                        }
+                    }
+                    _ => {
+                        return Some(tower_agent_runtime::agent_loop::BeforeToolCallResult {
+                            block: true,
+                            reason: Some(
+                                "tool_call hook must return null, bool, string, or object"
+                                    .to_owned(),
+                            ),
+                            ..tower_agent_runtime::agent_loop::BeforeToolCallResult::default()
+                        });
+                    }
+                }
+            }
+            Some(tower_agent_runtime::agent_loop::BeforeToolCallResult {
+                arguments: changed.then(|| arguments.as_object().cloned().unwrap_or_default()),
+                ..tower_agent_runtime::agent_loop::BeforeToolCallResult::default()
+            })
+        })
+    })
+}
+
+fn script_after_tool_result(
+    hooks: Arc<ScriptHookRegistry>,
+) -> tower_agent_runtime::agent_loop::AfterToolCall {
+    Arc::new(move |context| {
+        let hooks = Arc::clone(&hooks);
+        Box::pin(async move {
+            if hooks.is_empty() {
+                return None;
+            }
+            let mut text = context
+                .result
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    ContentBlock::Text(text) => Some(text.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut is_error = context.is_error;
+            let results = hooks
+                .invoke(
+                    tower_agent_codemode_core::ScriptHookEvent::ToolResult,
+                    serde_json::json!({
+                        "name": context.tool_call.name,
+                        "arguments": context.args,
+                        "text": text,
+                        "is_error": is_error,
+                    }),
+                    Some(context.signal.clone()),
+                )
+                .await;
+            let mut changed = false;
+            for hook in results {
+                match hook.value {
+                    Ok(serde_json::Value::Null) => {}
+                    Ok(serde_json::Value::String(next)) => {
+                        text = next;
+                        changed = true;
+                    }
+                    Ok(serde_json::Value::Object(object)) => {
+                        if object.get("action").and_then(serde_json::Value::as_str) == Some("block")
+                        {
+                            text = object
+                                .get("message")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("tool result blocked by script hook")
+                                .to_owned();
+                            is_error = true;
+                            changed = true;
+                            continue;
+                        }
+                        if let Some(next) = object.get("text").and_then(serde_json::Value::as_str) {
+                            text = next.to_owned();
+                            changed = true;
+                        }
+                        if let Some(next) =
+                            object.get("is_error").and_then(serde_json::Value::as_bool)
+                        {
+                            is_error = next;
+                            changed = true;
+                        }
+                    }
+                    Ok(other) => {
+                        text = format!("tool_result hook returned unsupported value: {other}");
+                        is_error = true;
+                        changed = true;
+                    }
+                    Err(error) => {
+                        text = error.to_string();
+                        is_error = true;
+                        changed = true;
+                    }
+                }
+            }
+            changed.then(|| tower_agent_runtime::agent_loop::AfterToolCallResult {
+                content: Some(vec![ContentBlock::Text(TextContent {
+                    text,
+                    text_signature: None,
+                })]),
+                is_error: Some(is_error),
+                ..tower_agent_runtime::agent_loop::AfterToolCallResult::default()
+            })
+        })
+    })
 }
 
 /// `off` / `minimal` / … / `max` → [`ModelThinkingLevel`]（pi `--thinking` / `/thinking` 的取值）。
@@ -1056,6 +1243,29 @@ mod tests {
             .collect()
     }
 
+    fn last_tool_result_text(
+        state: &tower_agent_runtime::AgentState,
+        tool_name: &str,
+    ) -> (String, bool) {
+        let result = state
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                tower_agent_runtime::AgentMessage::Message(
+                    tower_agent_provider::Message::ToolResult(result),
+                ) if result.tool_name == tool_name => Some(result),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("last `{tool_name}` tool result"));
+        (
+            tower_agent_tui::render_message(&tower_agent_runtime::AgentMessage::Message(
+                tower_agent_provider::Message::ToolResult(result.clone()),
+            )),
+            result.is_error,
+        )
+    }
+
     #[test]
     fn codemode_engine_defaults_to_js_and_script_overrides_it() {
         use super::{ScriptLanguage, ScriptMetadata};
@@ -1266,6 +1476,149 @@ mod tests {
             "工具读到的内容\n"
         );
         assert!(last_assistant_text(&state).contains("工具结果已收到"));
+    }
+
+    #[cfg(feature = "codemode-python")]
+    #[tokio::test]
+    async fn python_script_hooks_change_agent_behavior() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("original.txt"), "ORIGINAL\n").unwrap();
+        std::fs::write(dir.path().join("redirected.txt"), "SECRET\n").unwrap();
+        let session = session(dir.path());
+        let manager = session.mods.as_ref().expect("Python codemode host");
+        let script = r#"
+tool_register("script_echo", "script_echo", "", {"type": "object"})
+
+def script_echo(args):
+    return "tool:" + args["text"]
+
+def guard(args):
+    if args["name"] != "read":
+        return None
+    return {"action": "allow", "arguments": {"path": "redirected.txt"}}
+
+def redact(args):
+    if args["name"] != "read":
+        return None
+    return {"text": "REDACTED " + args["arguments"]["path"]}
+
+on("tool_call", "guard")
+on("tool_result", "redact")
+"#;
+        manager
+            .write("behavior", script)
+            .await
+            .expect("write hooks");
+        let echo = manager
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "script_echo")
+            .expect("registered script tool");
+        assert_eq!(
+            call_codemode_tool(&echo, "script_echo", serde_json::json!({ "text": "ok" })).await,
+            "tool:ok"
+        );
+
+        session
+            .ask("!read {\"path\":\"original.txt\"}")
+            .await
+            .expect("hooked read");
+        let (text, is_error) = last_tool_result_text(&session.state(), "read");
+        assert!(!is_error, "{text}");
+        assert_eq!(text, "REDACTED redirected.txt");
+
+        manager
+            .write(
+                "behavior",
+                r#"
+def block(args):
+    if args["name"] == "read":
+        return {"action": "block", "message": "danger blocked"}
+    return None
+
+on("tool_call", "block")
+"#,
+            )
+            .await
+            .expect("write blocking hook");
+        session
+            .ask("!read {\"path\":\"redirected.txt\"}")
+            .await
+            .expect("blocked read");
+        let (text, is_error) = last_tool_result_text(&session.state(), "read");
+        assert!(is_error);
+        assert_eq!(text, "danger blocked");
+    }
+
+    #[cfg(feature = "codemode-js")]
+    #[tokio::test]
+    async fn js_script_hooks_change_agent_behavior() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("original.txt"), "ORIGINAL\n").unwrap();
+        std::fs::write(dir.path().join("redirected.txt"), "SECRET\n").unwrap();
+        let session = session(dir.path());
+        session
+            .enable_codemode(dir.path(), None, &[])
+            .expect("enable JavaScript codemode");
+        let codemode = session
+            .state()
+            .tools
+            .into_iter()
+            .find(|tool| tool.name() == "codemode")
+            .expect("codemode tool");
+
+        let script = r#"
+function script_echo(args) { return "tool:" + args.text; }
+tool_register("script_echo", "script_echo", "", { type: "object" });
+function guard(args) {
+  if (args.name !== "read") return null;
+  return { action: "allow", arguments: { path: "redirected.txt" } };
+}
+function redact(args) {
+  if (args.name !== "read") return null;
+  return { text: "REDACTED " + args.arguments.path };
+}
+on("tool_call", "guard");
+on("tool_result", "redact");
+"#;
+        call_codemode_tool(&codemode, "codemode", serde_json::json!({ "code": script })).await;
+        let echoed = call_codemode_tool(
+            &codemode,
+            "codemode",
+            serde_json::json!({ "code": "return await tool_call(\"script_echo\", { text: \"ok\" });" }),
+        )
+        .await;
+        assert!(echoed.contains("tool:ok"), "{echoed}");
+
+        session
+            .ask("!read {\"path\":\"original.txt\"}")
+            .await
+            .expect("hooked read");
+        let (text, is_error) = last_tool_result_text(&session.state(), "read");
+        assert!(!is_error, "{text}");
+        assert_eq!(text, "REDACTED redirected.txt");
+
+        call_codemode_tool(
+            &codemode,
+            "codemode",
+            serde_json::json!({
+                "code": r#"
+function block(args) {
+  if (args.name === "read") return { action: "block", message: "danger blocked" };
+  return null;
+}
+on("tool_call", "block");
+"#
+            }),
+        )
+        .await;
+        session
+            .ask("!read {\"path\":\"redirected.txt\"}")
+            .await
+            .expect("blocked read");
+        let (text, is_error) = last_tool_result_text(&session.state(), "read");
+        assert!(is_error);
+        assert_eq!(text, "danger blocked");
     }
 
     #[tokio::test]
