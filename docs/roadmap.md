@@ -19,7 +19,7 @@
 - ◐ **统一能力层**（`CapabilitySurface`）：`tower-agent-codemode-core` 已落语言 / 权限 / 能力面 / 结构化错误；两个引擎已通过 exec / fs / tool_call / tool_register / state / log / ui 能力矩阵；待钩子与其余能力补齐。 **P0**
 - ◐ **统一提示词 + 引擎选择**：`PromptBuilder`、CLI / 配置 / 脚本三级优先级均已落地；待统一的 feature/host 分发把选择结果接到实际引擎。 **P0**
 - ◐ **合并 feature / CLI**：feature 已收敛为 `codemode` + `codemode-python` + `codemode-js`；待 CLI 开关与作者工具词汇收敛。 **P0**
-- ◐ **脚本仓库**（Q6 = c）：`ScriptStore`、Turso `script` 表与作者工具 storage 真源已落地；待导出/导入。 **P0**
+- ✅ **脚本仓库**（Q6 = c）：`ScriptStore`、Turso `script` 表、作者工具 storage 真源与显式导出/导入已落地。 **P0**
 - ◐ **统一会话与存储**：脚本存储、作用域、权限、语言元数据已统一；旧 scripts 文件写入已移除，JS 持久记录的启动执行待统一 host 分发。 **P1**
 - ❌ **扩展点 v0**（落 `tower-agent-plugin-sdk`）：工具注册 + `tool_call` / `tool_result` 钩子（Q4）；Rust 侧先可用，脚本侧 host function 跟上。 **P0**
 - ◐ 脚本权限已扩展为 `ScriptPermissions` 并接入 monty `exec`；待与 `plugins.md` §12 的运行时授权提示打通。 **P1**

@@ -40,6 +40,7 @@ tower-agent-monty = { workspace = true, optional = true }
 tower-agent-codemode = { workspace = true, optional = true }
 clap = { version = "4.6", features = ["derive"] }
 futures-util = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tower = { workspace = true }

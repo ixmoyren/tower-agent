@@ -1555,6 +1555,107 @@ def persisted_echo(args):
         assert_eq!(record.source, code);
     }
 
+    #[cfg(feature = "codemode-python")]
+    #[tokio::test]
+    async fn codemode_export_import_restores_and_runs_scripts() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let export_dir = tempfile::tempdir().expect("export dir");
+        let project = ConfigScope::from_working_dir(workspace.path());
+        let code = "\
+tool_register(\"exported_echo\", \"exported_echo\", \"\", {\"type\": \"object\"})
+
+def exported_echo(args):
+    return \"exported:\" + args[\"text\"]
+";
+
+        let original_storage = tower_agent_turso::TursoStorage::in_memory()
+            .await
+            .expect("open in-memory");
+        let original = Arc::new(crate::store::CliStore::from_storage(
+            original_storage,
+            tokio::runtime::Handle::current(),
+        ));
+        let writer_session = session(workspace.path()).with_store(Arc::clone(&original));
+        let manager = writer_session.mods.as_ref().expect("Python codemode host");
+        let write = manager
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "codemode_write")
+            .expect("codemode_write");
+        let written = call_codemode_tool(
+            &write,
+            "codemode_write",
+            serde_json::json!({ "name": "exported", "code": code }),
+        )
+        .await;
+        assert!(written.contains("exported"), "{written}");
+
+        let exported = crate::codemode_transfer::export_scripts(
+            original.script_store().as_ref(),
+            &project,
+            export_dir.path(),
+        )
+        .await
+        .expect("export scripts");
+        assert_eq!(exported, 1);
+        let file = std::fs::read_dir(export_dir.path())
+            .expect("export dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("codemode"))
+            .expect("exported script file");
+        let contents = std::fs::read_to_string(&file).expect("read export");
+        assert!(contents.starts_with("--- tower-agent-codemode v1\n"));
+        assert!(contents.contains("\"source_hash\""));
+        assert!(contents.contains("\"permissions\""));
+        assert!(contents.ends_with(code));
+
+        // `original` is an in-memory database. Dropping it models deleting the DB.
+        drop(writer_session);
+        drop(original);
+
+        let restored_storage = tower_agent_turso::TursoStorage::in_memory()
+            .await
+            .expect("open fresh in-memory");
+        let restored = Arc::new(crate::store::CliStore::from_storage(
+            restored_storage,
+            tokio::runtime::Handle::current(),
+        ));
+        let imported = crate::codemode_transfer::import_scripts(
+            restored.script_store().as_ref(),
+            export_dir.path(),
+            Some(&project),
+        )
+        .await
+        .expect("import scripts");
+        assert_eq!(imported, 1);
+
+        let restored_session = session(workspace.path()).with_store(Arc::clone(&restored));
+        assert_eq!(restored_session.load_persisted_mods().await, 1);
+        let tool = restored_session
+            .mods
+            .as_ref()
+            .expect("Python codemode host")
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "exported_echo")
+            .expect("imported script tool");
+        assert_eq!(
+            call_codemode_tool(&tool, "exported_echo", serde_json::json!({ "text": "ok" })).await,
+            "exported:ok"
+        );
+
+        let record = restored
+            .script_store()
+            .get_script(&project, "exported")
+            .await
+            .expect("read restored script")
+            .expect("restored script exists");
+        assert_eq!(record.language, ScriptLanguage::Monty);
+        assert!(record.enabled);
+        assert_eq!(record.source, code);
+    }
+
     #[tokio::test]
     async fn transcript_persists_across_turns_and_resumes() {
         let dir = tempfile::tempdir().expect("temp dir");

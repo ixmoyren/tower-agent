@@ -49,6 +49,9 @@ fn help_and_version_exit_successfully() {
         "--codemode-engine",
         "--codemode-session",
         "--codemode-session-clear",
+        "--codemode-export",
+        "--codemode-import",
+        "--codemode-script-scope",
     ] {
         assert!(help.contains(flag), "help is missing `{flag}`:\n{help}");
     }
@@ -65,6 +68,83 @@ fn help_and_version_exit_successfully() {
     let output = cli().arg("-v").output().expect("run cli");
     assert!(output.status.success());
     assert!(stdout(&output).starts_with("tower-agent "));
+}
+
+#[tokio::test]
+async fn codemode_export_import_commands_round_trip_through_the_database() {
+    use tower_agent_storage::{
+        ConfigScope, ScriptLanguage, ScriptPermissions, ScriptRecord, ScriptStore as _,
+    };
+    use tower_agent_turso::TursoStorage;
+
+    let home = tempfile::tempdir().expect("home");
+    let work = tempfile::tempdir().expect("work");
+    let export = tempfile::tempdir().expect("export");
+    let storage_path = home.path().join("scripts.db");
+    let storage_arg = storage_path.to_string_lossy().into_owned();
+    let project = ConfigScope::from_working_dir(work.path());
+    let source = "tool_register(\"round_trip\", \"round_trip\", \"\", {\"type\": \"object\"})\n\
+                  def round_trip(args):\n    return \"ok\"\n";
+
+    let storage = TursoStorage::open(&storage_path)
+        .await
+        .expect("open storage");
+    storage
+        .upsert_script(ScriptRecord {
+            id: "round-trip".to_owned(),
+            name: "round_trip".to_owned(),
+            language: ScriptLanguage::Monty,
+            scope: project.clone(),
+            source: source.to_owned(),
+            enabled: true,
+            permissions: ScriptPermissions::default(),
+            metadata: serde_json::json!({ "requires": [] }),
+            created_at: 1,
+            updated_at: 2,
+            source_hash: "export-recomputes-this".to_owned(),
+        })
+        .await
+        .expect("write script");
+    storage.flush().await.expect("flush");
+    drop(storage);
+    // Turso's background writer owns a short-lived connection; let it observe the
+    // closed queue before the CLI opens the same database.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let output = cli_at(&storage_arg, work.path())
+        .arg("--codemode-export")
+        .arg(export.path())
+        .output()
+        .expect("run export");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    assert!(
+        std::fs::read_dir(export.path())
+            .expect("export dir")
+            .filter_map(Result::ok)
+            .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("codemode"))
+    );
+
+    std::fs::remove_file(&storage_path).expect("delete database");
+
+    let output = cli_at(&storage_arg, work.path())
+        .arg("--codemode-import")
+        .arg(export.path())
+        .args(["--codemode-script-scope", "project"])
+        .output()
+        .expect("run import");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+
+    let restored = TursoStorage::open(&storage_path)
+        .await
+        .expect("reopen storage");
+    let record = restored
+        .get_script(&project, "round_trip")
+        .await
+        .expect("read script")
+        .expect("restored script");
+    assert_eq!(record.source, source);
+    assert_eq!(record.language, ScriptLanguage::Monty);
+    assert!(record.enabled);
 }
 
 #[test]

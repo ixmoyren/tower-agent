@@ -99,7 +99,7 @@
 >
 > **`protected` 标记与遮蔽规则**：`PluginManifest.protected` 的实现 **永不被遮蔽**——JIT 运行时（agent-monty）就以一张 protected 插件清单注册（提供 `tool.codemode_*` 与 `jit.run`），任何试图用同名插件/同名工具遮蔽它的脚本会被 `ModManager` **阻断**并回滚。除它之外：JIT 可以遮蔽静态与动态插件， **JIT 之间也允许**，规则是「后写覆盖先写」，工具目录按名去重并登记 `ModManager::shadowed_tools()`。
 >
-> **持久化（`ScriptStore`）**：`codemode_write` / `codemode_reload` 直接 upsert 到 storage（默认当前项目作用域，可用 `scope=user` 写用户级）；源码、语言、权限、启用状态、依赖与源码哈希都是记录字段，不再写 `codemode/scripts` 文件。启动时合并 user/project 记录，项目同名覆盖用户，只加载 `enabled=true` 的 monty 脚本；`codemode_persist` 确保当前脚本以启用状态保存，`codemode_discard` 删除当前项目记录并卸载。动态插件仍从 `dirs::config_dir()/tower-agent/plugins` 加载。
+> **持久化（`ScriptStore`）**：`codemode_write` / `codemode_reload` 直接 upsert 到 storage（默认当前项目作用域，可用 `scope=user` 写用户级）；源码、语言、权限、启用状态、依赖与源码哈希都是记录字段，不再写 `codemode/scripts` 文件。启动时合并 user/project 记录，项目同名覆盖用户，只加载 `enabled=true` 的 monty 脚本；`codemode_persist` 确保当前脚本以启用状态保存，`codemode_discard` 删除当前项目记录并卸载。CLI 的 `--codemode-export [dir]` / `--codemode-import [dir]` 做显式文件投影，默认目录为当前项目 `.tower-agent/codemode/`；导入采用同名同作用域覆盖。动态插件仍从 `dirs::config_dir()/tower-agent/plugins` 加载。
 
 ## 5. 插件模型
 

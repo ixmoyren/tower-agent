@@ -21,6 +21,7 @@
 //! （`tower_agent_runtime::Compactor`），由 agent 循环自动执行。
 
 pub mod args;
+pub mod codemode_transfer;
 pub mod provider;
 pub mod session;
 pub mod stack;
@@ -71,6 +72,10 @@ fn main() -> ExitCode {
         .cwd
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    if args.codemode_export.is_some() || args.codemode_import.is_some() {
+        return run_codemode_transfer_command(&args, &cwd);
+    }
 
     // 配置查看 / 修改（`--config-*`）：配置一律走 `tower-agent-storage`，CLI 只是消费端。
     if args.config_list
@@ -407,6 +412,67 @@ fn run_config_command(args: &CliArgs, cwd: &Path) -> ExitCode {
             eprintln!("{error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// `--codemode-export` / `--codemode-import`：脚本仓库与可审阅文件之间的显式投影。
+fn run_codemode_transfer_command(args: &CliArgs, cwd: &Path) -> ExitCode {
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("无法启动运行时：{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let store = match store::CliStore::open(&runtime) {
+        Ok(store) => Arc::new(store),
+        Err(error) => {
+            eprintln!("脚本存储不可用：{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let project = store::project_id(cwd);
+    let script_store = store.script_store();
+    let result = runtime.block_on(async {
+        if let Some(dir) = &args.codemode_export {
+            let dir = resolve_transfer_dir(cwd, dir);
+            let scope = scope_of(
+                args.codemode_script_scope
+                    .unwrap_or(ConfigScopeArg::Project),
+                &project,
+            );
+            codemode_transfer::export_scripts(script_store.as_ref(), &scope, &dir)
+                .await
+                .map(|count| format!("已导出 {count} 个 codemode 脚本到 `{}`。", dir.display()))
+        } else if let Some(dir) = &args.codemode_import {
+            let dir = resolve_transfer_dir(cwd, dir);
+            let scope = args
+                .codemode_script_scope
+                .map(|scope| scope_of(scope, &project));
+            codemode_transfer::import_scripts(script_store.as_ref(), &dir, scope.as_ref())
+                .await
+                .map(|count| format!("已从 `{}` 导入 {count} 个 codemode 脚本。", dir.display()))
+        } else {
+            Ok(String::new())
+        }
+    });
+    match result {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn resolve_transfer_dir(cwd: &Path, dir: &Path) -> PathBuf {
+    if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        cwd.join(dir)
     }
 }
 

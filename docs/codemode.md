@@ -127,7 +127,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 | P1   | **统一能力层**：抽出 `CapabilitySurface`（exec / fs / tool_call / tool_register / state / log / ui）到新的内部 crate `tower-agent-codemode-core`（引擎无关，避免 monty ↔ codemode 依赖成环）；monty 接上 `exec`（coreutils-wasm）；JS 引擎接上 `tool_call` / `tool_register` | 两个引擎各有一组同样的能力测试                                                                       |
 | P2   | **统一提示词 + 引擎选择**：`PromptBuilder` 由 `CapabilitySurface` 生成；引擎**全局默认 + 脚本可覆盖**（Q1）：`--codemode-engine monty\|js` 定进程默认，脚本头声明语言时覆盖它                                                                                                | 同一任务在两种引擎下都能跑通；提示词随能力/引擎变化                                                  |
 | P3   | **合并 feature / CLI**：feature 已收敛为 `codemode`（共享层）+ `codemode-python` / `codemode-js`（Q2）；CLI 开关与 `mod_*` 作者工具改名仍待后续任务                                                               | 无默认只留内置工具；Python / JS 可分别启用，也可同时启用                                               |
-| P4   | **统一会话与存储**：`ScriptStore` 已落 storage/Turso；作者工具读写 storage，启动按 project 覆盖 user 加载启用脚本，旧 scripts 文件路径已移除                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
+| P4   | **统一会话与存储**：`ScriptStore` 已落 storage/Turso；作者工具读写 storage；CLI 支持显式导出/导入，默认项目目录为 `.tower-agent/codemode/`                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
 | P5   | **接扩展点 v0**：`tower-agent-plugin-sdk` 的扩展点 = **工具注册 + `tool_call` / `tool_result` 钩子**（Q4）；codemode 把 host function 映射过去                                                                                                                               | 一个脚本能注册工具并在下一轮生效（与现在 monty 等价）+ 能在工具执行前改写/拦截、执行后改写结果       |
 
 兼容性：
@@ -187,6 +187,32 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 2. `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` 直接读写 `ScriptStore`；`codemode_persist` / `codemode_discard` 作为启用保存与删除的兼容入口。
 3. `codemode export <dir>` / `codemode import <dir>`：每个脚本一个文件（源码 + 元数据头）；项目级默认导出到 `.tower-agent/codemode/`。
 4. 脚本的 **元数据永远在 storage**（权限、源码哈希、最近运行），文件只是投影——避免两处真相。
+
+导出格式（v1）：
+
+```text
+--- tower-agent-codemode v1
+{
+  "version": 1,
+  "id": "...",
+  "name": "example",
+  "language": "monty",
+  "scope": { "Project": "/abs/workspace" },
+  "enabled": true,
+  "permissions": { "...": true },
+  "metadata": { "requires": [] },
+  "created_at": 0,
+  "updated_at": 0,
+  "source_hash": "0123456789abcdef"
+}
+---
+<原始脚本源码>
+```
+
+- `--codemode-export [dir]` 默认只导出当前 project 作用域；省略目录时写 `<cwd>/.tower-agent/codemode/`。`--codemode-script-scope user` 可导出用户级。
+- `--codemode-import [dir]` 默认按文件头中的 scope 恢复；`--codemode-script-scope project|user` 可覆盖全部文件的目标作用域，便于项目迁移。
+- 每个脚本一个 `<安全名>-<名字哈希>.codemode` 文件。导出会清理目标目录中属于该格式、但本次已不存在的旧文件，不碰其它 `.codemode` 文件。
+- 冲突策略固定为 **同名同作用域覆盖（upsert）**。导入前会校验格式版本和源码哈希；哈希不匹配时报错，不静默修改文件。
 
 不再考虑 (b) 作为真源：它会形成"第二套配置写入路径"，与"配置一律走 storage"的既定原则冲突。
 
@@ -722,6 +748,9 @@ XDG_CACHE_HOME=/tmp/cm-cache cargo test -p tower-agent-codemode --offline --test
 | `--codemode-mount <dir>[:<guest>][:ro\|rw]` | 追加挂载（可重复）；缺省 guest `/work`、只读                                          |
 | `--codemode-sessions`                       | 列出持久化会话后退出（只读目录，不构造工具）                                          |
 | `--codemode-session-clear <name>`           | 删掉一个持久化会话（连同产物）后退出                                                  |
+| `--codemode-export [dir]`                   | 把脚本仓库投影成每脚本一个文件；缺省目录 `<cwd>/.tower-agent/codemode/`               |
+| `--codemode-import [dir]`                   | 从文件导入脚本；缺省按文件内 scope，`--codemode-script-scope` 可覆盖                  |
+| `--codemode-script-scope <user\|project>`   | 选择导出作用域或覆盖导入目标作用域                                                    |
 
 会话名会被校验成「一层普通名字」，`/`、`..` 之类一律拒绝（`session_name_is_valid`），所以清理不会跑到基目录外面；`tests/sessions.rs` 守着列表、清理与这条越界防护（不碰真实 config，全在临时目录里做）。
 

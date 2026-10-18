@@ -132,6 +132,36 @@ pub struct CliArgs {
     )]
     pub codemode_session_clear: Option<String>,
 
+    /// 导出脚本到目录后退出；省略目录时使用 `<cwd>/.tower-agent/codemode/`。
+    #[arg(
+        long = "codemode-export",
+        value_name = "dir",
+        num_args = 0..=1,
+        default_missing_value = ".tower-agent/codemode",
+        conflicts_with = "codemode_import",
+        help = "Export codemode scripts, then exit (default: <cwd>/.tower-agent/codemode/)."
+    )]
+    pub codemode_export: Option<PathBuf>,
+
+    /// 从目录导入脚本后退出；省略目录时使用 `<cwd>/.tower-agent/codemode/`。
+    #[arg(
+        long = "codemode-import",
+        value_name = "dir",
+        num_args = 0..=1,
+        default_missing_value = ".tower-agent/codemode",
+        help = "Import codemode scripts, then exit (default: <cwd>/.tower-agent/codemode/)."
+    )]
+    pub codemode_import: Option<PathBuf>,
+
+    /// 导出/导入的脚本作用域；导出缺省 project，导入缺省沿用文件中的 scope。
+    #[arg(
+        long = "codemode-script-scope",
+        value_name = "scope",
+        value_enum,
+        help = "Script scope for export/import (export defaults to project; import defaults to file scope)."
+    )]
+    pub codemode_script_scope: Option<ConfigScopeArg>,
+
     /// 选择 provider：anthropic / openai / openai-responses / google（缺省时按环境里的凭据挑）。
     #[arg(
         long,
@@ -547,5 +577,26 @@ mod tests {
 
         let args = parse_ok(&["--no-session"]);
         assert!(args.no_session);
+    }
+
+    #[test]
+    fn codemode_export_and_import_parse_with_optional_directories() {
+        let args = parse_ok(&["--codemode-export"]);
+        assert_eq!(
+            args.codemode_export.as_deref(),
+            Some(std::path::Path::new(".tower-agent/codemode"))
+        );
+        assert_eq!(args.codemode_import, None);
+
+        let args = parse_ok(&["--codemode-import", "/tmp/scripts"]);
+        assert_eq!(
+            args.codemode_import.as_deref(),
+            Some(std::path::Path::new("/tmp/scripts"))
+        );
+        assert_eq!(args.codemode_export, None);
+
+        let args = parse_ok(&["--codemode-import", "--codemode-script-scope", "project"]);
+        assert_eq!(args.codemode_script_scope, Some(ConfigScopeArg::Project));
+        assert!(parse(["--codemode-export", "--codemode-import"]).is_err());
     }
 }
