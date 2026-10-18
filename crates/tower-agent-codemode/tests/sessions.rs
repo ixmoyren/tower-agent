@@ -1,6 +1,17 @@
 //! 命名会话的列出 / 清理（M7）。不碰真实 config 目录，都在临时目录里做。
 
-use tower_agent_codemode::{clear_session_in, list_sessions_in, session_name_is_valid};
+use tower_agent_codemode::{
+    clear_session_in, list_sessions_in, session_name_is_valid, sessions_root_in,
+};
+
+#[test]
+fn sessions_live_under_the_unified_codemode_root() {
+    let config = std::path::Path::new("/config");
+    assert_eq!(
+        sessions_root_in(config),
+        std::path::Path::new("/config/tower-agent/codemode/sessions")
+    );
+}
 
 #[test]
 fn lists_and_clears_named_sessions() {

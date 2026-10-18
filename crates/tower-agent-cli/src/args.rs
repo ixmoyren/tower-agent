@@ -99,12 +99,12 @@ pub struct CliArgs {
     )]
     pub codemode_engine: Option<CodemodeEngineArg>,
 
-    /// codemode 的命名会话：目录固定在 `<config>/tower-agent/codemode/<name>`，跨进程复用。
+    /// codemode 的命名会话：目录固定在 `<config>/tower-agent/codemode/sessions/<name>`。
     #[arg(
         long = "codemode-session",
         value_name = "name",
         value_parser = NonEmptyStringValueParser::new(),
-        help = "Persistent codemode session name (reuses <config>/tower-agent/codemode/<name>)."
+        help = "Persistent codemode session name (reuses <config>/tower-agent/codemode/sessions/<name>)."
     )]
     pub codemode_session: Option<String>,
 

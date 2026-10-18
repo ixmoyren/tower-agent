@@ -23,8 +23,8 @@
 |----------------|---------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
 | 沙箱基础设施   | `tower-agent-wasmtime`：`SandboxEngine` / `HostState` / `Sandbox` / `SandboxPool`                                   | wasm 组件编译 + WASI + 内存/栈上限 + JIT 缓存 + 实例池；`wasmtime` 静态插件占位（`protected`）                                                                                                                                                                                                                                                                                                                                                               | ——                                                                             |
 | guest 命令集   | `wasm/coreutils-wasm`（uutils multicall，**60 个命令**，argv[0] 分发；权威列表见 `tower_agent_codemode::COMMANDS`） | `exec(name, args, opts)`                                                                                                                                                                                                                                                                                                                                                                                                                                     | 两个引擎均已接入；monty 通过注入的 `CapabilitySurface` 转发                    |
-| Python codemode | `tower-agent-monty` + `wasm/monty-sandbox`                                                                          | monty 子集、宿主导发的 REPL 状态机；宿主能力 `exec` / `tool_call` / `tool_list` / `tool_register` / `tool_unregister` / `log` / `state_get` / `state_set` / `ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render`；挂载表（`ReadOnly` / `OverlayMemory` / `ReadWrite`）；`ScriptPermissions`；热重载（原子换绑 + 回滚）；持久化（`codemode_persist` / `dirs::config_dir()/tower-agent/mods`）；作者工具 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` | 与 JS 引擎仍各有一套会话 / 存储细节                                           |
-| codemode（JS） | `tower-agent-codemode` + `wasm/rquickjs-sandbox`                                                                    | rquickjs（guest）、`exec` + 60 个命令函数 + 链式 pipeline + `fs` 门面；`tool_call` / `tool_list` / `tool_register` / `tool_unregister`（注册工具绑定脚本 handler，可进入后续宿主调用）；`state_get/set`、`log`、`ui_*`；会话根（`--codemode-session <name>`，`<config>/tower-agent/codemode/<name>`）；命名会话列表 / 清理 | 没有工具钩子；脚本注册工具尚未自动同步到 CLI 的 agent 工具目录 |
+| Python codemode | `tower-agent-monty` + `wasm/monty-sandbox`                                                                          | monty 子集、宿主导发的 REPL 状态机；共享能力表；`ScriptPermissions`；热重载；持久化（`dirs::config_dir()/tower-agent/codemode/scripts`）；作者工具 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` | 存储仍以文件为真源，待 T4 接 storage                               |
+| codemode（JS） | `tower-agent-codemode` + `wasm/rquickjs-sandbox`                                                                    | rquickjs（guest）、`exec` + 60 个命令函数 + pipeline + `fs`；工具调用 / 注册、state、log、UI；会话根（`<config>/tower-agent/codemode/sessions/<name>`）；命名会话列表 / 清理 | 没有工具钩子；脚本注册工具尚未自动同步到 CLI 的 agent 工具目录 |
 | 插件体系       | `tower-agent-plugins` / `tower-agent-plugin-sdk`                                                                    | 静态（Layer）/ 动态（stabby cdylib）/ JIT（monty）三形态；能力注册表、依赖与版本、`protected`、权限提示；`HostApi` 中介调用                                                                                                                                                                                                                                                                                                                                  | 脚本扩展点仍少（见 [`sdk.md`](./sdk.md)）                                      |
 
 结论：两者缺的恰好是对方有的。合并之后，一个脚本 **同时**能跑命令、调工具、注册工具、挂钩子。
@@ -134,7 +134,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 
 - **名字**：两个引擎 crate 都保留（Q2）；`tower-agent-monty` 是 monty/Python 引擎、`tower-agent-codemode` 是宿主 + JS 引擎（或把 JS 引擎拆成 `tower-agent-quickjs`）；对外只有 `codemode`。
 - **`mods` 这个词**：降级为"codemode 的持久化脚本"这一子概念；CLI 的旧 `--no-mods` / `TPA_NO_MODS` 已删除，统一由 `--no-codemode` 关闭 codemode。
-- 不保留 `mods` 与 `codemode` 两套会话目录；统一到 `<config>/tower-agent/codemode/`（脚本仓库 + 会话根分开子目录）。
+- 不保留两套会话目录；统一到 `<config>/tower-agent/codemode/{scripts,sessions}/`。
 
 ### 0.8 影响面
 
@@ -176,7 +176,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 与既有决策的张力：
 
 - 前面已经定过"**配置一律走 `tower-agent-storage`，不能走别的路子**"（CLI/axum/webui 共用同一套存储抽象）。脚本更接近"用户资产"而不是"运行时产物"，按同一条原则应该进 storage。
-- 但 Python codemode 脚本目前仍是 **文件**（`dirs::cache_dir()/tower-agent/mods` 临时、`dirs::config_dir()/tower-agent/mods` 持久），T3.4/T4 再统一到 codemode 目录与 storage。
+- Python codemode 脚本目前仍是 **文件**（`dirs::cache_dir()/tower-agent/codemode/scripts` 临时、`dirs::config_dir()/tower-agent/codemode/scripts` 持久），T4 再迁到 storage。
 - 无论哪条， **脚本元数据（语言、权限、启用状态、源码哈希、最近运行）都应该进 storage**——它是权限矩阵与热重载校验的依据，JSON 侧车文件只会制造两处真相。
 
 **结论 (c)**：storage 是真源（与"配置走 storage"一致、多前端零成本、LLM 写入路径天然），文件用于 **显式导出 / 导入**（满足"人类要读、要 git、要 review"）。项目级脚本走 storage 的 project 作用域（上一轮刚加的 scope 维度正好用上）；确实需要进仓库时，导出到 `.tower-agent/codemode/` 再纳入 git。
@@ -673,7 +673,7 @@ CLI 三个开关（`crates/tower-agent-cli/src/args.rs`）：
 
 ```sh
 tower-agent --codemode                                   # 临时会话，产物会话结束即弃
-tower-agent --codemode --codemode-session demo           # 会话根 = <config>/tower-agent/codemode/demo，下次复用
+tower-agent --codemode --codemode-session demo           # 会话根 = <config>/tower-agent/codemode/sessions/demo
 tower-agent --codemode --codemode-mount /data:/data:ro   # 额外只读挂载；:rw 才可写
 ```
 
@@ -718,7 +718,7 @@ XDG_CACHE_HOME=/tmp/cm-cache cargo test -p tower-agent-codemode --offline --test
 | 开关                                        | 作用                                                                                  |
 |---------------------------------------------|---------------------------------------------------------------------------------------|
 | `--codemode`                                | 启用 codemode（工作区只读挂 `/work` + 会话根可写）                                    |
-| `--codemode-session <name>`                 | 会话根持久化在 `<config>/tower-agent/codemode/<name>`，跨进程复用；不传则临时（即焚） |
+| `--codemode-session <name>`                 | 会话根持久化在 `<config>/tower-agent/codemode/sessions/<name>`，跨进程复用；不传则临时（即焚） |
 | `--codemode-mount <dir>[:<guest>][:ro\|rw]` | 追加挂载（可重复）；缺省 guest `/work`、只读                                          |
 | `--codemode-sessions`                       | 列出持久化会话后退出（只读目录，不构造工具）                                          |
 | `--codemode-session-clear <name>`           | 删掉一个持久化会话（连同产物）后退出                                                  |

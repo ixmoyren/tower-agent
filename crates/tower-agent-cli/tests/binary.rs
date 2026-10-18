@@ -290,3 +290,31 @@ fn config_commands_round_trip_through_storage() {
         .expect("run cli");
     assert_eq!(stdout(&output).trim(), "gpt-5.5");
 }
+
+#[cfg(feature = "codemode-js")]
+#[test]
+fn codemode_sessions_use_the_unified_directory() {
+    let config = tempfile::tempdir().expect("config");
+    let sessions = config.path().join("tower-agent/codemode/sessions");
+    std::fs::create_dir_all(sessions.join("demo")).expect("create session");
+    std::fs::write(sessions.join("demo/result.txt"), "ok").expect("write artifact");
+    std::fs::create_dir_all(config.path().join("tower-agent/codemode/legacy")).expect("legacy dir");
+
+    let output = cli()
+        .env("XDG_CONFIG_HOME", config.path())
+        .arg("--codemode-sessions")
+        .output()
+        .expect("run cli");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("demo"), "got:\n{text}");
+    assert!(!text.contains("legacy"), "legacy directory leaked:\n{text}");
+
+    let output = cli()
+        .env("XDG_CONFIG_HOME", config.path())
+        .args(["--codemode-session-clear", "demo"])
+        .output()
+        .expect("run cli");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    assert!(!sessions.join("demo").exists());
+}

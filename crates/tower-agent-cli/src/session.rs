@@ -99,7 +99,7 @@ impl Session {
     /// 打开 codemode（`--codemode`）：构造工具并加进地基工具集，下一轮 turn 生效。
     ///
     /// 布局是「工作区只读挂到 `/work` + 会话根」；`session` 给了名字就把会话根**持久化**在
-    /// `<config>/tower-agent/codemode/<name>`（跨进程复用），否则用临时目录（会话即焚）。
+    /// `<config>/tower-agent/codemode/sessions/<name>`（跨进程复用），否则用临时目录（会话即焚）。
     ///
     /// 启用 mods 时把 codemode 作为**受保护静态插件**注册进统一注册表（名字 `codemode`、
     /// 能力 `tool.codemode` 因此进 `protected_*`，动态 / JIT 插件不能顶替）；未启用 mods

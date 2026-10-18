@@ -54,16 +54,25 @@ pub use plugin::{CodemodePlugin, PLUGIN_NAME};
 /// 暴露给 agent 的 codemode 工具（`AgentTool`）。
 pub use tool::{CodemodeTool, SessionRoot, TOOL_NAME, tool, tool_description, tool_parameters};
 
-/// 命名会话的默认目录：`<config>/tower-agent/codemode/<name>`（与 mods 的持久目录同源）。
+/// 命名会话的默认目录：`<config>/tower-agent/codemode/sessions/<name>`。
 #[must_use]
 pub fn default_session_dir(name: &str) -> Option<PathBuf> {
     sessions_root().map(|root| root.join(name))
 }
 
-/// 命名会话的基目录：`<config>/tower-agent/codemode`。
+/// 命名会话的基目录：`<config>/tower-agent/codemode/sessions`。
 #[must_use]
 pub fn sessions_root() -> Option<PathBuf> {
-    dirs::config_dir().map(|dir| dir.join("tower-agent").join("codemode"))
+    dirs::config_dir().map(|dir| sessions_root_in(&dir))
+}
+
+/// 给定平台配置根目录时，返回 codemode 的命名会话目录。
+#[must_use]
+pub fn sessions_root_in(config_root: &Path) -> PathBuf {
+    config_root
+        .join("tower-agent")
+        .join("codemode")
+        .join("sessions")
 }
 
 /// 会话名合不合法：只允许一层普通名字（挡掉 `/`、`..` 之类，避免跑到基目录外面）。

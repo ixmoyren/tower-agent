@@ -1,7 +1,7 @@
 //! mod 的落盘存储（`dirs` 统一平台目录）。
 //!
-//! - **持久化**：`dirs::config_dir()/tower-agent/mods` —— 用户显式保留的 mod；
-//! - **临时**：`dirs::cache_dir()/tower-agent/mods` —— 会话内的工作副本，未持久化，
+//! - **持久化**：`dirs::config_dir()/tower-agent/codemode/scripts` —— 用户显式保留的脚本；
+//! - **临时**：`dirs::cache_dir()/tower-agent/codemode/scripts` —— 会话内的工作副本，未持久化，
 //!   由系统缓存在需要时清理。
 //!
 //! 每个 mod 存两个文件：`<name>.py`（源码）与 `<name>.json`（权限 + 依赖）。
@@ -56,8 +56,10 @@ impl ModStore {
     #[must_use]
     pub fn from_dirs() -> Self {
         Self {
-            config: dirs::config_dir().map(|dir| dir.join("tower-agent").join("mods")),
-            cache: dirs::cache_dir().map(|dir| dir.join("tower-agent").join("mods")),
+            config: dirs::config_dir()
+                .map(|dir| dir.join("tower-agent").join("codemode").join("scripts")),
+            cache: dirs::cache_dir()
+                .map(|dir| dir.join("tower-agent").join("codemode").join("scripts")),
         }
     }
 
@@ -137,5 +139,27 @@ impl ModStore {
             .collect();
         mods.sort_by(|left, right| left.name.cmp(&right.name));
         mods
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_directories_use_the_unified_scripts_layout() {
+        let store = ModStore::from_dirs();
+        if let Some(config) = dirs::config_dir() {
+            assert_eq!(
+                store.config,
+                Some(config.join("tower-agent/codemode/scripts"))
+            );
+        }
+        if let Some(cache) = dirs::cache_dir() {
+            assert_eq!(
+                store.cache,
+                Some(cache.join("tower-agent/codemode/scripts"))
+            );
+        }
     }
 }

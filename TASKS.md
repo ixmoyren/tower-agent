@@ -9,9 +9,9 @@
 | 项目       | 值                                             |
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
-| 当前阶段   | **Phase 3（合并 feature / CLI / 词汇）**       |
-| 下一个任务 | **T3.4**                                       |
-| 代码状态   | **T1–T3.3 已完成**：能力层、CLI 与作者工具词汇已收敛 |
+| 当前阶段   | **Phase 4（脚本仓库）**                        |
+| 下一个任务 | **T4.1**                                       |
+| 代码状态   | **T1–T3 已完成**：统一能力层、CLI、词汇与目录布局已收敛 |
 
 ---
 
@@ -166,7 +166,7 @@
 - **做什么**：`mod_write` / `mod_reload` / `mod_list` / `mod_remove` → `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove`；保留名列表、prompt、测试同步。
 - **验收**：两个引擎都能用同一组作者工具；旧名字不再出现（`rg "mod_write"` 只剩历史文档或清零）。
 
-### [ ] T3.4 目录收敛
+### [x] T3.4 目录收敛
 
 - **依赖**：T3.2
 - **做什么**：统一到 `<config>/tower-agent/codemode/`（`scripts/` + `sessions/`）；不再使用 `.../mods` 与 `.../codemode/<name>` 两套。旧目录不做迁移（版本未稳定）。
@@ -275,3 +275,4 @@
 | 2026-10-18 | T3.1 | 删除 `mods` feature；门面与 CLI 统一为 `codemode` + `codemode-python` + `codemode-js`；默认、无默认及单引擎组合全部编译通过 |
 | 2026-10-18 | T3.2 | CLI 新增 `--no-codemode` 并与 `--codemode` 互斥；删除 `TPA_NO_MODS`，`--no-mods` 不再识别；帮助/二进制测试通过 |
 | 2026-10-18 | T3.3 | 六个作者工具统一为 `codemode_*`；保留名、描述、测试、README 与设计文档同步；源码/用户文档旧 tool 名清零 |
+| 2026-10-18 | T3.4 | 持久脚本迁至 `codemode/scripts`、命名会话迁至 `codemode/sessions`；旧路径引用清零，ModStore 与 CLI 列出/清理测试通过 |
