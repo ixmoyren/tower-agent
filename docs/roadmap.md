@@ -22,7 +22,7 @@
 - ✅ **脚本仓库**（Q6 = c）：`ScriptStore`、Turso `script` 表、作者工具 storage 真源与显式导出/导入已落地。 **P0**
 - ◐ **统一会话与存储**：脚本存储、作用域、权限、语言元数据已统一；旧 scripts 文件写入已移除，JS 持久记录的启动执行待统一 host 分发。 **P1**
 - ❌ **扩展点 v0**（落 `tower-agent-plugin-sdk`）：工具注册 + `tool_call` / `tool_result` 钩子（Q4）；Rust 侧先可用，脚本侧 host function 跟上。 **P0**
-- ◐ 脚本权限已扩展为 `ScriptPermissions` 并接入 monty `exec`；待与 `plugins.md` §12 的运行时授权提示打通。 **P1**
+- ✅ 脚本权限已扩展为 `ScriptPermissions`；storage 预授权与 `plugins.md` §12 的 `PermissionPolicy` 已在 monty / JS 两引擎打通，无人值守默认拒绝。 **P1**
 
 ## 2. 上下文管理（compaction 剩余项）
 

@@ -22,6 +22,7 @@ use tower_agent_codemode_core::{ScriptLanguage, ScriptMetadata};
 use tower_agent_core::UiState;
 #[cfg(feature = "codemode-python")]
 use tower_agent_monty::ModManager;
+use tower_agent_plugins::PermissionPolicy;
 #[cfg(feature = "codemode-js")]
 use tower_agent_plugins::StaticPlugin as _;
 use tower_agent_storage::{ConfigScope, ProviderCredential};
@@ -54,6 +55,8 @@ pub struct Session {
     tool_filter: Mutex<ToolFilter>,
     /// codemode 的进程级默认引擎（脚本元数据可覆盖）。
     codemode_engine: Mutex<ScriptLanguage>,
+    /// Runtime permission policy shared by both codemode engines.
+    permission_policy: PermissionPolicy,
     /// 配置存储：`/login` `/model` `/thinking` 会把结果写回（对齐 pi 的 `auth.json` /
     /// `settings.json`）；未接入存储时为 `None`。
     store: Option<Arc<CliStore>>,
@@ -132,7 +135,9 @@ impl Session {
                     .map_err(|error| error.to_string())
             })
             .transpose()?;
-        let plugin = tower_agent_codemode::CodemodePlugin::new(workspace, root).with_mounts(parsed);
+        let plugin = tower_agent_codemode::CodemodePlugin::new(workspace, root)
+            .with_mounts(parsed)
+            .with_permission_policy(self.permission_policy.clone());
         #[cfg(feature = "codemode-python")]
         if let Some(mods) = &self.mods {
             mods.register_static_plugin(Arc::new(plugin))
@@ -265,6 +270,7 @@ impl Session {
             mods,
             tool_filter: Mutex::new(ToolFilter::default()),
             codemode_engine: Mutex::new(ScriptLanguage::JavaScript),
+            permission_policy: PermissionPolicy::unattended(),
             store: None,
             transcript: None,
             compactor,
@@ -290,6 +296,17 @@ impl Session {
             );
         }
         self.store = Some(store);
+        self
+    }
+
+    /// Attach the shared runtime permission policy used by both codemode engines.
+    #[must_use]
+    pub fn with_permission_policy(mut self, permission_policy: PermissionPolicy) -> Self {
+        #[cfg(feature = "codemode-python")]
+        if let Some(mods) = &self.mods {
+            mods.set_permission_policy(permission_policy.clone());
+        }
+        self.permission_policy = permission_policy;
         self
     }
 

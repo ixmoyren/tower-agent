@@ -10,7 +10,8 @@ use semver::Version;
 use tower_agent_codemode_core::ScriptPermissions;
 use tower_agent_core::AgentTool;
 use tower_agent_plugins::{
-    CapabilityId, HostApi, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
+    CapabilityId, HostApi, PermissionPolicy, PluginContext, PluginError, PluginKind,
+    PluginManifest, StaticPlugin,
 };
 
 use crate::{CodemodeError, CodemodeTool, Mount, SessionRoot};
@@ -24,6 +25,7 @@ pub struct CodemodePlugin {
     session: SessionRoot,
     mounts: Vec<Mount>,
     permissions: ScriptPermissions,
+    permission_policy: PermissionPolicy,
     /// 编译好的工具（`CodemodeTool::new` 会同步编译两个 wasm 组件，很贵）。
     ///
     /// 注册表每次 `resolve` 都会调用 `install`，所以这里只编译一次、之后 clone；
@@ -40,6 +42,7 @@ impl CodemodePlugin {
             session,
             mounts: Vec::new(),
             permissions: ScriptPermissions::default(),
+            permission_policy: PermissionPolicy::unattended(),
             tool: Mutex::new(None),
         }
     }
@@ -55,6 +58,13 @@ impl CodemodePlugin {
     #[must_use]
     pub fn with_permissions(mut self, permissions: ScriptPermissions) -> Self {
         self.permissions = permissions;
+        self
+    }
+
+    /// 设置缺失能力使用的运行时授权策略。
+    #[must_use]
+    pub fn with_permission_policy(mut self, permission_policy: PermissionPolicy) -> Self {
+        self.permission_policy = permission_policy;
         self
     }
 }
@@ -74,12 +84,13 @@ impl StaticPlugin for CodemodePlugin {
         })?;
         if cached.is_none() {
             let host = HostApi::from_tools(context.tools().iter().cloned());
-            let tool = CodemodeTool::for_workspace_with_host(
+            let tool = CodemodeTool::for_workspace_with_host_and_policy(
                 &self.cwd,
                 self.session.clone(),
                 &self.mounts,
                 host,
                 self.permissions,
+                self.permission_policy.clone(),
             )
             .map_err(|error: CodemodeError| PluginError::Install {
                 plugin: PLUGIN_NAME.to_owned(),

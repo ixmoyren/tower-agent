@@ -188,6 +188,13 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 3. `codemode export <dir>` / `codemode import <dir>`：每个脚本一个文件（源码 + 元数据头）；项目级默认导出到 `.tower-agent/codemode/`。
 4. 脚本的 **元数据永远在 storage**（权限、源码哈希、最近运行），文件只是投影——避免两处真相。
 
+权限执行顺序（T4.4）：
+
+1. `ScriptRecord.permissions` 是持久预授权集合；允许的能力直接执行，不提示。
+2. 未持久授权的能力在首次调用时进入 `PermissionPolicy`：`AllowOnce` 仅本次通过，`AllowSession` 按会话缓存，`Deny` 拒绝。
+3. 无人值守模式（`--print` 或没有注入 prompter）不提示，直接返回结构化的 `unauthorized` 错误。
+4. monty 与 JS 共用同一个 Session 策略实例；前端通过 `Session::with_permission_policy` 注入确认 UI。
+
 导出格式（v1）：
 
 ```text

@@ -306,7 +306,7 @@ dynamic = ["dep:stabby", "dep:libloading"]
 - 沙箱作为 **动态插件**提供 `sandbox.exec`，把不可信执行隔到子进程/受限运行时。
 - 热更/卸载的边界：只允许在引用计数归零后释放；JIT 换绑是原子操作。
 
-> 实现状态：`tower_agent_plugins::PermissionPolicy` / `PermissionPrompter` / `PermissionDecision` 已落地——`AllowOnce` 不缓存、`AllowSession` 按会话缓存、`Deny` 拒绝，无人值守（`--print`）默认拒绝；TUI 提示的 UI 形态待接。
+> 实现状态：`tower_agent_plugins::PermissionPolicy` / `PermissionPrompter` / `PermissionDecision` 已接入 codemode 的两个引擎——脚本记录里的 `ScriptPermissions` 是持久预授权集合；缺失能力首次调用时进入统一策略，`AllowOnce` 不缓存、`AllowSession` 按会话缓存、`Deny` 拒绝，无人值守（`--print` 或无 prompter）默认拒绝。`Session::with_permission_policy` / `CodemodePlugin::with_permission_policy` 是前端注入点；具体 TUI 确认框形态仍可由前端继续定制。
 
 ## 13. 错误处理
 

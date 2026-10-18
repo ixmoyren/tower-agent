@@ -1,12 +1,30 @@
 //! Tool capability coverage for the JavaScript codemode engine.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
 use futures_util::StreamExt as _;
 use tower_agent_codemode::{CodemodeHost, CodemodeOptions, Mount};
 use tower_agent_codemode_core::ScriptPermissions;
 use tower_agent_core::{AgentTool, ToolCallRequest};
-use tower_agent_plugins::HostApi;
+use tower_agent_plugins::{
+    CapabilityId, HostApi, Permission, PermissionDecision, PermissionPolicy, PermissionPrompter,
+};
 use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
 use tower_agent_tools::create_read_tool;
+
+struct AllowOncePrompter {
+    calls: AtomicUsize,
+}
+
+impl PermissionPrompter for AllowOncePrompter {
+    fn decide(&self, _capability: &CapabilityId, _permission: &Permission) -> PermissionDecision {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        PermissionDecision::AllowOnce
+    }
+}
 
 fn request(name: &str, arguments: serde_json::Value) -> ToolCallRequest {
     ToolCallRequest::new(ToolCall {
@@ -121,6 +139,16 @@ async fn js_tool_permissions_are_enforced() {
         message.contains("\"capability\":\"tools\""),
         "actual: {message}"
     );
+
+    let prompter = Arc::new(AllowOncePrompter {
+        calls: AtomicUsize::new(0),
+    });
+    codemode.set_permission_policy(PermissionPolicy::prompting(prompter.clone()));
+    codemode
+        .run_async("return await tool_list();", None)
+        .await
+        .expect("session authorization allows tool_list");
+    assert_eq!(prompter.calls.load(Ordering::SeqCst), 1);
 
     let session = tempfile::tempdir().expect("session");
     let codemode = CodemodeHost::new_with_host(

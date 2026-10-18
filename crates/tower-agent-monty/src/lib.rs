@@ -56,7 +56,10 @@ mod tests {
     use futures_util::future::BoxFuture;
     use serde_json::{Value, json};
     use tower_agent_core::UiState;
-    use tower_agent_plugins::PluginRegistry;
+    use tower_agent_plugins::{
+        CapabilityId, Permission, PermissionDecision, PermissionPolicy, PermissionPrompter,
+        PluginRegistry,
+    };
     use tower_agent_storage::{ScriptRecord, ScriptStore, StorageFuture};
 
     use super::*;
@@ -178,6 +181,21 @@ mod tests {
     }
 
     struct TestExecSurface;
+
+    struct AllowOncePrompter {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl PermissionPrompter for AllowOncePrompter {
+        fn decide(
+            &self,
+            _capability: &CapabilityId,
+            _permission: &Permission,
+        ) -> PermissionDecision {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            PermissionDecision::AllowOnce
+        }
+    }
 
     impl CapabilitySurface for TestExecSurface {
         fn permissions(&self) -> ScriptPermissions {
@@ -596,6 +614,11 @@ def shout(args):
         let second = ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
         second.set_script_store(storage.clone(), project);
         assert_eq!(second.load_persisted().await, 1, "应加载一个持久化脚本");
+        assert_eq!(
+            second.permissions("demo"),
+            permissions,
+            "重启后必须恢复持久化权限"
+        );
         let shout = second
             .tools()
             .into_iter()
@@ -1051,5 +1074,13 @@ def run_commands(args):
         let text = call_mod_tool(&tool(&manager, "run_commands"), json!({})).await;
         assert!(text.contains("unauthorized"), "actual: {text}");
         assert!(text.contains("\"capability\":\"exec\""), "actual: {text}");
+
+        let prompter = Arc::new(AllowOncePrompter {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        manager.set_permission_policy(PermissionPolicy::prompting(prompter.clone()));
+        let text = call_mod_tool(&tool(&manager, "run_commands"), json!({})).await;
+        assert_eq!(text, "hello from exec\n");
+        assert_eq!(prompter.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

@@ -31,7 +31,7 @@ use tower_agent_core::{
     AgentError, AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolCallRequest,
     ToolRenderer, ToolResultStream, UiState,
 };
-use tower_agent_plugins::HostApi;
+use tower_agent_plugins::{CapabilityId, HostApi, Permission, PermissionPolicy};
 use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
 use tower_agent_wasmtime::{HostState, SandboxEngine, SandboxError, SandboxOptions};
 use wasmtime::{Store, StoreLimitsBuilder};
@@ -394,6 +394,7 @@ struct HostBackend {
     exec: Arc<ExecService>,
     host: HostApi,
     permissions: ScriptPermissions,
+    permission_policy: Mutex<PermissionPolicy>,
     current_source: Mutex<Option<String>>,
     script_tools: Mutex<BTreeSet<String>>,
     state: Mutex<BTreeMap<String, Value>>,
@@ -430,12 +431,45 @@ impl CodemodeHost {
         Self::new_with_host_and_ui(options, host, permissions, UiState::new())
     }
 
+    /// 构造 codemode 宿主，并注入缺失能力的运行时授权策略。
+    pub fn new_with_host_and_policy(
+        options: CodemodeOptions,
+        host: HostApi,
+        permissions: ScriptPermissions,
+        permission_policy: PermissionPolicy,
+    ) -> Result<Arc<Self>, CodemodeError> {
+        Self::new_with_host_and_ui_and_policy(
+            options,
+            host,
+            permissions,
+            UiState::new(),
+            permission_policy,
+        )
+    }
+
     /// 构造 codemode 宿主，并注入共享 UI 状态。
     pub fn new_with_host_and_ui(
         options: CodemodeOptions,
         host: HostApi,
         permissions: ScriptPermissions,
         ui: UiState,
+    ) -> Result<Arc<Self>, CodemodeError> {
+        Self::new_with_host_and_ui_and_policy(
+            options,
+            host,
+            permissions,
+            ui,
+            PermissionPolicy::unattended(),
+        )
+    }
+
+    /// 构造 codemode 宿主，并显式注入共享 UI 与运行时授权策略。
+    pub fn new_with_host_and_ui_and_policy(
+        options: CodemodeOptions,
+        host: HostApi,
+        permissions: ScriptPermissions,
+        ui: UiState,
+        permission_policy: PermissionPolicy,
     ) -> Result<Arc<Self>, CodemodeError> {
         let exec = Arc::new(ExecService::new(
             &options.coreutils_wasm,
@@ -448,6 +482,7 @@ impl CodemodeHost {
             exec,
             host,
             permissions,
+            permission_policy: Mutex::new(permission_policy),
             current_source: Mutex::new(None),
             script_tools: Mutex::new(BTreeSet::new()),
             state: Mutex::new(BTreeMap::new()),
@@ -468,8 +503,8 @@ impl CodemodeHost {
                       -> HostFuture<'_, Result<ExecResult, String>> {
                     let backend = Arc::clone(&backend_for_exec);
                     Box::new(async move {
-                        if let Err(error) = backend.permissions.authorize(Capability::Exec) {
-                            return Ok((Err(capability_error_text(&error)),));
+                        if let Err(error) = backend.authorize(Capability::Exec) {
+                            return Ok((Err(error),));
                         }
                         Ok((backend.exec.exec(&name, &args, &opts).await,))
                     })
@@ -663,6 +698,16 @@ impl CodemodeHost {
         Ok(host)
     }
 
+    /// Replace the runtime policy used for capabilities absent from the persisted
+    /// [`ScriptPermissions`].
+    pub fn set_permission_policy(&self, permission_policy: PermissionPolicy) {
+        *self
+            .backend
+            .permission_policy
+            .lock()
+            .expect("codemode permission policy poisoned") = permission_policy;
+    }
+
     /// 会话根目录。
     #[must_use]
     pub fn session_root(&self) -> &Path {
@@ -773,10 +818,27 @@ impl CodemodeHost {
 }
 
 impl HostBackend {
+    fn authorize(&self, capability: Capability) -> Result<(), String> {
+        if self.permissions.allows(capability) {
+            return Ok(());
+        }
+        let capability_id = CapabilityId::new("codemode", "javascript");
+        let permission = Permission::new(capability.as_str());
+        self.permission_policy
+            .lock()
+            .expect("codemode permission policy poisoned")
+            .check(&capability_id, &[permission])
+            .map_err(|_| {
+                let error = CapabilityError::Unauthorized { capability };
+                format!(
+                    "{} for codemode JavaScript; permission was not granted",
+                    capability_error_text(&error)
+                )
+            })
+    }
+
     async fn tool_call(&self, name: &str, args_json: &str) -> Result<String, String> {
-        self.permissions
-            .authorize(Capability::Tools)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::Tools)?;
         let args: Value = serde_json::from_str(args_json)
             .map_err(|error| format!("invalid tool args: {error}"))?;
         let arguments = match args {
@@ -809,9 +871,7 @@ impl HostBackend {
     }
 
     fn tool_list(&self) -> Result<Vec<WireToolDescriptor>, String> {
-        self.permissions
-            .authorize(Capability::Tools)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::Tools)?;
         let mut names = self.host.capabilities();
         names.sort();
         Ok(names
@@ -841,9 +901,7 @@ impl HostBackend {
     }
 
     fn tool_register(&self, registration: WireToolRegistration) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::RegisterTools)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::RegisterTools)?;
         if registration.name.trim().is_empty() {
             return Err("tool_register requires a non-empty tool name".to_owned());
         }
@@ -905,9 +963,7 @@ impl HostBackend {
     }
 
     fn tool_unregister(&self, name: &str) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::RegisterTools)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::RegisterTools)?;
         let owned = self
             .script_tools
             .lock()
@@ -921,9 +977,7 @@ impl HostBackend {
     }
 
     fn state_get(&self, key: &str) -> Result<Option<String>, String> {
-        self.permissions
-            .authorize(Capability::State)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::State)?;
         self.state
             .lock()
             .expect("codemode state poisoned")
@@ -933,9 +987,7 @@ impl HostBackend {
     }
 
     fn state_set(&self, key: &str, value_json: &str) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::State)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::State)?;
         let value = serde_json::from_str(value_json)
             .map_err(|error| format!("invalid state value: {error}"))?;
         self.state
@@ -946,17 +998,13 @@ impl HostBackend {
     }
 
     fn log(&self, level: &str, message: &str) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::State)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::State)?;
         eprintln!("[codemode {level}] {message}");
         Ok(true)
     }
 
     fn ui_status(&self, segment_json: &str) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::Ui)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::Ui)?;
         let value: Value = serde_json::from_str(segment_json)
             .map_err(|error| format!("invalid UI status: {error}"))?;
         let id = value
@@ -983,9 +1031,7 @@ impl HostBackend {
     }
 
     fn ui_panel(&self, panel_json: &str) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::Ui)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::Ui)?;
         let value: Value = serde_json::from_str(panel_json)
             .map_err(|error| format!("invalid UI panel: {error}"))?;
         let id = value
@@ -1018,9 +1064,7 @@ impl HostBackend {
     }
 
     fn ui_clear(&self, id: Option<&str>) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::Ui)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::Ui)?;
         match id {
             Some(id) => {
                 self.ui.remove_panel(id);
@@ -1032,15 +1076,17 @@ impl HostBackend {
     }
 
     fn ui_tool_render(&self, tool: &str, lines_json: &str) -> Result<bool, String> {
-        self.permissions
-            .authorize(Capability::Ui)
-            .map_err(|error| capability_error_text(&error))?;
+        self.authorize(Capability::Ui)?;
         let value: Value = serde_json::from_str(lines_json)
             .map_err(|error| format!("invalid UI renderer: {error}"))?;
         self.ui
             .set_tool_renderer(tool, ToolRenderer::new(json_string_lines(&value)?));
         Ok(true)
     }
+}
+
+fn capability_error_text(error: &CapabilityError) -> String {
+    serde_json::to_string(error).unwrap_or_else(|_| error.to_string())
 }
 
 #[derive(Clone)]
@@ -1095,10 +1141,6 @@ impl CodemodeHost {
         let value = result.value.unwrap_or_else(|| "null".to_owned());
         Ok(serde_json::from_str(&value).unwrap_or(Value::String(value)))
     }
-}
-
-fn capability_error_text(error: &CapabilityError) -> String {
-    serde_json::to_string(error).unwrap_or_else(|_| error.to_string())
 }
 
 fn is_js_identifier(value: &str) -> bool {

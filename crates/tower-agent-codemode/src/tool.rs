@@ -137,6 +137,21 @@ impl CodemodeTool {
         host: tower_agent_plugins::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
     ) -> Result<Self, CodemodeError> {
+        Self::new_with_host_and_policy(
+            options,
+            host,
+            permissions,
+            tower_agent_plugins::PermissionPolicy::unattended(),
+        )
+    }
+
+    /// 起 worker，并注入缺失能力使用的运行时授权策略。
+    pub fn new_with_host_and_policy(
+        options: CodemodeOptions,
+        host: tower_agent_plugins::HostApi,
+        permissions: tower_agent_codemode_core::ScriptPermissions,
+        permission_policy: tower_agent_plugins::PermissionPolicy,
+    ) -> Result<Self, CodemodeError> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
 
@@ -144,7 +159,12 @@ impl CodemodeTool {
             .name("codemode".to_owned())
             .stack_size(WORKER_STACK)
             .spawn(move || {
-                let host = match CodemodeHost::new_with_host(options, host, permissions) {
+                let host = match CodemodeHost::new_with_host_and_policy(
+                    options,
+                    host,
+                    permissions,
+                    permission_policy,
+                ) {
                     Ok(host) => {
                         let _ = ready_tx.send(Ok(()));
                         host
@@ -249,6 +269,25 @@ impl CodemodeTool {
         host: tower_agent_plugins::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
     ) -> Result<Self, CodemodeError> {
+        Self::for_workspace_with_host_and_policy(
+            workspace,
+            session,
+            mounts,
+            host,
+            permissions,
+            tower_agent_plugins::PermissionPolicy::unattended(),
+        )
+    }
+
+    /// 完整版：注入宿主工具、脚本权限与运行时授权策略。
+    pub fn for_workspace_with_host_and_policy(
+        workspace: impl AsRef<std::path::Path>,
+        session: SessionRoot,
+        mounts: &[crate::Mount],
+        host: tower_agent_plugins::HostApi,
+        permissions: tower_agent_codemode_core::ScriptPermissions,
+        permission_policy: tower_agent_plugins::PermissionPolicy,
+    ) -> Result<Self, CodemodeError> {
         let (root, temp) = match session {
             SessionRoot::Ephemeral => {
                 let dir = tempfile::tempdir()
@@ -265,7 +304,8 @@ impl CodemodeTool {
         let mut options = CodemodeOptions::embedded(root)
             .mount(crate::Mount::read_only(workspace.as_ref(), "/work"));
         options.mounts.extend(mounts.iter().cloned());
-        let mut tool = Self::new_with_host(options, host, permissions)?;
+        let mut tool =
+            Self::new_with_host_and_policy(options, host, permissions, permission_policy)?;
         tool.session = temp;
         Ok(tool)
     }

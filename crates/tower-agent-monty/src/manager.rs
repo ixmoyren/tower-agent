@@ -23,8 +23,8 @@ use tower_agent_core::{
     AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer, UiState,
 };
 use tower_agent_plugins::{
-    CapabilityId, HostApi, PluginContext, PluginError, PluginId, PluginKind, PluginManifest,
-    PluginRegistry, ShadowedPlugin, StaticPlugin,
+    CapabilityId, HostApi, Permission, PermissionPolicy, PluginContext, PluginError, PluginId,
+    PluginKind, PluginManifest, PluginRegistry, ShadowedPlugin, StaticPlugin,
 };
 use tower_agent_provider::{Arguments, ToolCall};
 use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore};
@@ -151,6 +151,8 @@ pub struct ModManager {
     capability_surface: Mutex<Option<Arc<dyn CapabilitySurface>>>,
     mounts: Mutex<MountTable>,
     permissions: Mutex<BTreeMap<String, ModPermissions>>,
+    /// Runtime grants for capabilities outside the persisted permission set.
+    permission_policy: Mutex<PermissionPolicy>,
     /// 三形态共用的注册表（调用方通常塞入内置静态插件）。
     registry: Mutex<PluginRegistry>,
     /// 最近一次成功解析 + 安装后的工具目录（唯一来源）。
@@ -190,6 +192,7 @@ impl ModManager {
             capability_surface: Mutex::new(None),
             mounts: Mutex::new(MountTable::new()),
             permissions: Mutex::new(BTreeMap::new()),
+            permission_policy: Mutex::new(PermissionPolicy::unattended()),
             registry: Mutex::new(registry),
             catalog: Mutex::new(Vec::new()),
             shadows: Mutex::new(Vec::new()),
@@ -664,6 +667,15 @@ impl ModManager {
             .insert(name.to_string(), permissions);
     }
 
+    /// Replace the session permission policy used for capabilities not persisted
+    /// in a script's [`ScriptPermissions`].
+    pub fn set_permission_policy(&self, policy: PermissionPolicy) {
+        *self
+            .permission_policy
+            .lock()
+            .expect("permission policy poisoned") = policy;
+    }
+
     /// 取某个 mod 的权限（没有记录时返回默认权限）。
     #[must_use]
     pub fn permissions(&self, name: &str) -> ModPermissions {
@@ -673,6 +685,25 @@ impl ModManager {
             .get(name)
             .copied()
             .unwrap_or_default()
+    }
+
+    fn authorize(&self, script: &str, capability: Capability) -> Result<(), String> {
+        if self.permissions(script).allows(capability) {
+            return Ok(());
+        }
+        let capability_id = CapabilityId::new("codemode", script.to_owned());
+        let permission = Permission::new(capability.as_str());
+        self.permission_policy
+            .lock()
+            .expect("permission policy poisoned")
+            .check(&capability_id, &[permission])
+            .map_err(|_| {
+                let error = CapabilityError::Unauthorized { capability };
+                format!(
+                    "{} for codemode script `{script}`; permission was not granted",
+                    capability_error_text(&error)
+                )
+            })
     }
 
     /// 当前所有 mod 的摘要（按名字排序）。
@@ -1056,20 +1087,13 @@ impl ModManager {
 
     /// 派发一次宿主调用（由 [`ModHostAdapter`] 调用）。
     pub(crate) async fn dispatch(&self, call: HostCall) -> Result<Value, String> {
-        let permissions = self.permissions(&call.plugin);
-        let denied = |what: &str| Err(format!("mod `{}` is not allowed to {what}", call.plugin));
-
         match call.function.as_str() {
             "exec" | "__codemode_exec" => {
-                permissions
-                    .authorize(Capability::Exec)
-                    .map_err(|error| capability_error_text(&error))?;
+                self.authorize(&call.plugin, Capability::Exec)?;
                 self.host_exec(&call).await
             }
             "tool_call" | "tool_list" => {
-                if !permissions.tools {
-                    return denied("call host tools");
-                }
+                self.authorize(&call.plugin, Capability::Tools)?;
                 if call.function == "tool_list" {
                     Ok(self.tool_names())
                 } else {
@@ -1077,9 +1101,7 @@ impl ModManager {
                 }
             }
             "tool_register" | "tool_unregister" => {
-                if !permissions.register_tools {
-                    return denied("register tools");
-                }
+                self.authorize(&call.plugin, Capability::RegisterTools)?;
                 if call.function == "tool_register" {
                     self.host_tool_register(&call)
                 } else {
@@ -1087,17 +1109,13 @@ impl ModManager {
                 }
             }
             "log" => {
-                if !permissions.state {
-                    return denied("log");
-                }
+                self.authorize(&call.plugin, Capability::State)?;
                 let message = arg_str(&call, 0, "message").unwrap_or_default();
                 eprintln!("[mod {}] {message}", call.plugin);
                 Ok(Value::Null)
             }
             "state_set" => {
-                if !permissions.state {
-                    return denied("write host state");
-                }
+                self.authorize(&call.plugin, Capability::State)?;
                 let key = arg_str(&call, 0, "key").ok_or("state_set requires (key, value)")?;
                 let value = call
                     .positional_or_kwarg(1, "value")
@@ -1110,9 +1128,7 @@ impl ModManager {
                 Ok(Value::Null)
             }
             "state_get" => {
-                if !permissions.state {
-                    return denied("read host state");
-                }
+                self.authorize(&call.plugin, Capability::State)?;
                 let key = arg_str(&call, 0, "key").ok_or("state_get requires (key)")?;
                 Ok(self
                     .kv
@@ -1123,15 +1139,11 @@ impl ModManager {
                     .unwrap_or(Value::Null))
             }
             "ui_state" => {
-                if !permissions.ui {
-                    return denied("read UI state");
-                }
+                self.authorize(&call.plugin, Capability::Ui)?;
                 serde_json::to_value(self.ui.snapshot()).map_err(|error| error.to_string())
             }
             name if name.starts_with("ui_") => {
-                if !permissions.ui {
-                    return denied("change the UI");
-                }
+                self.authorize(&call.plugin, Capability::Ui)?;
                 match name {
                     "ui_status" => self.host_ui_status(&call),
                     "ui_panel" => self.host_ui_panel(&call),
@@ -1146,9 +1158,8 @@ impl ModManager {
 
     /// 服务一次 OS 调用（由 [`ModHostAdapter::handle_os_call`] 调用）。
     fn handle_os_call(&self, plugin: &str, call_json: &str) -> String {
-        if !self.permissions(plugin).fs {
-            return wire::permission_denied("filesystem access is not allowed for this mod")
-                .to_string();
+        if let Err(error) = self.authorize(plugin, Capability::Fs) {
+            return wire::permission_denied(error).to_string();
         }
         let call: OsFunctionCall = match serde_json::from_str(call_json) {
             Ok(call) => call,
