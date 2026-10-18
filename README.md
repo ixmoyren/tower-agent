@@ -1,6 +1,7 @@
 # tower-agent
 
-> 一个 **tower-native** 的通用 Agent 框架 —— pi（TypeScript agent 框架）的 Rust 重写。
+> 立足 **tower** 生态的通用 Agent 框架：在 agent 能力模型上参考 pi-agent，
+> 通过可组合插件、Wasmtime 沙箱与 codemode，构建能够由 LLM 动态调整的 agent。
 
 [English](README-en.md)
 
@@ -8,29 +9,40 @@
 
 ### 项目简介
 
-`tower-agent` 是一个用 Rust 编写、以 [tower](https://github.com/tower-rs/tower) 的
-`Service` / `Layer` 模型为骨架的通用 Agent 框架。它把 **pi**（TypeScript 的 agent 框架）
-的可观察行为搬到 Rust，并在此基础上做 tower-native 重构：provider 调用、工具执行、RPC
-等「请求 → 响应」边界共享同一套中间件（超时、重试、限流、并发、背压、遥测）；而流式事件、
-订阅通知与会话状态走 `Stream` 与编排层，不硬塞进通用中间件。
+`tower-agent` **不是 pi-agent 的 Rust 重写或逐项移植**。它参考 pi-agent 在 agent loop、
+tool calling、session、compaction、extension 等方面积累的能力模型与交互经验，但架构和实现
+以 Rust 与 [tower](https://github.com/tower-rs/tower) 为第一等约束重新设计。
+pi-agent 在这里是能力设计参考，不是兼容性目标；`tower-agent` 不承诺与其 API、模块结构或
+行为逐项对齐。
+
+Provider 调用、工具执行、RPC 等「请求 → 响应」边界统一使用 `Service` / `Layer`，因此可以
+复用 tower 生态的超时、重试、限流、并发、背压和遥测能力；流式事件、订阅通知与会话状态则由
+`Stream` 和编排层承载。Agent 本身不是封闭的固定流程：静态插件、动态插件、热重载脚本、
+codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 LLM 都能在受控边界内增加工具、
+调整行为、扩展 UI 或改变 agent 的工作方式。
 
 定位类似 [`tower-mcp`](https://crates.io/crates/tower-mcp) / `tower-llm`：可被 **Axum / Tonic / CLI / TUI / WebUI** 等宿主集成，也能作为库单独使用。
 
 ### 特性亮点
 
-- **tower-native**：`Agent` 实现 `Service<AgentRequest>`，可用 `ServiceBuilder` + 任意
-  `Layer` 组合；同时提供 **有状态会话**、 **无状态 Service** 与 **池化 Service**三种形态。
-- **双响应形态**：非流式 `AgentResponse`（= 流式事件的 fold）与流式 `AgentEventStream`
-  （`BoxStream<AgentEvent>`），直接对接 TUI / SSE。
-- **多 provider 插件**：Anthropic Messages、OpenAI Chat Completions（含兼容端点）、
-  OpenAI Responses、Google Generative AI、DeepSeek 都以内置 provider 插件注册；宿主也可实现
+- **tower-native**：`Agent` 实现 `Service<AgentRequest>`，可用 `ServiceBuilder` 与任意
+  `Layer` 组合；同时提供 **有状态会话**、**无状态 Service** 和 **池化 Service**。
+- **丰富的插件开发手段**：静态插件、动态 `cdylib` 插件和热重载插件共享统一注册、解析、
+  覆盖与生命周期模型；可扩展工具、Provider、中间件、事件 Hook、UI、存储和沙箱能力。
+- **Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存和实例池独立成层，为 codemode
+  与其他不可信代码提供一致的隔离边界。
+- **codemode：让 agent 可变**：LLM 可以编写 JavaScript 或 monty/Python 脚本，在沙箱中执行、
+  注册或替换工具、挂接 Hook、贡献 UI，并通过热重载动态调整 agent 的能力与行为。
+- **多 Provider**：Anthropic Messages、OpenAI Chat Completions（含兼容端点）、OpenAI
+  Responses、Google Generative AI、DeepSeek 以独立 Provider 插件注册；宿主也可实现
   `ProviderPlugin` 注入自定义 LLM。
 - **七个内置工具**：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`，
   每个工具本身就是一个可组合的 tower `Layer`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)
   ——bash 兼容的 Rust shell，在进程内解释执行，跨平台行为一致）。
-- **三种插件形态**：静态（编译期 tower `Layer`）、动态（stabby `cdylib`，运行时加载 / 卸载）、
-  热重载（monty 脚本，跑在 wasmtime 沙箱里），覆盖从「零开销内置」到「热加载 codemode 脚本」的整条光谱。
-- **codemode Python 脚本**：让 LLM 自己编写、热重载、卸载 monty 脚本，从而动态扩展宿主能力、注册工具、贡献 UI。
+- **前后端解耦**：`tower-agent-ui` 提供与渲染无关的状态归约、命令和宿主接口；
+  `tower-agent-tui` 只负责 ratatui/终端，GUI 与 axum 服务可以直接消费 UI 后端。
+- **双响应形态**：非流式 `AgentResponse`（流式事件的 fold）与流式 `AgentEventStream`
+  （`BoxStream<AgentEvent>`），可直接对接 TUI、SSE 或其他事件消费者。
 - **稳定协议**：帧格式 / 严格 CBOR 子集 / RPC 信封（`tower-agent-protocol`）。
 
 ### 架构
@@ -39,7 +51,7 @@
 
 | Crate                    | 职责                                                                                                  |
 |--------------------------|-------------------------------------------------------------------------------------------------------|
-| `tower-agent`            | **门面**：再导出 core / runtime / provider / tools / plugins（可选 ui/protocol/plugin-sdk）           |
+| `tower-agent`            | **门面与装配层**：再导出 core / runtime / provider / tools / plugin，并装配宿主插件（可选 ui/protocol/plugin-sdk） |
 | `tower-agent-core`       | **契约**：`AgentRequest`/`AgentResponse`/`AgentEventStream`、消息与事件、工具边界、Layer 扩展点、错误 |
 | `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
 | `tower-agent-provider`   | **Provider 协议**：消息/模型/请求/事件、Stream Service、Models、HTTP/SSE、插件契约；不含具体厂商实现 |
@@ -48,15 +60,15 @@
 | `tower-agent-plugin`    | **插件宿主**：注册表、生命周期、HostApi、权限；`provider` feature 提供 Provider 适配器，配合 `dynamic` 提供动态桥接 |
 | `tower-agent-plugin-sdk` | **插件作者 SDK**：`declare_plugin!`、静态 / 动态 ABI 契约                                             |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
-| `tower-agent-monty`      | **热重载后端**：内嵌 monty（Python 子集）沙箱插件 + codemode 脚本管理器                              |
-| `tower-agent-wasmtime`   | **wasm 沙箱底座**：wasmtime 引擎 / 组件、WASI、资源上限、JIT 缓存与实例池                             |
+| `tower-agent-monty`      | **codemode Python 宿主**：内嵌 monty（Python 子集）沙箱插件 + 热重载脚本管理器                       |
+| `tower-agent-wasmtime`   | **通用 Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存与实例池                               |
 | `tower-agent-protocol`   | **协议**：帧、严格 CBOR 子集、RPC 信封                                                                |
 | `tower-agent-tui`        | **终端渲染前端**：消费 `tower-agent-ui`，负责 ratatui 页面、编辑器与终端事件循环                       |
 | `tower-agent-cli`        | **CLI 宿主**：二进制名 `tower-agent`，以 `Service` / `Layer` 组合装配会话                             |
 
-**分层原则**：`tower-agent-core` 只放契约与类型， **不依赖** runtime / plugins / 前端；
-编排循环、队列、事件总线在 `runtime`；`tools` 提供工具实现与插件声明，`plugins` 提供注册表等宿主机制，
-内置工具只由门面装配层登记；`tower-agent-ui` 承载前端无关的会话状态与命令，
+**分层原则**：`tower-agent-core` 只放契约与类型，**不依赖** runtime / plugin / 前端；
+编排循环、队列、事件总线在 `runtime`；`tools` 提供工具实现与插件声明，`plugin` 提供注册表、
+解析、生命周期与扩展机制；`tower-agent-ui` 承载前端无关的会话状态和命令，
 `tower-agent-tui` 只做 ratatui 渲染。门面 crate 不依赖终端前端。
 
 ### 三种插件形态
@@ -68,7 +80,7 @@
 | 加载     | 编译期                      | `libloading` 运行时加载     | 运行时编译 + 原子换绑           |
 | 卸载     | 不卸载（随进程）            | 支持卸载                    | 支持热替换                      |
 | 调用开销 | 零（直接函数调用）          | 一次间接调用 + ABI 编解码   | 编译后接近原生                  |
-| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemod | codemode Python 脚本、轻量扩展  |
+| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemode | codemode Python 脚本、轻量扩展  |
 
 静态插件实现 `StaticPlugin`，可贡献 **能力**、 **工具** 以及三层中间件
 （`agent_layers()` / `tool_layers()` / `event_handlers()`）。动态插件用
@@ -140,7 +152,7 @@ echo "解释一下 crates/tower-agent-runtime 的编排循环" \
 tower-agent/
 ├── crates/                  # 工作区各 crate（见上方架构表）
 ├── docs/                    # 设计文档（总设计 / 架构 / 插件 / codemode）
-├── examples/plugin-example/ # 动态插件（cdylib）示例
+├── examples/                # 动态插件与动态 provider（cdylib）示例
 └── wasm/                    # 独立的 wasm 组件 workspace
     ├── monty-sandbox/       #   把 monty 解释器编译成 wasm 组件
     ├── coreutils-wasm/      #   codemode 的命令层（uutils multicall，60 命令）
@@ -149,11 +161,11 @@ tower-agent/
 
 ### 文档
 
-- [`docs/design.md`](docs/design.md)：整体设计 —— tower 模型与 pi 概念的映射、移植路线。
-- [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md)：目标架构与迁移计划。
+- [`docs/design.md`](docs/design.md)：整体设计、agent 能力模型与关键契约。
+- [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md)：crate 分层、扩展模型与演进方向。
 - [`docs/plugins.md`](docs/plugins.md)：插件 / 扩展体系（静态 / 动态 / JIT 脚本）。
 - [`docs/codemode.md`](docs/codemode.md)：codemode —— **agent 可以编程**（LLM 生成脚本、沙箱执行；解释器可选 monty/Python 或 rquickjs/JS）。§0 是 v2 统一提案，§1–§11 是 JS 引擎细节。
-- [`docs/sdk.md`](docs/sdk.md)：扩展点设计（对照 pi `ExtensionAPI`）——落在 `tower-agent-plugin-sdk` 上，Rust 插件与沙箱脚本共用同一套语义。
+- [`docs/sdk.md`](docs/sdk.md)：插件作者 SDK 与扩展点设计；Rust 插件和沙箱脚本共享能力、Hook 与注册语义。
 - [`docs/roadmap.md`](docs/roadmap.md)：**未完成事项**的单一入口（以及建议顺序）。
 - [`docs/architecture-review.md`](docs/architecture-review.md)：现状评审。
 - [`wasm/monty-sandbox/README.md`](wasm/monty-sandbox/README.md)：wasm 组件接口与再生成流程。

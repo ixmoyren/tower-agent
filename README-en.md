@@ -1,18 +1,31 @@
 # tower-agent
 
-> A **tower-native** general-purpose agent framework — a Rust rewrite of pi (a TypeScript agent framework).
+> A general-purpose agent framework rooted in the **tower** ecosystem: inspired by
+> pi-agent at the agent-capability level, with composable plugins, Wasmtime sandboxes,
+> and codemode for agents that an LLM can dynamically reshape.
+
+[中文](README.md)
 
 ---
 
 ### Overview
 
-`tower-agent` is a general-purpose agent framework written in Rust and built around the
-[tower](https://github.com/tower-rs/tower) `Service` / `Layer` model. It ports the
-observable behavior of **pi** (a TypeScript agent framework) to Rust, then reshapes the
-architecture to be tower-native: request/response boundaries — provider calls, tool
-execution, RPC — share one middleware stack (timeout, retry, rate limiting, concurrency,
-backpressure, telemetry), while streaming events, subscriptions and session state stay as
-`Stream`s and orchestration logic instead of being forced into generic middleware.
+`tower-agent` is **not a Rust rewrite or line-by-line port of pi-agent**. It draws on
+pi-agent's capability model and practical lessons around agent loops, tool calling,
+sessions, compaction, and extensions, while designing its architecture and implementation
+around Rust and [tower](https://github.com/tower-rs/tower) as first-class constraints.
+pi-agent is a capability reference, not a compatibility target: `tower-agent` makes no
+commitment to matching its APIs, module structure, or behavior item by item.
+
+Provider calls, tool execution, RPC, and other request/response boundaries use the
+`Service` / `Layer` model, so they can reuse timeout, retry, rate limiting, concurrency,
+backpressure, and telemetry facilities from the tower ecosystem. Streaming events,
+subscriptions, and session state stay in `Stream`s and the orchestration layer.
+
+The agent is not a closed, fixed workflow. Static plugins, dynamic plugins, hot-reload
+scripts, codemode, and Wasmtime sandboxes form an extensible runtime in which both the host
+and the LLM can add tools, adjust behavior, contribute UI, or change how the agent works
+inside explicit safety boundaries.
 
 Its positioning is similar to [`tower-mcp`](https://crates.io/crates/tower-mcp) /
 `tower-llm`: it can be embedded by hosts such as **axum / tonic / CLI / TUI / web**, or
@@ -23,8 +36,14 @@ used directly as a library.
 - **tower-native**: `Agent` implements `Service<AgentRequest>` and composes with
   `ServiceBuilder` + any `Layer`. Three shapes are provided — **stateful sessions**,
   a **stateless `Service`**, and a **pooled `Service`**.
-- **Two response shapes**: non-streaming `AgentResponse` (a fold of the stream) and the
-  streaming `AgentEventStream` (`BoxStream<AgentEvent>`) — ready for TUI and SSE.
+- **Rich plugin development**: static plugins, dynamic `cdylib` plugins, and hot-reload
+  plugins share one registry, resolution, override, and lifecycle model. They can extend
+  tools, providers, middleware, event hooks, UI, storage, and sandbox capabilities.
+- **Wasmtime sandbox foundation**: component model, WASI, resource limits, JIT cache, and
+  instance pooling form a reusable isolation layer for codemode and other untrusted code.
+- **codemode makes the agent mutable**: the LLM can write JavaScript or monty/Python
+  scripts, execute them in a sandbox, register or replace tools, attach hooks, contribute
+  UI, and dynamically reshape agent behavior through hot reload.
 - **Multiple providers**: Anthropic Messages, OpenAI Chat Completions (incl. compatible
   endpoints), OpenAI Responses, Google Generative AI, and DeepSeek, behind a unified
   `Models` router with catalog refresh.
@@ -32,11 +51,12 @@ used directly as a library.
   Each tool is itself a composable tower `Layer` (`shell` embeds
   [brush](https://github.com/reubeno/brush), a bash-compatible Rust shell, and interprets
   commands in-process for consistent cross-platform behavior).
-- **Three plugin forms**: static (compile-time tower `Layer`), dynamic (stabby `cdylib`
-  loaded/unloaded at runtime), and hot-reload (monty scripts running inside a wasmtime
-  sandbox) — spanning zero-overhead built-ins through hot-loaded codemode scripts.
-- **codemode Python scripts**: let the LLM write, hot-reload, and unload monty scripts that extend host
-  capabilities, register tools, and contribute UI.
+- **Frontend separation**: `tower-agent-ui` owns rendering-independent state reduction,
+  commands, and host interfaces; `tower-agent-tui` handles only ratatui and terminal
+  integration. GUIs and axum services can consume the UI backend directly.
+- **Two response shapes**: non-streaming `AgentResponse` (a fold of the stream) and the
+  streaming `AgentEventStream` (`BoxStream<AgentEvent>`) — ready for TUI, SSE, and other
+  event consumers.
 - **Stable protocol**: framing, a strict CBOR subset, and RPC envelopes (`tower-agent-protocol`).
 
 ### Architecture
@@ -46,23 +66,26 @@ dependencies are declared once through workspace dependencies.
 
 | Crate                    | Responsibility                                                                                                                     |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------|
-| `tower-agent`            | **Facade**: re-exports core / runtime / provider / tools / plugins (optional tui/protocol/plugin-sdk)                              |
+| `tower-agent`            | **Facade and assembly layer**: re-exports core / runtime / provider / tools / plugin and assembles host plugins (optional ui/protocol/plugin-sdk) |
 | `tower-agent-core`       | **Contracts**: `AgentRequest`/`AgentResponse`/`AgentEventStream`, messages & events, tool boundary, layer extension points, errors |
 | `tower-agent-runtime`    | **Runtime**: the `Agent` loop, queues, event bus; stateless / pooled `Service` adapters                                            |
 | `tower-agent-provider`   | **Provider protocol**: messages/models/request schemas, stream services, `Models`, HTTP/SSE, plugin contracts                      |
 | `tower-agent-provider-builtin` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, sidecars                                      |
-| `tower-agent-tools`      | **Built-in tools**: read / shell / edit / write / grep / find / ls                                                                 |
+| `tower-agent-tools`      | **Built-in tools**: read / shell / edit / write / grep / find / ls, each as an independent static plugin                          |
 | `tower-agent-plugin`    | **Plugin host**: registry, lifecycle, HostApi, permissions; optional `provider` adapter plus `dynamic` provider bridge               |
 | `tower-agent-plugin-sdk` | **Plugin author SDK**: `declare_plugin!`, static / dynamic ABI contracts                                                           |
-| `tower-agent-monty`      | **Hot-reload backend**: embedded monty (Python subset) sandbox plugins + codemode script manager                                    |
-| `tower-agent-wasmtime`   | **wasm sandbox base**: wasmtime engine/component, WASI, resource limits, JIT cache and instance pool                               |
+| `tower-agent-ui`         | **Frontend-neutral UI backend**: event reduction, session view, slash commands, static UI plugins                                  |
+| `tower-agent-monty`      | **codemode Python host**: embedded monty (Python subset) sandbox plugins + hot-reload script manager                               |
+| `tower-agent-wasmtime`   | **General Wasmtime sandbox base**: component model, WASI, resource limits, JIT cache, and instance pool                           |
 | `tower-agent-protocol`   | **Protocol**: framing, strict CBOR subset, RPC envelopes                                                                           |
 | `tower-agent-tui`        | **Terminal frontend**: differential-rendering TUI over the agent event stream                                                      |
 | `tower-agent-cli`        | **CLI host**: binary named `tower-agent`, assembling the session via `Service` / `Layer`                                           |
 
 **Layering rule**: `tower-agent-core` holds only contracts and types and does **not**
-depend on runtime / plugins / frontends; the loop, queues and event bus live in `runtime`;
-providers, tools and plugins each live in their own crate.
+depend on runtime / plugin / frontends; the loop, queues, and event bus live in `runtime`;
+tools provide implementations and plugin declarations, while `plugin` owns registry,
+resolution, lifecycle, and extension mechanisms. `tower-agent-ui` is rendering-independent,
+and `tower-agent-tui` handles only ratatui and terminal integration.
 
 ### The three plugin forms
 
@@ -139,6 +162,7 @@ provider with credentials in the environment is used.
 | Variable      | Purpose                                                                 |
 |---------------|-------------------------------------------------------------------------|
 | `TPA_WORKERS` | Number of runtime workers (defaults to `available_parallelism`)         |
+| `TOWER_AGENT_PROVIDERS` | Override the CLI provider configuration file path              |
 
 ### Repository layout
 
@@ -146,7 +170,7 @@ provider with credentials in the environment is used.
 tower-agent/
 ├── crates/                  # workspace crates (see the architecture table above)
 ├── docs/                    # design docs (design / architecture / plugins / codemode)
-├── examples/plugin-example/ # dynamic plugin (cdylib) example
+├── examples/                # dynamic plugin and dynamic provider (cdylib) examples
 └── wasm/                    # independent wasm component workspaces
     ├── monty-sandbox/       #   compiles the monty interpreter into a wasm component
     ├── coreutils-wasm/      #   codemode's command layer (uutils multicall, 60 commands)
@@ -155,10 +179,11 @@ tower-agent/
 
 ### Documentation
 
-- [`docs/design.md`](docs/design.md): overall design — mapping tower concepts to pi, migration path.
-- [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md): target architecture and migration plan.
+- [`docs/design.md`](docs/design.md): overall design, agent capability model, and key contracts.
+- [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md): crate layering, extension model, and evolution direction.
 - [`docs/plugins.md`](docs/plugins.md): the plugin/extension system (static / dynamic / hot-reload).
 - [`docs/codemode.md`](docs/codemode.md): codemode mode (rquickjs + wasmtime + uutils — script and commands both run inside the wasm sandbox).
+- [`docs/sdk.md`](docs/sdk.md): plugin author SDK and extension points shared by Rust plugins and sandboxed scripts.
 - [`docs/architecture-review.md`](docs/architecture-review.md): current-state review.
 - [`wasm/monty-sandbox/README.md`](wasm/monty-sandbox/README.md): wasm component interface and regeneration.
 
