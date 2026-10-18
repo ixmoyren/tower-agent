@@ -202,6 +202,9 @@ impl Editor {
                 _ => {}
             }
         }
+        if self.apply_insert_motion(&input) {
+            return EditorAction::None;
+        }
         self.textarea.input_without_shortcuts(input);
         self.clamp_menu_selection();
         EditorAction::None
@@ -260,6 +263,27 @@ impl Editor {
             (Key::Char('G'), false) => self.textarea.move_cursor(CursorMove::Bottom),
             _ => return false,
         }
+        true
+    }
+
+    /// Insert 模式下的方向键移动。
+    ///
+    /// `input_without_shortcuts` 只完整处理了普通 Left，Right/Up/Down 会被忽略；
+    /// 这里显式映射，保证对话框编辑器中的方向键与 Home/End 行为一致。
+    fn apply_insert_motion(&mut self, input: &Input) -> bool {
+        if input.ctrl || input.alt || input.shift {
+            return false;
+        }
+        let motion = match input.key {
+            Key::Left => CursorMove::Back,
+            Key::Right => CursorMove::Forward,
+            Key::Up => CursorMove::Up,
+            Key::Down => CursorMove::Down,
+            Key::Home => CursorMove::Head,
+            Key::End => CursorMove::End,
+            _ => return false,
+        };
+        self.textarea.move_cursor(motion);
         true
     }
 
@@ -602,6 +626,33 @@ mod tests {
             editor.handle(&key(KeyCode::Char(ch)));
         }
         assert_eq!(editor.text(), "one\ntwo");
+    }
+
+    #[test]
+    fn insert_mode_arrow_keys_move_the_cursor() {
+        let mut editor = Editor::new();
+        editor.handle(&key(KeyCode::Char('i')));
+        for ch in "ab".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
+        editor.handle(&key(KeyCode::Enter));
+        for ch in "cd".chars() {
+            editor.handle(&key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.textarea().cursor(), (1, 2));
+
+        editor.handle(&key(KeyCode::Up));
+        assert_eq!(editor.textarea().cursor(), (0, 2));
+        editor.handle(&key(KeyCode::Down));
+        assert_eq!(editor.textarea().cursor(), (1, 2));
+        editor.handle(&key(KeyCode::Left));
+        assert_eq!(editor.textarea().cursor(), (1, 1));
+        editor.handle(&key(KeyCode::Right));
+        assert_eq!(editor.textarea().cursor(), (1, 2));
+
+        editor.handle(&key(KeyCode::Left));
+        editor.handle(&key(KeyCode::Char('X')));
+        assert_eq!(editor.text(), "ab\ncXd");
     }
 
     #[test]

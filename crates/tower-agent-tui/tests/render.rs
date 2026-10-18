@@ -257,6 +257,31 @@ fn editor_input_routes_through_the_tui_host() {
 }
 
 #[test]
+fn insert_mode_arrows_move_through_the_tui_host() {
+    use ratatui::termina::event::{Event, KeyCode, KeyEvent, Modifiers};
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(KeyEvent::new(code, Modifiers::NONE))
+    }
+
+    let mut tui = tui(40, 14);
+    tui.handle_input(&key(KeyCode::Char('i')));
+    for ch in "abc".chars() {
+        tui.handle_input(&key(KeyCode::Char(ch)));
+    }
+
+    tui.handle_input(&key(KeyCode::Left));
+    tui.handle_input(&key(KeyCode::Left));
+    assert_eq!(tui.editor().textarea().cursor(), (0, 1));
+
+    tui.handle_input(&key(KeyCode::Right));
+    assert_eq!(tui.editor().textarea().cursor(), (0, 2));
+
+    tui.handle_input(&key(KeyCode::Char('X')));
+    assert_eq!(tui.editor().text(), "abXc");
+}
+
+#[test]
 fn entry_kinds_are_tracked_in_the_view_model() {
     let state = TuiState::new("t");
     assert_eq!(state.entries().len(), 0);
