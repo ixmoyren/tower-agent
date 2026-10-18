@@ -127,7 +127,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 | P1   | **统一能力层**：抽出 `CapabilitySurface`（exec / fs / tool_call / tool_register / state / log / ui）到新的内部 crate `tower-agent-codemode-core`（引擎无关，避免 monty ↔ codemode 依赖成环）；monty 接上 `exec`（coreutils-wasm）；JS 引擎接上 `tool_call` / `tool_register` | 两个引擎各有一组同样的能力测试                                                                       |
 | P2   | **统一提示词 + 引擎选择**：`PromptBuilder` 由 `CapabilitySurface` 生成；引擎**全局默认 + 脚本可覆盖**（Q1）：`--codemode-engine monty\|js` 定进程默认，脚本头声明语言时覆盖它                                                                                                | 同一任务在两种引擎下都能跑通；提示词随能力/引擎变化                                                  |
 | P3   | **合并 feature / CLI**：feature 已收敛为 `codemode`（共享层）+ `codemode-python` / `codemode-js`（Q2）；CLI 开关与 `mod_*` 作者工具改名仍待后续任务                                                               | 无默认只留内置工具；Python / JS 可分别启用，也可同时启用                                               |
-| P4   | **统一会话与存储**：脚本仓库（持久 / 临时）、会话根、快照、权限，一套模型两种引擎共用                                                                                                                                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
+| P4   | **统一会话与存储**：`ScriptStore` 已落 storage/Turso（作用域、语言、权限、源码、启用状态、哈希、时间戳）；codemode 作者工具接入仍待 T4.2                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
 | P5   | **接扩展点 v0**：`tower-agent-plugin-sdk` 的扩展点 = **工具注册 + `tool_call` / `tool_result` 钩子**（Q4）；codemode 把 host function 映射过去                                                                                                                               | 一个脚本能注册工具并在下一轮生效（与现在 monty 等价）+ 能在工具执行前改写/拦截、执行后改写结果       |
 
 兼容性：
@@ -179,7 +179,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 - Python codemode 脚本目前仍是 **文件**（`dirs::cache_dir()/tower-agent/codemode/scripts` 临时、`dirs::config_dir()/tower-agent/codemode/scripts` 持久），T4 再迁到 storage。
 - 无论哪条， **脚本元数据（语言、权限、启用状态、源码哈希、最近运行）都应该进 storage**——它是权限矩阵与热重载校验的依据，JSON 侧车文件只会制造两处真相。
 
-**结论 (c)**：storage 是真源（与"配置走 storage"一致、多前端零成本、LLM 写入路径天然），文件用于 **显式导出 / 导入**（满足"人类要读、要 git、要 review"）。项目级脚本走 storage 的 project 作用域（上一轮刚加的 scope 维度正好用上）；确实需要进仓库时，导出到 `.tower-agent/codemode/` 再纳入 git。
+**结论 (c)**：storage 是真源（与"配置走 storage"一致、多前端零成本、LLM 写入路径天然），文件用于 **显式导出 / 导入**（满足"人类要读、要 git、要 review"）。`ScriptStore` 已实现 `(scope_kind, scope_id, name)` 主键与 project/user 隔离；确实需要进仓库时，导出到 `.tower-agent/codemode/` 再纳入 git。
 
 落地形状：
 

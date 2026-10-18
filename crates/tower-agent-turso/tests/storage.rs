@@ -1,4 +1,4 @@
-//! Turso 存储后端的端到端测试：五种子接口 + 中文全文检索 + 重开库持久化。
+//! Turso 存储后端的端到端测试：六种子接口 + 中文全文检索 + 重开库持久化。
 //!
 //! 写入走后台队列、不阻塞调用方，因此「写后读」前要 `flush()`。
 
@@ -7,7 +7,8 @@ use tower_agent_core::AgentMessage;
 use tower_agent_provider::{Message, UserContent, UserMessage};
 use tower_agent_storage::{
     ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
-    ProviderStore, SessionRecord, SessionStore, effective_config, resolve_config,
+    ProviderStore, ScriptLanguage, ScriptPermissions, ScriptRecord, ScriptStore, SessionRecord,
+    SessionStore, effective_config, resolve_config,
 };
 use tower_agent_turso::TursoStorage;
 
@@ -18,6 +19,22 @@ fn memory(id: &str, content: &str) -> MemoryRecord {
         tags: vec!["test".to_owned()],
         scope: Some("global".to_owned()),
         created_at: 1,
+    }
+}
+
+fn script(id: &str, name: &str, scope: ConfigScope, source: &str, updated_at: i64) -> ScriptRecord {
+    ScriptRecord {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        language: ScriptLanguage::Monty,
+        scope,
+        source: source.to_owned(),
+        enabled: true,
+        permissions: ScriptPermissions::allow_all(),
+        metadata: json!({ "origin": "test" }),
+        created_at: 1,
+        updated_at,
+        source_hash: format!("hash-{id}"),
     }
 }
 
@@ -57,6 +74,110 @@ async fn config_round_trips_json() {
     storage.delete_config(&user, "model").await.unwrap();
     storage.flush().await.unwrap();
     assert_eq!(storage.get_config(&user, "model").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn scripts_round_trip_update_and_delete() {
+    let storage = TursoStorage::in_memory().await.expect("open in-memory");
+    let scope = ConfigScope::User;
+    let original = script("s1", "reader", scope.clone(), "value = 1\n", 10);
+
+    storage.upsert_script(original.clone()).await.unwrap();
+    storage.flush().await.unwrap();
+    assert_eq!(
+        storage.get_script(&scope, "reader").await.unwrap(),
+        Some(original.clone())
+    );
+    assert_eq!(
+        storage.list_scripts(&scope).await.unwrap(),
+        vec![original.clone()]
+    );
+
+    let updated = script("s1", "reader", scope.clone(), "value = 2\n", 20);
+    storage.upsert_script(updated.clone()).await.unwrap();
+    storage.flush().await.unwrap();
+    assert_eq!(
+        storage.get_script(&scope, "reader").await.unwrap(),
+        Some(updated)
+    );
+
+    storage.delete_script(&scope, "reader").await.unwrap();
+    storage.flush().await.unwrap();
+    assert_eq!(storage.get_script(&scope, "reader").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn scripts_are_project_isolated_and_sorted_by_updated_at() {
+    let storage = TursoStorage::in_memory().await.expect("open in-memory");
+    let user = ConfigScope::User;
+    let project_a = ConfigScope::project("/work/a");
+    let project_b = ConfigScope::project("/work/b");
+
+    storage
+        .upsert_script(script("u", "shared", user.clone(), "user source\n", 30))
+        .await
+        .unwrap();
+    storage
+        .upsert_script(script(
+            "pa-old",
+            "alpha",
+            project_a.clone(),
+            "alpha source\n",
+            10,
+        ))
+        .await
+        .unwrap();
+    storage
+        .upsert_script(script(
+            "pa-new",
+            "zeta",
+            project_a.clone(),
+            "zeta source\n",
+            40,
+        ))
+        .await
+        .unwrap();
+    storage
+        .upsert_script(script(
+            "pa-shared",
+            "shared",
+            project_a.clone(),
+            "project source\n",
+            20,
+        ))
+        .await
+        .unwrap();
+    storage.flush().await.unwrap();
+
+    assert_eq!(
+        storage
+            .get_script(&user, "shared")
+            .await
+            .unwrap()
+            .expect("user script")
+            .source,
+        "user source\n"
+    );
+    assert_eq!(
+        storage
+            .get_script(&project_a, "shared")
+            .await
+            .unwrap()
+            .expect("project script")
+            .source,
+        "project source\n"
+    );
+    assert_eq!(
+        storage
+            .list_scripts(&project_a)
+            .await
+            .unwrap()
+            .iter()
+            .map(|record| record.name.as_str())
+            .collect::<Vec<_>>(),
+        ["zeta", "shared", "alpha"]
+    );
+    assert!(storage.list_scripts(&project_b).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -278,6 +399,16 @@ async fn storage_persists_across_reopen() {
             .remember(memory("m1", "记得这次中文检索的结论"))
             .await
             .unwrap();
+        storage
+            .upsert_script(script(
+                "persisted",
+                "saved",
+                ConfigScope::User,
+                "value = 3\n",
+                50,
+            ))
+            .await
+            .unwrap();
         // 退出前排空队列，确保落盘。
         storage.flush().await.unwrap();
     }
@@ -295,4 +426,12 @@ async fn storage_persists_across_reopen() {
         hits.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         ["m1"]
     );
+    let saved = storage
+        .get_script(&ConfigScope::User, "saved")
+        .await
+        .unwrap()
+        .expect("persisted script");
+    assert_eq!(saved.source, "value = 3\n");
+    assert_eq!(saved.language, ScriptLanguage::Monty);
+    assert!(saved.enabled);
 }

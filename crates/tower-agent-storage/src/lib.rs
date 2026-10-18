@@ -1,11 +1,11 @@
-//! 存储抽象：把「配置 / provider 凭据 / 会话 / 原始历史 / 记忆」抽成宿主无关的接口。
+//! 存储抽象：把「配置 / provider 凭据 / 会话 / 历史 / 记忆 / 脚本」抽成宿主无关的接口。
 //!
 //! 这是存储插件的**公共基础**：`tower-agent-turso` 这类静态插件实现这些 trait；
 //! 未来同名动态插件 / JIT 插件只要实现同一套接口就能顶替它——覆盖走插件注册表的同名规则，
 //! 因此 [`StoragePlugin`] **刻意不标 `protected`**：默认实现必须可被替换。
 //!
 //! 接口全部用 [`BoxFuture`] 表达 async（对象安全），宿主拿 `Arc<dyn Storage>` 即可使用；
-//! 具体后端（Turso / 未来别的）只负责实现这五个子接口。
+//! 具体后端（Turso / 未来别的）只负责实现这六个子接口。
 //!
 //! 各接口的边界：
 //!
@@ -26,6 +26,8 @@ use tower_agent_core::AgentMessage;
 use tower_agent_plugins::{
     CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
 };
+
+pub use tower_agent_codemode_core::{ScriptLanguage, ScriptPermissions};
 
 /// 存储操作的结果。
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -235,6 +237,53 @@ pub trait SessionStore: Send + Sync + 'static {
     fn delete_session(&self, id: &str) -> StorageFuture<'_, ()>;
 }
 
+/// A persisted codemode script.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptRecord {
+    /// Stable script id.
+    pub id: String,
+    /// Script name, unique inside its scope.
+    pub name: String,
+    /// Interpreter selected for the script.
+    pub language: ScriptLanguage,
+    /// User or project scope.
+    pub scope: ConfigScope,
+    /// Script source.
+    pub source: String,
+    /// Whether the script should be loaded at startup.
+    pub enabled: bool,
+    /// Capability permissions persisted with the script.
+    pub permissions: ScriptPermissions,
+    /// Application-specific metadata.
+    #[serde(default)]
+    pub metadata: Value,
+    /// Creation time (Unix milliseconds).
+    pub created_at: i64,
+    /// Last update time (Unix milliseconds).
+    pub updated_at: i64,
+    /// Hash of the source used for change detection.
+    pub source_hash: String,
+}
+
+/// Script storage: codemode scripts keyed by `(scope, name)`.
+pub trait ScriptStore: Send + Sync + 'static {
+    /// Insert or replace a script in its scope.
+    fn upsert_script(&self, script: ScriptRecord) -> StorageFuture<'_, ()>;
+
+    /// Read a script by scope and name.
+    fn get_script(
+        &self,
+        scope: &ConfigScope,
+        name: &str,
+    ) -> StorageFuture<'_, Option<ScriptRecord>>;
+
+    /// List scripts in one scope, newest `updated_at` first.
+    fn list_scripts(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<ScriptRecord>>;
+
+    /// Delete a script by scope and name.
+    fn delete_script(&self, scope: &ConfigScope, name: &str) -> StorageFuture<'_, ()>;
+}
+
 /// 原始对话历史：会话 transcript 的追加 / 读回 / 替换 / 清空。
 pub trait HistoryStore: Send + Sync + 'static {
     /// 追加一条消息。
@@ -285,13 +334,16 @@ pub trait MemoryStore: Send + Sync + 'static {
     fn forget(&self, id: &str) -> StorageFuture<'_, ()>;
 }
 
-/// 一个完整存储后端 = 上面五个子接口。
+/// 一个完整存储后端 = 上面六个子接口。
 ///
-/// 宿主用 `Arc<dyn Storage>` 拿到一个后端；具体实现（Turso / 未来别的）只需实现这五个。
-pub trait Storage: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore {}
+/// 宿主用 `Arc<dyn Storage>` 拿到一个后端；具体实现（Turso / 未来别的）只需实现这六个。
+pub trait Storage:
+    ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
+{
+}
 
 impl<T> Storage for T where
-    T: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore
+    T: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
 {
 }
 

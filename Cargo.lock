@@ -5405,6 +5405,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tower-agent-codemode-core",
  "tower-agent-core",
  "tower-agent-plugins",
 ]

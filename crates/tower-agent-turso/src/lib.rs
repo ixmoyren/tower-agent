@@ -1,7 +1,7 @@
 //! tower-agent 的**默认存储后端**：内嵌 [Turso]（Rust 重写的 SQLite 兼容引擎）。
 //!
-//! 实现 [`tower_agent_storage`] 的五个子接口（配置 / 凭据 / 会话 / 历史 /
-//! 记忆），并把它包成可被同名动态插件顶替的静态插件。
+//! 实现 [`tower_agent_storage`] 的六个子接口（配置 / 凭据 / 会话 / 历史 /
+//! 记忆 / 脚本），并把它包成可被同名动态插件顶替的静态插件。
 //!
 //! # 为什么不是 SurrealDB
 //!
@@ -51,8 +51,8 @@ use tokio::sync::{mpsc, oneshot};
 use tower_agent_core::AgentMessage;
 use tower_agent_storage::{
     ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
-    ProviderStore, SessionRecord, SessionStore, StorageError, StorageFuture, StoragePlugin,
-    StorageResult,
+    ProviderStore, ScriptLanguage, ScriptRecord, ScriptStore, SessionRecord, SessionStore,
+    StorageError, StorageFuture, StoragePlugin, StorageResult,
 };
 use turso::{Connection, Row, Value as TursoValue};
 
@@ -93,6 +93,23 @@ CREATE TABLE IF NOT EXISTS message (\
     payload    TEXT NOT NULL\
 );\
 CREATE INDEX IF NOT EXISTS message_session ON message (session_id, id);\
+CREATE TABLE IF NOT EXISTS script (\
+    id          TEXT NOT NULL,\
+    scope_kind  TEXT NOT NULL,\
+    scope_id    TEXT NOT NULL,\
+    name        TEXT NOT NULL,\
+    language    TEXT NOT NULL,\
+    source      TEXT NOT NULL,\
+    enabled     INTEGER NOT NULL,\
+    permissions TEXT NOT NULL,\
+    metadata    TEXT NOT NULL,\
+    created_at  INTEGER NOT NULL,\
+    updated_at  INTEGER NOT NULL,\
+    source_hash TEXT NOT NULL,\
+    PRIMARY KEY (scope_kind, scope_id, name)\
+);\
+CREATE INDEX IF NOT EXISTS script_scope_updated \
+    ON script (scope_kind, scope_id, updated_at DESC, name ASC);\
 CREATE TABLE IF NOT EXISTS memory (\
     id         TEXT PRIMARY KEY,\
     content    TEXT NOT NULL,\
@@ -139,6 +156,20 @@ const SQL_GET_SESSION: &str = "SELECT id, title, model, created_at, updated_at, 
 const SQL_LIST_SESSIONS: &str = "SELECT id, title, model, created_at, updated_at, metadata \
      FROM session ORDER BY updated_at DESC, id DESC";
 const SQL_DELETE_SESSION: &str = "DELETE FROM session WHERE id = ?1";
+
+const SQL_UPSERT_SCRIPT: &str = "INSERT OR REPLACE INTO script \
+     (id, scope_kind, scope_id, name, language, source, enabled, permissions, metadata, \
+      created_at, updated_at, source_hash) \
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
+const SQL_GET_SCRIPT: &str = "SELECT id, scope_kind, scope_id, name, language, source, enabled, \
+     permissions, metadata, created_at, updated_at, source_hash \
+     FROM script WHERE scope_kind = ?1 AND scope_id = ?2 AND name = ?3";
+const SQL_LIST_SCRIPTS: &str = "SELECT id, scope_kind, scope_id, name, language, source, enabled, \
+     permissions, metadata, created_at, updated_at, source_hash \
+     FROM script WHERE scope_kind = ?1 AND scope_id = ?2 \
+     ORDER BY updated_at DESC, name ASC";
+const SQL_DELETE_SCRIPT: &str =
+    "DELETE FROM script WHERE scope_kind = ?1 AND scope_id = ?2 AND name = ?3";
 
 const SQL_APPEND_MESSAGE: &str = "INSERT INTO message (session_id, payload) VALUES (?1, ?2)";
 const SQL_LOAD_MESSAGES: &str = "SELECT payload FROM message WHERE session_id = ?1 ORDER BY id ASC";
@@ -505,6 +536,88 @@ impl SessionStore for TursoStorage {
     }
 }
 
+impl ScriptStore for TursoStorage {
+    fn upsert_script(&self, script: ScriptRecord) -> StorageFuture<'_, ()> {
+        let (scope_kind, scope_id) = script.scope.storage_parts();
+        let scope_kind = scope_kind.to_owned();
+        let scope_id = scope_id.to_owned();
+        Box::pin(async move {
+            let permissions = serialize(&script.permissions)?;
+            let metadata = serialize(&script.metadata)?;
+            self.enqueue(WriteOp::Statement {
+                sql: SQL_UPSERT_SCRIPT,
+                params: vec![
+                    text(script.id),
+                    text(scope_kind),
+                    text(scope_id),
+                    text(script.name),
+                    text(script.language.as_str()),
+                    text(script.source),
+                    integer(i64::from(script.enabled)),
+                    text(permissions),
+                    text(metadata),
+                    integer(script.created_at),
+                    integer(script.updated_at),
+                    text(script.source_hash),
+                ],
+            })
+        })
+    }
+
+    fn get_script(
+        &self,
+        scope: &ConfigScope,
+        name: &str,
+    ) -> StorageFuture<'_, Option<ScriptRecord>> {
+        let (kind, id) = scope.storage_parts();
+        let kind = kind.to_owned();
+        let id = id.to_owned();
+        let name = name.to_owned();
+        Box::pin(async move {
+            let mut rows = self
+                .read
+                .query(SQL_GET_SCRIPT, vec![text(kind), text(id), text(name)])
+                .await
+                .map_err(backend)?;
+            let Some(row) = rows.next().await.map_err(backend)? else {
+                return Ok(None);
+            };
+            Ok(Some(script_from_row(&row)?))
+        })
+    }
+
+    fn list_scripts(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<ScriptRecord>> {
+        let (kind, id) = scope.storage_parts();
+        let kind = kind.to_owned();
+        let id = id.to_owned();
+        Box::pin(async move {
+            let mut rows = self
+                .read
+                .query(SQL_LIST_SCRIPTS, vec![text(kind), text(id)])
+                .await
+                .map_err(backend)?;
+            let mut scripts = Vec::new();
+            while let Some(row) = rows.next().await.map_err(backend)? {
+                scripts.push(script_from_row(&row)?);
+            }
+            Ok(scripts)
+        })
+    }
+
+    fn delete_script(&self, scope: &ConfigScope, name: &str) -> StorageFuture<'_, ()> {
+        let (kind, id) = scope.storage_parts();
+        let kind = kind.to_owned();
+        let id = id.to_owned();
+        let name = name.to_owned();
+        Box::pin(async move {
+            self.enqueue(WriteOp::Statement {
+                sql: SQL_DELETE_SCRIPT,
+                params: vec![text(kind), text(id), text(name)],
+            })
+        })
+    }
+}
+
 impl HistoryStore for TursoStorage {
     fn append_message(&self, session_id: &str, message: AgentMessage) -> StorageFuture<'_, ()> {
         let session_id = session_id.to_owned();
@@ -718,6 +831,47 @@ fn session_from_row(row: &Row) -> StorageResult<SessionRecord> {
         created_at: column_i64(row, 3)?,
         updated_at: column_i64(row, 4)?,
         metadata,
+    })
+}
+
+/// `script` 表一行 → 脚本记录。
+fn script_from_row(row: &Row) -> StorageResult<ScriptRecord> {
+    let scope_kind = column_text(row, 1)?;
+    let scope_id = column_text(row, 2)?;
+    let scope = match (scope_kind.as_str(), scope_id.as_str()) {
+        ("user", "") => ConfigScope::User,
+        ("project", id) => ConfigScope::Project(id.to_owned()),
+        _ => {
+            return Err(StorageError::Serialization(format!(
+                "invalid script scope ({scope_kind}, {scope_id})"
+            )));
+        }
+    };
+    let language_name = column_text(row, 4)?;
+    let language = ScriptLanguage::parse(&language_name).ok_or_else(|| {
+        StorageError::Serialization(format!("unknown script language `{language_name}`"))
+    })?;
+    let enabled = match column_i64(row, 6)? {
+        0 => false,
+        1 => true,
+        other => {
+            return Err(StorageError::Serialization(format!(
+                "invalid script enabled flag: {other}"
+            )));
+        }
+    };
+    Ok(ScriptRecord {
+        id: column_text(row, 0)?,
+        name: column_text(row, 3)?,
+        language,
+        scope,
+        source: column_text(row, 5)?,
+        enabled,
+        permissions: deserialize(&column_text(row, 7)?)?,
+        metadata: deserialize(&column_text(row, 8)?)?,
+        created_at: column_i64(row, 9)?,
+        updated_at: column_i64(row, 10)?,
+        source_hash: column_text(row, 11)?,
     })
 }
 
