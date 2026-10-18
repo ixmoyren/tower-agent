@@ -7,7 +7,8 @@
 //! - [`runtime`]：有状态运行时（`Agent`、编排循环、事件总线）；
 //! - [`provider`]：provider Services 与 Models 路由；
 //! - [`tools`]：内置工具；
-//! - [`plugins`]：插件宿主（静态 / 动态 / 热重载）；`plugin-sdk` feature 打开作者 SDK。
+//! - [`plugins`]：插件宿主（静态 / 动态 / 热重载）；`plugin-sdk` feature 打开作者 SDK；
+//!   `ui` feature 打开前端无关的 `tower-agent-ui` 会话插件。
 //!
 //! tower-native：`runtime::Agent` 实现 `core::AgentServiceExt`/`Service<AgentRequest>`，
 //! 可 `.layer()` 组合或 `.boxed_agent()` 后交给 axum/tonic 等宿主。
@@ -28,10 +29,10 @@ pub use tower_agent_monty as monty;
 pub use tower_agent_plugin_sdk as plugin_sdk;
 #[cfg(feature = "protocol")]
 pub use tower_agent_protocol as protocol;
-#[cfg(feature = "tui")]
-pub use tower_agent_tui as tui;
 #[cfg(feature = "storage-turso")]
 pub use tower_agent_turso as turso;
+#[cfg(feature = "ui")]
+pub use tower_agent_ui as ui;
 
 pub use tower_agent_core::{
     AfterToolResultLayer, AgentError, AgentEvent, AgentEventStream, AgentMessage, AgentRequest,

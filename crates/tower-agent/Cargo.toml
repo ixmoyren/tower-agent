@@ -16,8 +16,8 @@ default = [
     "codemode-js",
     "storage-turso",
 ]
-# 可选前端/协议/插件 SDK。
-tui = ["dep:tower-agent-tui"]
+# 可选的前端无关 UI 会话插件 / 协议 / 插件 SDK。
+ui = ["dep:tower-agent-ui"]
 protocol = ["dep:tower-agent-protocol"]
 plugin-sdk = ["dep:tower-agent-plugin-sdk"]
 # 默认存储后端：内嵌 Turso（持久化 config / provider 凭据 / 会话 / 历史 / 记忆）。
@@ -40,10 +40,10 @@ tower-agent-plugins = { workspace = true }
 tower-agent-wasmtime = { workspace = true, optional = true }
 tower-agent-codemode = { workspace = true, optional = true }
 tower-agent-monty = { workspace = true, optional = true }
-tower-agent-tui = { workspace = true, optional = true }
 tower-agent-protocol = { workspace = true, optional = true }
 tower-agent-plugin-sdk = { workspace = true, optional = true }
 tower-agent-turso = { workspace = true, optional = true }
+tower-agent-ui = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures-util.workspace = true

@@ -147,7 +147,7 @@ context.register_tool(tool);
         ▼               ▼                ▼              ▼
    工具集/路由   钩子管线(Layer)      UI 贡献       命令/flag 表
         │               │                │              │
-        └────── tower-agent-runtime / core / tui ───────┘
+        └──── tower-agent-runtime / core / ui / tui ────┘
 ```
 
 要点：

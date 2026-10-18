@@ -21,7 +21,6 @@ tower = { workspace = true }
 [features]
 default = ["static"]
 static = []
-# 动态插件（stabby cdylib + libloading）开关；热重载插件见 `tower-agent-monty`。
 dynamic = ["dep:stabby", "dep:libloading", "dep:rkyv", "dep:serde_json"]
 
 [dev-dependencies]

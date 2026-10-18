@@ -189,7 +189,8 @@ ModelsRouterService
 protocol/   // 帧、CBOR 编解码、RPC envelope（对应 pi packages/protocol）
 ai/         // provider Service、Models 路由、认证/重试/超时 Layer；统一错误/PiError/BoxError/公共 Request/Response（对应 pi packages/ai）
 agent/      // Agent 编排、工具 Service、事件流（对应 pi packages/agent）
-tui/        // 终端 UI（对应 pi packages/tui，不使用 tower）
+ui/         // 前端无关 UI 会话后端（事件归约 / 命令 / 可序列化视图）
+tui/        // 终端渲染（对应 pi packages/tui，不使用 tower）
 tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与扩展（对应 coding-agent）
 ```
 
@@ -206,7 +207,7 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
   - **溢出 / 长度恢复**：provider 报上下文溢出（建立请求失败，或流内 `error` 文案命中溢出关键词），或响应被长度截断且没有工具调用时，会**压缩一次再重试当前请求**（每个请求只试一次）。终态事件（`MessageEnd`）由外层在确定不重试后才发出，因此被丢弃的那次尝试不会进 transcript、也不会渲染成条目。
   - **压缩钩子**：`CompactionHook`（`before` / `after` / `failed`）对应 pi 的 `session_before_compact` / `session_compact` / `session_compact_failed`；`before` 可取消压缩或用自定义摘要跳过内置摘要调用，`after` / `failed` 供遥测。`CompactionReason` 区分 `Threshold` / `Manual` / `Overflow` / `Length`。
   - **可持久化 / 可恢复**：`Compaction` 是 serde 可序列化的（`summary` / `first_kept` / `tokens_before`），`Compactor::restore` 可把已持久化的压缩装回去，续接会话时不必重新摘要。
-- `tower_agent_tui::UiPlugin` 是 UI 扩展点（状态栏片段 / overlay / 工具结果定制渲染），后端仍固定用 termina（不引入 crossterm）。
+- `tower_agent_ui::AgentUi` 是前端无关的 UI 会话后端（事件归约、斜杠命令、submit/handled/quit 动作），GUI 与 axum 可直接消费；`tower_agent_tui::UiPlugin` 只保留终端渲染扩展点（状态栏片段 / overlay / 工具结果定制渲染）。
 - tower-agent-cli 侧：`cli` crate 重命名为 `tower-agent-cli`，其余 crate 名称与职责不变。
 
 `ai` 已落地的 provider 层：
@@ -245,11 +246,12 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 - `find` 不调用外部 `fd`，改用 `ignore` + `globset` 在进程内实现相同语义（`*` 不跨分隔符、无 `/` 的模式按文件名匹配、`**/` 前缀规则、尊重 `.gitignore` 且含隐藏文件、非 git 仓库内也应用 `.gitignore`）。
 - `grep` 不调用外部 `rg`，改用 `regex` + `ignore` 实现相同输出形状与截断/提示文案，并跳过二进制文件。
 
-`tui` 已落地的内容（`crates/tower-agent-tui`，基于 `ratatui` 0.30）：
+`ui` / `tui` 已落地的内容（`crates/tower-agent-ui` + `crates/tower-agent-tui`）：
 
-- `model::TuiState` 是唯一状态来源，由 `AgentEvent` 归约（`MessageUpdate` 驱动流式文本，`ToolExecutionStart/Update/End` 驱动工具条目原地更新，`TurnEnd` 记录错误）。
-- `render` 是纯函数：`&TuiState` → 缓冲区，三段布局（状态栏 / transcript / 提示栏），按显示宽度折行（宽字符按 2 列计算）并从底部对齐。
-- `app::Tui<B: Backend>` 把状态、输入编辑器与 ratatui 后端绑定；差分渲染由 `Terminal::draw` 承担（只写变化的单元格）。后端是泛型，因此生产用 termina、测试用 `TestBackend` 走同一套渲染代码。
+- `tower_agent_ui::UiModel` 是唯一状态来源，由 `AgentEvent` 归约（`MessageUpdate` 驱动流式文本，`ToolExecutionStart/Update/End` 驱动工具条目原地更新，`TurnEnd` 记录错误）；快照可序列化为 JSON。
+- `tower_agent_ui::AgentUi` 把模型、斜杠命令与宿主控制协议封装成静态插件，并输出 `UiAction::{Submit,Handled,Quit}`；GUI / axum 不依赖 ratatui 即可复用。
+- `render` 是纯函数：`&UiModel` → 缓冲区，三段布局（状态栏 / transcript / 提示栏），按显示宽度折行（宽字符按 2 列计算）并从底部对齐。
+- `app::Tui<B: Backend>` 把 `AgentUi`、输入编辑器与 ratatui 后端绑定；差分渲染由 `Terminal::draw` 承担（只写变化的单元格）。后端是泛型，因此生产用 termina、测试用 `TestBackend` 走同一套渲染代码。
 - `backend` 模块是 **唯一**与具体后端耦合的地方：`init_terminal` / `restore_terminal` / `run_tui` / `run_agent_tui` / 全局按键。当前后端是 **termina**（`ratatui::backend::TerminaBackend`，由 manifest 的 `termina` feature 引入）；换 crossterm/termion/termwiz 只改这一个文件。
 - `editor` 模块是输入编辑器： **`ratatui-textarea`**（官方 Ratatui 开发者维护的 fork，git 引入、`termina` 输入适配、`default-features = false`）+ 一层 vim 键位。 **默认 vim 普通模式**，五种模式：Normal / Insert / **Visual**（`v` 逐字符、`V` 整行；`y` `d` `c` `p` 作用在选区上）/ **Replace**（`r` 替换一次、`R` 覆盖输入）/ Operator（`d`/`y`/`c` + 动作，含 `dd`/`yy`/`dw`）。Normal 键位：`i a A I o O`、`Esc`、`h j k l`/方向键、`w e b`、`0 ^ $`、`gg G`、`x D C`、`p u Ctrl+r`、`v V r R`。 **默认显示行号**（`set_line_number_style`
   ），边框标题显示当前模式。Normal 模式 `Enter` 提交、`q` 退出；Insert 模式 `Enter` 换行。
@@ -263,12 +265,12 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 - `provider`：把 `--provider` / `--model` 映射到 `ai` 的真实 provider 栈——`ProviderKind`（`anthropic` / `openai` / `openai-responses` / `google`）给出 `(provider, api)`、凭据环境变量与默认模型 id；`build` 读环境变量并用 `Models` 注册路由 + 模型目录，真实 provider 用 `RetryTransport → ReqwestTransport` 加 `TimeoutService`（建立请求超时）。缺凭据返回 `MissingApiKey`，未知 provider 返回 `Unknown`（都带可读文案）。没给 `--provider` 时 `default_kind_from_env` 按 `anthropic → openai → google` 挑第一个有凭据的，都没有就报错。
 
 - `store`：CLI 配置的持久化层，**配置一律经 `tower-agent-storage`**（默认后端 Turso，`~/.local/share/tower-agent/storage.db`，`TOWER_AGENT_STORAGE` 可覆盖路径）——provider 凭据存进 `ProviderStore`（对应 pi `~/.pi/agent/auth.json`），`defaultProvider` / `defaultModel` / `defaultThinkingLevel` 存进 `ConfigStore`（对应 pi `~/.pi/agent/settings.json`）。`ConfigStore` 按**作用域**分区（`ConfigScope::User` / `ConfigScope::Project(<项目 id>)`，项目级覆盖用户级，`resolve_config` / `effective_config` 是唯一实现）；作用是 storage 接口的职责，不是某个终端或某个后端的私事，axum / webui 走同一套接口。取值优先级对齐 pi：命令行（`--provider` / `--api-key` / `--model` / `--thinking`）> 环境变量 > 存储；启动时读出快照，运行期由 `/login` `/model` `/thinking` 写回**用户级**（fire-and-forget，退出前 `flush` 落盘）。查看 / 修改配置由 `--config-get` / `--config-set` / `--config-unset` / `--config-list` + `--config-scope <user|project>` 提供（写指令默认 user 作用域）。存储打不开时只警告，CLI 退回纯环境变量模式。
-- `session::Session`：持有 `tower_agent_runtime::Agent` + 七个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它同时实现 `tower_agent_tui::CommandHost`，把会话能力交给斜杠命令。
+- `session::Session`：持有 `tower_agent_runtime::Agent` + 七个内置工具 + 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它实现 `tower_agent_ui::CommandHost`，把会话能力交给前端无关的命令层。
 - **transcript 持久化**：会话按**项目（工作目录）**归属，元数据写进 `SessionStore` 的 `session.metadata.cwd`、消息逐条写进 `HistoryStore`（都在同一份 storage 里）。`store::Transcript` 在每轮结束时把「还没落盘的尾巴」追加进去（`sync` 幂等，成功 / 取消 / 失败都落盘），标题取第一条用户消息。CLI 参数对齐 pi：默认**自动保存**新会话，`--continue` 续接当前目录最近一次会话，`--session <id>` 续接指定会话，`--no-session` 关闭保存；`/new` 换一个新会话 id。续接时把落盘的消息作为 `AgentInitialState.messages` 重新喂回运行时的 agent 循环。
 - `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、 **流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。以 `/` 开头的输入不进 agent，而是交给 `tui` 的斜杠命令层。
 - `faux`：确定性的离线 provider， **测试替身**——实现放在 `tower_agent_provider::provider::faux`（`test-util` feature，`tower-agent-cli` 以 dev-dependency 引入），`ProviderKind::Faux` 与 `--provider faux` 都只存在于测试构建里，发布的二进制不含它；不联网也能端到端跑通会话，按固定规则产生事件流（工具结果 → 总结文本；`!<工具> <JSON>` → 一次工具调用；其他 → 回显）。
 - 二进制 `tower-agent-cli`： **不带参数且 stdin/stdout 都是终端时直接进 TUI**（提示词可选，TUI 里用 `/` 命令驱动）；`--print` 或任一路被重定向时走一次性纯文本模式（提示词来自位置参数或 stdin），`--list-tools` 打印八个工具后退屏；`--provider` / `--model` / `--thinking` / `-t` 系列选择 provider、模型与工具。这与 pi「终端交互默认进 TUI、重定向默认 print」一致。
-- TUI 斜杠命令：`tower_agent_tui::command` 的表逐条对齐 pi `BUILTIN_SLASH_COMMANDS`（24 条，名称与说明一致），编辑器里 `/` 打开菜单（前缀优先过滤、`Tab` 补全、`↑/↓` 选择、`Enter` 执行、`Esc` 关闭）。已实现 `/model`、`/thinking`、`/session`（含会话 id）、`/hotkeys`、`/new`（开新会话记录）、`/quit`、`/login`（凭据与默认项写回 `store`）、`/compact`（请求压缩，排到下一个模型请求前）；其余命令（`/export`、`/resume`…）依赖尚未移植的导出 / 会话选择器能力，执行时给出明确的“尚未移植”提示。
+- 斜杠命令：`tower-agent-ui` 的表逐条对齐 pi `BUILTIN_SLASH_COMMANDS`（24 条，名称与说明一致），TUI 编辑器里 `/` 打开菜单（前缀优先过滤、`Tab` 补全、`↑/↓` 选择、`Enter` 执行、`Esc` 关闭）。已实现 `/model`、`/thinking`、`/session`（含会话 id）、`/hotkeys`、`/new`（开新会话记录）、`/quit`、`/login`（凭据与默认项写回 `store`）、`/compact`（请求压缩，排到下一个模型请求前）；其余命令（`/export`、`/resume`…）依赖尚未移植的导出 / 会话选择器能力，执行时给出明确的“尚未移植”提示。
 - **上下文压缩**：核心实现（见上，`tower_agent_runtime::Compactor`）由 agent 循环自动执行；CLI 只是从 storage 读 `compaction.enabled` / `compaction.reserveTokens` / `compaction.keepRecentTokens`（user ⊕ project 有效值）构造压缩器。压缩状态随会话落进 `session.metadata.compaction`，`--continue` / `--session` 续接时用 `Compactor::restore` 装回去，不会重新摘要。原始 transcript 不改写，导出 / 续接仍能看到完整历史。
 - 尚未移植：扩展（extensions/MCP）。TUI 模式下输入区即 vim 编辑器，提交的文本经 `Session::submit` 进入 agent。
 - 不使用 tower：TUI 订阅事件流，不是"请求 → 响应"边界（第 4.1 节）。
@@ -334,7 +336,7 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 4. 再按 `agent` → `tools` → `tui` → `tower-agent-cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
     1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/tower-agent-runtime`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
     2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成，落在 `crates/tower-agent-tools`（`truncate` / `path_utils` / `queue` / `edit_diff` / `shell` / `read` / `write` / `edit` / `ls` / `find` / `grep`；`shell` 内嵌 brush（`brush-core` + `brush-builtins`）在进程内解释 bash 兼容语法，不再依赖外部 shell 可执行文件），共 36 个单元测试与 15 个端到端测试（其中一条把内置工具注册进 `Agent` 跑通完整 agent 循环）。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿（90 个测试）。
-    3. ~~`tui`：`tui` crate 的差分渲染，订阅 `AgentEvent` 流。~~ 已完成，落在 `crates/tower-agent-tui`（`model` / `render` / `app` / `editor` / `backend`）：`ratatui` 0.30 + **termina** 后端渲染，`TuiState` 归约 agent 事件， **`ratatui-textarea`（git 引入）+ vim 键位的输入编辑器（默认普通模式、默认行号）**，`Tui<B: Backend>` 泛型宿主，`run_tui` / `run_agent_tui` 事件循环（提交经 mpsc 交给调用方）。 **纯库、无二进制**（与 pi `packages/tui` 一致）；可运行的 TUI 入口在 `tower-agent-cli`。测试：25 个 lib 单元（含 12 个编辑器用例）+ 7 个
+    3. ~~`ui` / `tui`：前端无关 UI 后端 + 差分终端渲染。~~ 已完成：`tower-agent-ui` 负责 `AgentEvent` 归约、斜杠命令、可序列化 `UiModel` 与静态插件；`tower-agent-tui` 负责 `ratatui` 0.30 + **termina** 页面、`ratatui-textarea`（git 引入）+ vim 键位编辑器、`Tui<B: Backend>` 宿主与 `run_tui` / `run_agent_tui` 事件循环。 **两份 crate 都是纯库、无二进制**；可运行的 TUI 入口在 `tower-agent-cli`。测试：UI 16 个单元测试；TUI 39 个 lib 单元 + 9 个
        `TestBackend`
        端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。
     4. `tower-agent-cli`：`tower-agent-cli` crate 的会话入口与扩展。

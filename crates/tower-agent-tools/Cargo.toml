@@ -11,7 +11,6 @@ workspace = true
 [dependencies]
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
-# 只被本 crate 使用：放在这里而不是 workspace。
 base64 = "0.23"
 dirs = { workspace = true }
 futures-util = { workspace = true }

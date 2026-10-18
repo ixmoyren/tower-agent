@@ -14,15 +14,12 @@ workspace = true
 
 [features]
 default = ["codemode", "codemode-python", "codemode-js"]
-# codemode 的共享入口，不引入具体解释器。
 codemode = ["dep:tower-agent", "tower-agent/codemode"]
-# Python（monty）解释器。
 codemode-python = [
     "codemode",
     "tower-agent/codemode-python",
     "dep:tower-agent-monty",
 ]
-# JavaScript（rquickjs）解释器。
 codemode-js = [
     "codemode",
     "tower-agent/codemode-js",
@@ -47,6 +44,7 @@ tower = { workspace = true }
 tower-agent-storage.workspace = true
 tower-agent-turso.workspace = true
 tower-agent-codemode-core.workspace = true
+tower-agent-ui.workspace = true
 
 [dev-dependencies]
 tower-agent-provider = { workspace = true, features = ["test-util"] }

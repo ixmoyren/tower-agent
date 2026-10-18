@@ -91,7 +91,7 @@
 > **codemode Python 脚本**：`ModManager` 管理一组 monty 脚本，对 LLM 暴露 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` 作者工具。脚本可：
 > 1. **调宿主能力**：`exec(name, args, opts)` / `tool_call(name, args)` / `log` / `state_get` / `state_set`；
 > 2. **提供工具**：安装期 `tool_register(name, function, description, parameters)` 把 Python 函数包成 `ModTool`，运行时动态注册进 `HostApi` 与 agent 工具集（`tool_unregister` 注销）；
-> 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据。
+> 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据；agent 事件归约与命令协议统一由 `tower-agent-ui` 提供。
 >
 > 沙箱侧还提供： **实例池**（`SandboxPool`，一次运行借出、跑完归还）+ **预热**（`ModManager::warmup` / `spawn_warmup` 后台编译组件、预建实例）、 **文件系统挂载**（`ModManager::mount*` 用 `monty-fs` 的 `MountTable` 在宿主侧服务 OS 调用：`ReadOnly` / `OverlayMemory` / `ReadWrite`）与 **每-mod 权限**（`ModPermissions` 现为 `ScriptPermissions` 别名：`exec` / `fs` / `tools` / `register_tools` / `hooks` / `commands` / `ui` / `state`，在派发与 OS 处理时强制）。CLI 默认把工作目录只读挂到 `/work`。
 >

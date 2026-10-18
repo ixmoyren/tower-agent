@@ -13,5 +13,4 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-# 只被本 crate 的测试使用。
 cbor4ii = { version = "1.2.3", features = ["use_alloc"] }

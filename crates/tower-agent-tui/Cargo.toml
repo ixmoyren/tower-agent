@@ -1,6 +1,6 @@
 [package]
 name = "tower-agent-tui"
-description = "tower-agent TUI frontend (pi `tui`): differential terminal rendering over the agent event stream."
+description = "tower-agent terminal renderer: ratatui pages and terminal input over tower-agent-ui."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,11 +9,13 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-tower-agent-runtime = { workspace = true }
-tower-agent-provider = { workspace = true }
-tower-agent-core = { workspace = true }
 ratatui = { git = "https://github.com/ratatui/ratatui.git", default-features = false, features = ["all-widgets", "termina", "layout-cache", "macros"] }
 ratatui-textarea = { git = "https://github.com/ixmoyren/ratatui-textarea", default-features = false, features = ["termina", "search"] }
 unicode-width = "0.2"
-serde_json = { workspace = true }
 tokio = { workspace = true }
+tower-agent-ui.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tower-agent-provider.workspace = true
+tower-agent-runtime.workspace = true

@@ -9,7 +9,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-# 内部子 crate。
 tower-agent-core = { workspace = true }
 tower-agent-plugins = { workspace = true, features = ["dynamic"] }
 tower-agent-provider = { workspace = true }
