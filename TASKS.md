@@ -10,8 +10,8 @@
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
 | 当前阶段   | **Phase 3（合并 feature / CLI / 词汇）**       |
-| 下一个任务 | **T3.2**                                       |
-| 代码状态   | **T1–T2、T3.1 已完成**：能力层、引擎选择与 feature 合并已落地 |
+| 下一个任务 | **T3.3**                                       |
+| 代码状态   | **T1–T3.2 已完成**：能力层、feature 与 CLI 开关已收敛 |
 
 ---
 
@@ -151,7 +151,7 @@
     3. 删除 `mods` feature（不做别名，版本未稳定）。
 - **验收**：feature 矩阵可编译（见 0.3 的两条 `--no-default-features` 命令 + 各自单开）。
 
-### [ ] T3.2 CLI 开关收敛
+### [x] T3.2 CLI 开关收敛
 
 - **依赖**：T3.1
 - **做什么**：
@@ -273,3 +273,4 @@
 | 2026-10-18 | T2.1 | `codemode-core` 新增 `PromptBuilder`：由能力集、挂载、限额与语言生成 description / instructions；Python / JS / 能力关闭快照通过 |
 | 2026-10-18 | T2.2 | 新增 `--codemode-engine monty\|js`、`codemode.engine` 有效配置与 `ScriptMetadata.language`；脚本 > CLI > 配置 > 默认 JS，CLI 50 测试通过 |
 | 2026-10-18 | T3.1 | 删除 `mods` feature；门面与 CLI 统一为 `codemode` + `codemode-python` + `codemode-js`；默认、无默认及单引擎组合全部编译通过 |
+| 2026-10-18 | T3.2 | CLI 新增 `--no-codemode` 并与 `--codemode` 互斥；删除 `TPA_NO_MODS`，`--no-mods` 不再识别；帮助/二进制测试通过 |

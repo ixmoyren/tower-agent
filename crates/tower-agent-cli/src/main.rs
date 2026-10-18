@@ -244,12 +244,13 @@ fn main() -> ExitCode {
         compactor.restore(restored);
     }
 
-    let session = Session::with_compaction(
+    let session = Session::with_compaction_and_codemode(
         cwd.clone(),
         setup.stream_fn(),
         setup.model.clone(),
         initial_messages,
         Arc::clone(&compactor),
+        !args.no_codemode,
     );
     let session = match &transcript {
         Some(transcript) => session.with_transcript(Arc::clone(transcript)),

@@ -167,7 +167,7 @@ impl Session {
         model: Model,
         messages: Vec<AgentMessage>,
     ) -> Self {
-        Self::build(cwd, stream, model, messages, None)
+        Self::build(cwd, stream, model, messages, None, true)
     }
 
     /// 用显式模型 + 初始 transcript + 上下文压缩器构造会话。
@@ -180,7 +180,26 @@ impl Session {
         messages: Vec<AgentMessage>,
         compactor: Arc<Compactor>,
     ) -> Self {
-        Self::build(cwd, stream, model, messages, Some(compactor))
+        Self::build(cwd, stream, model, messages, Some(compactor), true)
+    }
+
+    /// 构造会话，并显式指定是否启用 codemode 宿主。
+    pub fn with_compaction_and_codemode(
+        cwd: impl AsRef<Path>,
+        stream: BoxStreamService,
+        model: Model,
+        messages: Vec<AgentMessage>,
+        compactor: Arc<Compactor>,
+        codemode_enabled: bool,
+    ) -> Self {
+        Self::build(
+            cwd,
+            stream,
+            model,
+            messages,
+            Some(compactor),
+            codemode_enabled,
+        )
     }
 
     fn build(
@@ -189,6 +208,7 @@ impl Session {
         model: Model,
         messages: Vec<AgentMessage>,
         compactor: Option<Arc<Compactor>>,
+        codemode_enabled: bool,
     ) -> Self {
         let cwd = cwd.as_ref().to_path_buf();
         let system_prompt = format!(
@@ -197,11 +217,13 @@ impl Session {
             tower_agent_plugins::DEFAULT_TOOL_NAMES.join(", ")
         );
         let base_tools = tower_agent_plugins::default_tools(&cwd);
+        #[cfg(not(feature = "codemode-python"))]
+        let _ = codemode_enabled;
         // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
         // 内置静态插件与 JIT mod 共用一张注册表：工具目录来自「解析 + 安装」。
         // monty 解释器随 `tower-agent-monty` 内嵌（CLI feature `codemode-python`）。
         #[cfg(feature = "codemode-python")]
-        let mods = if std::env::var_os("TPA_NO_MODS").is_none() {
+        let mods = if codemode_enabled {
             // 插件集合与 mods 宿主都来自组装层（含 wasmtime 等受保护宿主能力），
             // 不在会话里硬编码。
             match tower_agent::assembly::HostPlugins::new(&cwd).mods(UiState::new()) {
@@ -211,7 +233,7 @@ impl Session {
                     Some(manager)
                 }
                 Err(error) => {
-                    eprintln!("mods 初始化失败（本次会话已关闭 mods）：{error}");
+                    eprintln!("codemode Python 宿主初始化失败（本次会话已关闭）：{error}");
                     None
                 }
             }
@@ -983,6 +1005,23 @@ mod tests {
             ))),
             ScriptLanguage::JavaScript
         );
+    }
+
+    #[cfg(feature = "codemode-python")]
+    #[test]
+    fn no_codemode_disables_the_python_host() {
+        use tower_agent_runtime::{CompactionSettings, Compactor};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = Session::with_compaction_and_codemode(
+            dir.path(),
+            FauxProvider::new().boxed(),
+            model(),
+            Vec::new(),
+            Arc::new(Compactor::new(CompactionSettings::default())),
+            false,
+        );
+        assert!(session.ui_state().is_none());
     }
 
     /// 第一次调用会卡在闸门上的 provider；之后的调用立刻返回，用来观察 steer 行为。

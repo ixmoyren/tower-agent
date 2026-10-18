@@ -75,12 +75,20 @@ pub struct CliArgs {
     #[arg(long = "list-tools", help = "List the built-in tools, then exit.")]
     pub list_tools: bool,
 
-    /// 打开 codemode：在 wasm 沙箱里跑 JavaScript（coreutils 命令 + 会话目录文件）。
+    /// 显式启用 JavaScript codemode 沙箱。
     #[arg(
         long = "codemode",
-        help = "Enable the codemode tool (JavaScript + coreutils inside a wasm sandbox)."
+        conflicts_with = "no_codemode",
+        help = "Enable the JavaScript codemode sandbox (coreutils + filesystem)."
     )]
     pub codemode: bool,
+
+    /// 关闭全部 codemode 宿主、工具与沙箱。
+    #[arg(
+        long = "no-codemode",
+        help = "Disable all codemode hosts, tools, and sandboxes."
+    )]
+    pub no_codemode: bool,
 
     /// codemode 的进程级默认引擎；脚本元数据中的 language 仍可覆盖它。
     #[arg(
@@ -487,6 +495,14 @@ mod tests {
             ScriptLanguage::JavaScript
         );
         assert!(parse(["--codemode-engine", "python"]).is_err());
+    }
+
+    #[test]
+    fn codemode_enable_and_disable_flags_conflict() {
+        assert!(parse_ok(&["--codemode"]).codemode);
+        assert!(parse_ok(&["--no-codemode"]).no_codemode);
+        assert!(parse(["--codemode", "--no-codemode"]).is_err());
+        assert!(parse(["--no-mods"]).is_err());
     }
 
     #[test]

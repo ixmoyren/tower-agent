@@ -115,6 +115,11 @@ echo "解释一下 crates/tower-agent-runtime 的编排循环" \
 | `-t`, `--tools <list>`              | 只启用列出的内置工具（逗号分隔）                            |
 | `--exclude-tools <list>`            | 排除列出的内置工具（逗号分隔）                              |
 | `--no-tools` / `--no-builtin-tools` | 禁用全部内置工具                                            |
+| `--codemode`                         | 显式启用 JavaScript codemode 沙箱                           |
+| `--no-codemode`                      | 关闭全部 codemode 宿主、工具与沙箱                          |
+| `--codemode-engine <monty\|js>`      | 设置 codemode 默认引擎（脚本 language 可覆盖）              |
+| `--codemode-session <name>`          | 使用持久化 codemode 会话                                    |
+| `--codemode-mount <spec>`            | 额外 codemode 挂载（可重复）                                 |
 | `-h`, `--help` · `-v`, `--version`  | 帮助 / 版本                                                 |
 
 **环境变量**
@@ -122,7 +127,6 @@ echo "解释一下 crates/tower-agent-runtime 的编排循环" \
 | 变量          | 作用                                              |
 |---------------|---------------------------------------------------|
 | `TPA_WORKERS` | runtime worker 数（默认 `available_parallelism`） |
-| `TPA_NO_MODS` | 关闭 mods 宿主（monty 解释器默认内嵌启用）        |
 
 ### 仓库结构
 

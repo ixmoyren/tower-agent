@@ -41,7 +41,21 @@ fn stderr(output: &std::process::Output) -> String {
 fn help_and_version_exit_successfully() {
     let output = cli().arg("--help").output().expect("run cli");
     assert!(output.status.success());
-    assert!(stdout(&output).contains("Usage"));
+    let help = stdout(&output);
+    assert!(help.contains("Usage"));
+    for flag in [
+        "--codemode",
+        "--no-codemode",
+        "--codemode-engine",
+        "--codemode-session",
+        "--codemode-session-clear",
+    ] {
+        assert!(help.contains(flag), "help is missing `{flag}`:\n{help}");
+    }
+    assert!(
+        !help.contains("mods"),
+        "legacy mods wording remains:\n{help}"
+    );
 
     let output = cli().arg("--version").output().expect("run cli");
     assert!(output.status.success());
@@ -51,6 +65,25 @@ fn help_and_version_exit_successfully() {
     let output = cli().arg("-v").output().expect("run cli");
     assert!(output.status.success());
     assert!(stdout(&output).starts_with("tower-agent "));
+}
+
+#[test]
+fn obsolete_mods_flag_is_rejected() {
+    let output = cli().arg("--no-mods").output().expect("run cli");
+    assert!(!output.status.success());
+    let text = stderr(&output);
+    assert!(text.contains("--no-mods"), "got:\n{text}");
+
+    let output = cli()
+        .args(["--codemode", "--no-codemode"])
+        .output()
+        .expect("run cli");
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("cannot be used with"),
+        "got:\n{}",
+        stderr(&output)
+    );
 }
 
 #[test]

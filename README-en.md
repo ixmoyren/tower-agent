@@ -126,6 +126,11 @@ provider with credentials in the environment is used.
 | `-t`, `--tools <list>`              | Only enable the listed built-in tools (comma-separated)                 |
 | `--exclude-tools <list>`            | Exclude the listed built-in tools (comma-separated)                     |
 | `--no-tools` / `--no-builtin-tools` | Disable all built-in tools                                              |
+| `--codemode`                         | Explicitly enable the JavaScript codemode sandbox                       |
+| `--no-codemode`                      | Disable all codemode hosts, tools, and sandboxes                        |
+| `--codemode-engine <monty\|js>`      | Set the default codemode engine (script metadata can override it)       |
+| `--codemode-session <name>`          | Use a persistent codemode session                                       |
+| `--codemode-mount <spec>`            | Add a codemode mount (repeatable)                                       |
 | `-h`, `--help` · `-v`, `--version`  | Help / version                                                          |
 
 **Environment variables**
@@ -133,7 +138,6 @@ provider with credentials in the environment is used.
 | Variable      | Purpose                                                                 |
 |---------------|-------------------------------------------------------------------------|
 | `TPA_WORKERS` | Number of runtime workers (defaults to `available_parallelism`)         |
-| `TPA_NO_MODS` | Disable the mods host (the embedded monty interpreter is on by default) |
 
 ### Repository layout
 

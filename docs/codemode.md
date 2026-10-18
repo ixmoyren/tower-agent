@@ -133,7 +133,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 兼容性：
 
 - **名字**：两个引擎 crate 都保留（Q2）；`tower-agent-monty` 是 monty/Python 引擎、`tower-agent-codemode` 是宿主 + JS 引擎（或把 JS 引擎拆成 `tower-agent-quickjs`）；对外只有 `codemode`。
-- **`mods` 这个词**：建议降级为"codemode 的持久化脚本"这一子概念（`mod_persist` 等），不再作为顶层模式名；CLI 的 `--no-mods` / `TPA_NO_MODS` 换成 `--no-codemode`。
+- **`mods` 这个词**：降级为"codemode 的持久化脚本"这一子概念；CLI 的旧 `--no-mods` / `TPA_NO_MODS` 已删除，统一由 `--no-codemode` 关闭 codemode。
 - 不保留 `mods` 与 `codemode` 两套会话目录；统一到 `<config>/tower-agent/codemode/`（脚本仓库 + 会话根分开子目录）。
 
 ### 0.8 影响面
@@ -141,7 +141,8 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 - crate：`tower-agent-codemode`（宿主，吃掉 monty 的宿主职责或改为引擎适配器）、`tower-agent-monty`（Python 引擎）、`tower-agent-wasmtime`（不变）、 **新增内部 crate `tower-agent-codemode-core`**（能力层 / 提示词 / 脚本模型，引擎无关）、 **扩展 `tower-agent-plugin-sdk`**（不新增对外 SDK crate）。
 - feature：`tower-agent` 门面 / `tower-agent-cli` 已收敛为 `codemode` + `codemode-python` + `codemode-js`；
   默认三者都开，`mods` feature 已删除且没有兼容别名。
-- CLI：`--codemode` / `--codemode-engine` / `--codemode-session*` / 权限开关；`TPA_NO_MODS` 废弃。
+- CLI：`--codemode` / `--no-codemode` / `--codemode-engine` / `--codemode-session*`；旧
+  `--no-mods` 与 `TPA_NO_MODS` 不再识别。
 - 文档：`docs/codemode.md`（本文件，v2 提案 + JS 细节）、`docs/sdk.md`（扩展点设计，落在 plugin-sdk）、`docs/plugins.md`（§4.3 / §16 需改：JIT 形态与 codemode 的关系）、`docs/design.md`（§5 CLI 段落与待办）。
 - 测试：能力层的"双引擎一致性"测试（同一脚本语义在两种语言下等价）、提示词快照测试、权限矩阵测试。
 
