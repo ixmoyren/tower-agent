@@ -5333,13 +5333,17 @@ dependencies = [
 name = "tower-agent-plugin-sdk"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "rkyv",
  "schemars",
  "semver",
  "serde",
  "serde_json",
  "stabby",
+ "tokio",
+ "tower",
  "tower-agent-plugins",
+ "tower-agent-provider",
  "tower-agent-runtime",
 ]
 

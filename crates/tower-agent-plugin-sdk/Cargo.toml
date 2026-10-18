@@ -22,3 +22,9 @@ schemars.workspace = true
 default = []
 # 动态插件作者需要的 ABI 类型 + `declare_dynamic_plugin!`。
 dynamic = ["tower-agent-plugins/dynamic", "dep:stabby", "dep:rkyv"]
+
+[dev-dependencies]
+futures-util.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-agent-provider.workspace = true

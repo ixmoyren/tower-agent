@@ -8,7 +8,10 @@
 //! [`tower::load_shed`] 这类把错误擦成 [`crate::BoxError`] 的 layer 之后，需要用
 //! `ServiceBuilder::map_err(AgentError::other)`（或 `tower::ServiceExt::map_err`）转回来。
 
-use std::task::{Context, Poll};
+use std::{
+    future::Future,
+    task::{Context, Poll},
+};
 
 use futures_util::{StreamExt as _, future::BoxFuture};
 use tower::{Layer, Service, ServiceExt as _};
@@ -72,14 +75,15 @@ pub struct BeforeToolCallService<S, F> {
     hook: F,
 }
 
-impl<S, F> Service<ToolCallRequest> for BeforeToolCallService<S, F>
+impl<S, F, Fut> Service<ToolCallRequest> for BeforeToolCallService<S, F>
 where
     S: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>
         + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
-    F: Fn(ToolCallRequest) -> ToolCallDecision + Clone + Send + 'static,
+    F: Fn(ToolCallRequest) -> Fut + Clone + Send + 'static,
+    Fut: Future<Output = Result<ToolCallDecision, AgentError>> + Send + 'static,
 {
     type Response = ToolResultStream;
     type Error = AgentError;
@@ -90,15 +94,22 @@ where
     }
 
     fn call(&mut self, request: ToolCallRequest) -> Self::Future {
-        match (self.hook)(request) {
-            ToolCallDecision::Block(result) => {
-                Box::pin(async move { Ok(ToolResultStream::once(result)) })
+        let hook = self.hook.clone();
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            let decision = match hook(request).await {
+                Ok(decision) => decision,
+                Err(error) => {
+                    return Ok(ToolResultStream::once(AgentToolResult::error(format!(
+                        "tool_call hook failed: {error}"
+                    ))));
+                }
+            };
+            match decision {
+                ToolCallDecision::Block(result) => Ok(ToolResultStream::once(result)),
+                ToolCallDecision::Allow(request) => inner.oneshot(request).await,
             }
-            ToolCallDecision::Allow(request) => {
-                let inner = self.inner.clone();
-                Box::pin(async move { inner.oneshot(request).await })
-            }
-        }
+        })
     }
 }
 
@@ -136,14 +147,15 @@ pub struct AfterToolResultService<S, F> {
     hook: F,
 }
 
-impl<S, F> Service<ToolCallRequest> for AfterToolResultService<S, F>
+impl<S, F, Fut> Service<ToolCallRequest> for AfterToolResultService<S, F>
 where
     S: Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>
         + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
-    F: Fn(&ToolCallRequest, AgentToolResult) -> AgentToolResult + Clone + Send + 'static,
+    F: Fn(&ToolCallRequest, AgentToolResult) -> Fut + Clone + Send + 'static,
+    Fut: Future<Output = Result<AgentToolResult, AgentError>> + Send + 'static,
 {
     type Response = ToolResultStream;
     type Error = AgentError;
@@ -158,7 +170,15 @@ where
         let inner = self.inner.clone();
         Box::pin(async move {
             let stream = inner.oneshot(request.clone()).await?;
-            let mapped = stream.map(move |result| hook(&request, result));
+            let mapped = stream.then(move |result| {
+                let hook = hook.clone();
+                let request = request.clone();
+                async move {
+                    hook(&request, result).await.unwrap_or_else(|error| {
+                        AgentToolResult::error(format!("tool_result hook failed: {error}"))
+                    })
+                }
+            });
             Ok(ToolResultStream::new(mapped))
         })
     }
@@ -223,9 +243,11 @@ mod tests {
     #[tokio::test]
     async fn before_layer_can_block_a_call() {
         let service = ServiceBuilder::new()
-            .layer(BeforeToolCallLayer::new(|_request: ToolCallRequest| {
-                ToolCallDecision::block("blocked by policy")
-            }))
+            .layer(BeforeToolCallLayer::new(
+                |_request: ToolCallRequest| async {
+                    Ok(ToolCallDecision::block("blocked by policy"))
+                },
+            ))
             .service(Echo)
             .boxed_tool();
         assert_eq!(first_text(&service, "echo").await, "blocked by policy");
@@ -235,8 +257,11 @@ mod tests {
     async fn after_layer_rewrites_results() {
         let service = ServiceBuilder::new()
             .layer(AfterToolResultLayer::new(
-                |_request: &ToolCallRequest, result: AgentToolResult| {
-                    AgentToolResult::text(format!("wrapped: {}", result.is_error))
+                |_request: &ToolCallRequest, result: AgentToolResult| async move {
+                    Ok(AgentToolResult::text(format!(
+                        "wrapped: {}",
+                        result.is_error
+                    )))
                 },
             ))
             .service(Echo)

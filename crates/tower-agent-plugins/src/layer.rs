@@ -150,8 +150,11 @@ mod tests {
         let cwd = std::env::temp_dir();
         let inner = tower_agent_tools::create_ls_tool(&cwd).service().clone();
         let layer = tower_tool_layer(AfterToolResultLayer::new(
-            |_request: &ToolCallRequest, result: AgentToolResult| {
-                AgentToolResult::text(format!("wrapped:{}", result.is_error))
+            |_request: &ToolCallRequest, result: AgentToolResult| async move {
+                Ok(AgentToolResult::text(format!(
+                    "wrapped:{}",
+                    result.is_error
+                )))
             },
         ));
         let service = layer.apply(inner);

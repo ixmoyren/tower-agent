@@ -68,7 +68,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 |--------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|-------------------------------------------|----------------------------------|
 | `registerTool`（含 `exposure` / `namespace` / `annotations` / `outputSchema`） | ✅ `AgentTool` 已带 exposure / namespace / annotations；SDK 提供 typed 注册与完整元数据 | provider 可逐步消费新字段                     | `plugin_sdk::tool::ToolMetadata::…`       | ✅（monty 已有 `tool_register`） |
 | `ctx.executeTool(name, args)`（嵌套调用、`parentToolCallId`、记账）            | ❌                                                                                                                   | 需要 runtime 支持"工具内再调工具"的记录与事件 | `plugin_sdk::tool::call(...)`             | ✅（monty 已有 `tool_call`）     |
-| `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ 10 个 `AgentEvent`，**纯通知**；工具前后有 Layer、压缩有 Hook                                                      | **事件面是最大缺口**                          | `plugin_sdk::hook::on(Event, handler)`    | ◐（v0 只做工具前后，见 §3.1）    |
+| `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ Rust `plugin_sdk::hook::on(ToolCall/ToolResult, async handler)` 已可拦截/改参/改写结果；其余事件仍为通知面 | 其余事件与脚本 host function                  | `plugin_sdk::hook::on(Event, handler)`    | ◐（v0 只做工具前后，见 §3.1）    |
 | `registerCommand` / `registerShortcut` / `registerFlag`                        | ❌ 斜杠命令是硬编码表                                                                                                | 命令/快捷键/flag 注册表 + 前端接线            | `plugin_sdk::command::*`                  | ❌                               |
 | `registerProvider` / `registerVirtualModel`                                    | ❌ provider 由 CLI 直接编排                                                                                          | 把 provider 组装变成注册项                    | `plugin_sdk::provider::register(...)`     | ❌                               |
 | `registerMcpServer`                                                            | ❌ MCP 未移植                                                                                                        | MCP 客户端                                    | `plugin_sdk::provider::register_mcp(...)` | ❌                               |
@@ -87,6 +87,24 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 
 1. `tool_call`：可改写入参、可拦截（已有 `BeforeToolCallLayer`，暴露成扩展点 + 让脚本可挂）。
 2. `tool_result`：可改写结果（已有 `AfterToolResultLayer`）。
+
+```rust
+use tower_agent_plugin_sdk::hook::{self, ToolCall, ToolResult};
+use tower_agent_runtime::ToolCallDecision;
+
+let before = hook::on(ToolCall, |mut request| async move {
+    // 可改 request.tool_call.arguments；这里演示拦截。
+    Ok(ToolCallDecision::block("blocked by policy"))
+});
+let after = hook::on(ToolResult, |_request, mut result| async move {
+    result.is_error = false;
+    Ok(result)
+});
+context.register_tool_layer(before);
+context.register_tool_layer(after);
+```
+
+handler 返回 `Result<…, AgentError>`。before/after hook 失败会转换成 `is_error` 工具结果，不会被静默吞掉。
 
 加上已有的 **工具注册**（`tool_register` / `tool_call`），这三条合起来就等价于"现在 monty 能做的一切 + 能改变工具行为"。
 
@@ -199,7 +217,7 @@ JSON 回传脚本（未授权 / 未知能力 / 引擎错误 / 超时 / 取消 / 
 | 阶段 | 内容                                                                                                                                                |
 |------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | S0   | 本文档 + `codemode.md` §0（评审） ✅ 决策已定：Q1/Q2/Q4/Q7                                                                                          |
-| S1   | **`tower-agent-plugin-sdk` 扩展点 v0**：`tool` + `hook`，先接工具前后钩子（`tool_call` / `tool_result`）与已有的 `CompactionHook` 样例；Rust 侧可用 |
+| S1 ✅ | **`tower-agent-plugin-sdk` 扩展点 v0**：`tool` + async `hook`；工具前后钩子已接 `BeforeToolCallLayer` / `AfterToolResultLayer`，Rust 侧可用 |
 | S2   | 脚本侧 host function（v0 范围）：`tool_call` / `tool_register` / `on(tool_call)` / `on(tool_result)`；权限矩阵；prompt 同步                         |
 | S3   | `command` / `ui` 扩展点；Rust 与脚本都能注册斜杠命令                                                                                                |
 | S4   | runtime 事件面补齐（§3.1 的第 3–5 条），脚本可真的“改行为”                                                                                          |

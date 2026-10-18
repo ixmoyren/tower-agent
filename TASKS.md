@@ -10,8 +10,8 @@
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
 | 当前阶段   | **Phase 5（扩展点 v0）**                       |
-| 下一个任务 | **T5.2**                                       |
-| 代码状态   | **T1–T4、T5.1 已完成**：统一能力、storage 与 SDK 工具元数据已落地 |
+| 下一个任务 | **T5.3**                                       |
+| 代码状态   | **T1–T4、T5.1–T5.2 已完成**：SDK 工具元数据与 Rust async hooks 已落地 |
 
 ---
 
@@ -224,7 +224,7 @@
     3. 工具元数据模型补到 `AgentTool` / 工具目录（先做最小字段，不要求 provider 全用上）。
 - **验收**：`cargo test -p tower-agent-plugin-sdk`；Rust 插件注册一个带元数据的工具。
 
-### [ ] T5.2 plugin-sdk：tool hooks
+### [x] T5.2 plugin-sdk：tool hooks
 
 - **依赖**：T5.1
 - **做什么**：
@@ -281,3 +281,4 @@
 | 2026-10-18 | T4.3 | 新增 `--codemode-export` / `--codemode-import`；每脚本一个 `.codemode` 文件（JSON 元数据头 + 源码），默认项目目录 `.tower-agent/codemode/`；同名覆盖；write → export → 删库 → import → run 全链路测试通过 |
 | 2026-10-18 | T4.4 | `ScriptPermissions` 作为持久预授权集合接入统一 `PermissionPolicy`；monty / JS 均在无人值守下拒绝，prompter 允许后首次调用成功；Session 默认拒绝并支持前端注入共享策略 |
 | 2026-10-18 | T5.1 | `AgentTool` 增加 exposure / namespace / annotations；plugin-sdk 新增 `tool::ToolMetadata`、typed 注册与元数据扩展 trait；Rust 插件完整元数据注册测试通过 |
+| 2026-10-18 | T5.2 | plugin-sdk 新增 `hook::on(ToolCall/ToolResult, async handler)`；runtime 工具前后层支持 async，拦截调用、改写入参、改写结果与 hook 失败降级测试通过 |
