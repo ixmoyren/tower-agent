@@ -143,7 +143,6 @@ tower-agent/
 
 ### 文档
 
-- [`TASKS.md`](TASKS.md)：**当前可执行任务清单**（codemode v2 的决策、任务、依赖、验收标准；冷启动从这里开始）。
 - [`docs/design.md`](docs/design.md)：整体设计 —— tower 模型与 pi 概念的映射、移植路线。
 - [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md)：目标架构与迁移计划。
 - [`docs/plugins.md`](docs/plugins.md)：插件 / 扩展体系（静态 / 动态 / JIT 脚本）。

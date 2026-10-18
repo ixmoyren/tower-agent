@@ -3,7 +3,6 @@
 > v2（本节 §0， **提案 / 待评审**）：把 `mods` 与 `codemode` 统一成同一个能力—— **agent 可以编程**，
 > 解释器可选（monty = Python / rquickjs-sandbox = JavaScript）。
 > §1–§11 是 v1 的 **JS 引擎（rquickjs）实现细节**，作为该统一设计的第一个后端保留原文。
-> **执行清单见 [`TASKS.md`](../TASKS.md)**（决策已定，从 T1.1 开始）。
 
 ## 0. 统一设计（v2 提案 · 待评审）
 
@@ -188,14 +187,14 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 3. `codemode export <dir>` / `codemode import <dir>`：每个脚本一个文件（源码 + 元数据头）；项目级默认导出到 `.tower-agent/codemode/`。
 4. 脚本的 **元数据永远在 storage**（权限、源码哈希、最近运行），文件只是投影——避免两处真相。
 
-权限执行顺序（T4.4）：
+权限执行顺序：
 
 1. `ScriptRecord.permissions` 是持久预授权集合；允许的能力直接执行，不提示。
 2. 未持久授权的能力在首次调用时进入 `PermissionPolicy`：`AllowOnce` 仅本次通过，`AllowSession` 按会话缓存，`Deny` 拒绝。
 3. 无人值守模式（`--print` 或没有注入 prompter）不提示，直接返回结构化的 `unauthorized` 错误。
 4. monty 与 JS 共用同一个 Session 策略实例；前端通过 `Session::with_permission_policy` 注入确认 UI。
 
-脚本 hook wire 契约（T5.4）：
+脚本 hook wire 契约：
 
 - `tool_call` 收到 `{ "name": string, "arguments": object }`。
 - 返回 `null` / `true`：放行；返回 `false` 或字符串：拦截并作为错误结果。

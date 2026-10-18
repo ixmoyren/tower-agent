@@ -8,8 +8,6 @@
 
 本文档回答： **"给 agent 加能力"这件事应该长什么样**，以及它如何落在现有 `tower-agent-plugin-sdk` / `tower-agent-plugins`，并与 codemode 脚本共用同一套语义。
 
-> **执行清单见 [`TASKS.md`](../TASKS.md)**（Phase 5 / T5.1–T5.4）。
-
 ---
 
 ## 1. 定位
