@@ -560,9 +560,12 @@ fn render_config_value(value: &serde_json::Value) -> String {
 fn print_tools(codemode: bool) {
     println!(
         "内置工具（{} 个）：",
-        tower_agent_plugins::DEFAULT_TOOL_NAMES.len()
+        tower_agent::tools::DEFAULT_TOOL_NAMES.len()
     );
-    for tool in tower_agent_plugins::default_tools(PathBuf::from(".")) {
+    for tool in tower_agent::assembly::HostPlugins::new(PathBuf::from("."))
+        .tools()
+        .expect("内置工具插件应可解析")
+    {
         println!(
             "  {:<12} {}",
             tool.name(),
@@ -606,10 +609,10 @@ fn select_filter(args: &CliArgs) -> session::ToolFilter {
 
 /// `--tools` / `--exclude-tools` 里写了不存在的工具名时给出提示（pi 会忽略它们）。
 fn warn_unknown_tool(name: &str) {
-    if !name.is_empty() && !tower_agent_plugins::DEFAULT_TOOL_NAMES.contains(&name) {
+    if !name.is_empty() && !tower_agent::tools::DEFAULT_TOOL_NAMES.contains(&name) {
         eprintln!(
             "忽略未知工具：{name}（可用：{}）",
-            tower_agent_plugins::DEFAULT_TOOL_NAMES.join(", ")
+            tower_agent::tools::DEFAULT_TOOL_NAMES.join(", ")
         );
     }
 }

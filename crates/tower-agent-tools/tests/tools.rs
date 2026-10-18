@@ -33,10 +33,9 @@ fn request(name: &str, args: JsonValue) -> ToolCallRequest {
     })
 }
 
-/// 内置工具集合，顺序与 `plugins` 的内置工具插件（`DEFAULT_TOOL_NAMES`）一致。
+/// 内置工具实现集合，顺序与 `tools::plugin` 的静态插件一致。
 ///
-/// 注册与选择已迁移到插件体系，`tools` crate 只导出单个工具的实现；
-/// 这里保留一份本地清单，专门测试这些实现本身。
+/// 注册与选择由上层装配，本测试直接构造实现以测试工具行为本身。
 fn default_tools(cwd: impl AsRef<std::path::Path>) -> Vec<AgentTool> {
     let cwd = cwd.as_ref();
     vec![

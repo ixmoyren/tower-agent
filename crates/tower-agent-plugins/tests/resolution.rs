@@ -104,45 +104,55 @@ fn capability_override_binds_to_the_named_implementation() {
     let mut plain = PluginRegistry::new();
     plain
         .register_manifest(
-            manifest("a", v(1, 2, 0), PluginKind::Static).providing(cap("tool", "x"), v(1, 2, 0)),
+            manifest("a", v(1, 2, 0), PluginKind::Static)
+                .providing(cap("sandbox", "exec"), v(1, 2, 0)),
         )
         .unwrap();
     plain
         .register_manifest(
-            manifest("b", v(1, 1, 0), PluginKind::Static).providing(cap("tool", "x"), v(1, 1, 0)),
+            manifest("b", v(1, 1, 0), PluginKind::Static)
+                .providing(cap("sandbox", "exec"), v(1, 1, 0)),
         )
         .unwrap();
     plain
         .register_manifest(
             manifest("c", v(1, 0, 0), PluginKind::Static)
-                .requiring(cap("tool", "x"), req("^1.0.0")),
+                .requiring(cap("sandbox", "exec"), req("^1.0.0")),
         )
         .unwrap();
     // 无覆盖：同形态下选最高版本（a@1.2.0）。
     let resolution = plain.resolve().unwrap();
-    assert_eq!(binding_for(&resolution, "c", &cap("tool", "x")).name, "a");
+    assert_eq!(
+        binding_for(&resolution, "c", &cap("sandbox", "exec")).name,
+        "a"
+    );
 
     let mut overridden = PluginRegistry::new();
     overridden
         .register_manifest(
-            manifest("a", v(1, 2, 0), PluginKind::Static).providing(cap("tool", "x"), v(1, 2, 0)),
+            manifest("a", v(1, 2, 0), PluginKind::Static)
+                .providing(cap("sandbox", "exec"), v(1, 2, 0)),
         )
         .unwrap();
     overridden
         .register_manifest(
-            manifest("b", v(1, 1, 0), PluginKind::Static).providing(cap("tool", "x"), v(1, 1, 0)),
+            manifest("b", v(1, 1, 0), PluginKind::Static)
+                .providing(cap("sandbox", "exec"), v(1, 1, 0)),
         )
         .unwrap();
     overridden
         .register_manifest(
             manifest("c", v(1, 0, 0), PluginKind::Static)
-                .requiring(cap("tool", "x"), req("^1.0.0")),
+                .requiring(cap("sandbox", "exec"), req("^1.0.0")),
         )
         .unwrap();
-    overridden.add_override(CapabilityOverride::to("b", cap("tool", "x")));
-    // 能力级覆盖把 `tool.x` 显式绑到 b，即使它的版本更低。
+    overridden.add_override(CapabilityOverride::to("b", cap("sandbox", "exec")));
+    // 能力级覆盖把非工具能力 `sandbox.exec` 显式绑到 b。
     let resolution = overridden.resolve().unwrap();
-    assert_eq!(binding_for(&resolution, "c", &cap("tool", "x")).name, "b");
+    assert_eq!(
+        binding_for(&resolution, "c", &cap("sandbox", "exec")).name,
+        "b"
+    );
 }
 
 #[test]
@@ -150,16 +160,17 @@ fn override_to_unknown_provider_is_reported() {
     let mut registry = PluginRegistry::new();
     registry
         .register_manifest(
-            manifest("a", v(1, 0, 0), PluginKind::Static).providing(cap("tool", "x"), v(1, 0, 0)),
+            manifest("a", v(1, 0, 0), PluginKind::Static)
+                .providing(cap("sandbox", "exec"), v(1, 0, 0)),
         )
         .unwrap();
     registry
         .register_manifest(
             manifest("c", v(1, 0, 0), PluginKind::Static)
-                .requiring(cap("tool", "x"), req("^1.0.0")),
+                .requiring(cap("sandbox", "exec"), req("^1.0.0")),
         )
         .unwrap();
-    registry.add_override(CapabilityOverride::to("nope", cap("tool", "x")));
+    registry.add_override(CapabilityOverride::to("nope", cap("sandbox", "exec")));
     let error = registry.resolve().unwrap_err();
     assert!(matches!(error, PluginError::OverrideTargetMissing { .. }));
 }

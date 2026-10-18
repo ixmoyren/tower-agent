@@ -119,15 +119,20 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        task::{Context, Poll},
     };
 
-    use futures_util::StreamExt as _;
-    use tower::ServiceExt as _;
+    use futures_util::{StreamExt as _, future::BoxFuture};
+    use tower::{Service, ServiceExt as _};
     use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
-    use tower_agent_runtime::{AfterToolResultLayer, AgentToolResult, ToolCallRequest};
+    use tower_agent_runtime::{
+        AfterToolResultLayer, AgentError, AgentToolResult, ToolCallRequest, ToolResultStream,
+    };
 
     use super::*;
 
@@ -147,8 +152,24 @@ mod tests {
 
     #[tokio::test]
     async fn tower_tool_layer_applies_to_a_tool_service() {
-        let cwd = std::env::temp_dir();
-        let inner = tower_agent_tools::create_ls_tool(&cwd).service().clone();
+        #[derive(Clone)]
+        struct Inner;
+
+        impl Service<ToolCallRequest> for Inner {
+            type Response = ToolResultStream;
+            type Error = AgentError;
+            type Future = BoxFuture<'static, Result<ToolResultStream, AgentError>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _request: ToolCallRequest) -> Self::Future {
+                Box::pin(async { Ok(ToolResultStream::once(AgentToolResult::text("inner"))) })
+            }
+        }
+
+        let inner = Inner.boxed_tool();
         let layer = tower_tool_layer(AfterToolResultLayer::new(
             |_request: &ToolCallRequest, result: AgentToolResult| async move {
                 Ok(AgentToolResult::text(format!(
@@ -170,7 +191,7 @@ mod tests {
         let result = stream.next().await.expect("one result");
         assert!(matches!(
             result.content.first(),
-            Some(ContentBlock::Text(text)) if text.text.starts_with("wrapped:")
+            Some(ContentBlock::Text(text)) if text.text == "wrapped:false"
         ));
     }
 }

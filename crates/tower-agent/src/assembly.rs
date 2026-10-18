@@ -6,7 +6,7 @@
 //!
 //! 产出的 [`PluginRegistry`] 固定包含：
 //!
-//! - 内置工具（`read` / `shell` / …，来自 [`tower_agent_plugins::default_registry`]）；
+//! - 七个内置工具插件（`read` / `shell` / …，来自 [`tower_agent_tools::builtin_plugins`]）；
 //! - `wasmtime`（feature `sandbox-wasmtime`）：把名字与 `sandbox.wasmtime` 能力占成 `protected`；
 //! - `codemode`（feature `codemode`，需显式 [`HostPlugins::with_codemode`]）：受保护静态插件，
 //!   提供 `tool.codemode`。
@@ -71,7 +71,12 @@ impl HostPlugins {
     /// 组装成注册表（只注册，不解析、不安装；JIT / 动态插件之后再叠加）。
     #[must_use]
     pub fn registry(self) -> PluginRegistry {
-        let mut registry = tower_agent_plugins::default_registry(&self.cwd);
+        let mut registry = PluginRegistry::new();
+        for plugin in tower_agent_tools::builtin_plugins(&self.cwd) {
+            registry
+                .register_plugin(plugin)
+                .expect("内置工具插件清单固定且自洽");
+        }
         #[cfg(feature = "sandbox-wasmtime")]
         registry
             .register_plugin(Arc::new(tower_agent_wasmtime::WasmtimePlugin::new()))

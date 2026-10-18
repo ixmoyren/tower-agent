@@ -237,7 +237,7 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 
 尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
-`tools` crate 已落地的内置工具（`crates/tower-agent-tools`）：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)（`brush-core` + `brush-builtins`，bash 兼容的 Rust shell），在进程内解释执行，Windows / macOS / Linux 行为一致），以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。
+`tools` crate 已落地的内置工具（`crates/tower-agent-tools`）：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)（`brush-core` + `brush-builtins`，bash 兼容的 Rust shell），在进程内解释执行，Windows / macOS / Linux 行为一致），以及它们共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。七个工具各自导出独立静态插件，注册表登记与解析由 `tower-agent::assembly` 完成。
 
 与 pi 的实现差异（都是"进程内实现替代外部二进制"或环境能力所限）：
 

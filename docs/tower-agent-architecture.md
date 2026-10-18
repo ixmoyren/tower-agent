@@ -25,7 +25,7 @@ tower-agent/                 （facade：re-export core + runtime + provider + t
   tower-agent-core/          核心能力：Request/Response、消息/事件、tool 边界、Layer 扩展点、错误
   tower-agent-runtime/       有状态运行时：编排循环、队列、事件总线；无状态/池化 Service 适配
   tower-agent-provider/      provider Services（现 ai）
-  tower-agent-tools/         内置工具（read/shell/edit/write/grep/find/ls）
+  tower-agent-tools/         内置工具实现 + 七个独立静态插件声明（read/shell/edit/write/grep/find/ls）
   tower-agent-protocol/      帧 / CBOR / RPC（按需保留）
   tower-agent-plugins/       插件宿主：注册表 / 生命周期 / HostApi / 权限 / 三类加载器
   tower-agent-plugin-sdk/    插件作者 SDK（静态宏 / 动态 ABI / monty 契约）

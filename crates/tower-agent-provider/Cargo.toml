@@ -9,15 +9,12 @@ license.workspace = true
 workspace = true
 
 [features]
-# 仅供测试使用的确定性离线 provider（`provider::faux`）。由消费者的
-# `[dev-dependencies]` 打开，正常构建不会编进任何二进制。
 test-util = []
 
 [dependencies]
 tower = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
-# 只被本 crate 使用：放在这里而不是 workspace。
 bytes = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream", "charset", "json"] }
 serde = { workspace = true }

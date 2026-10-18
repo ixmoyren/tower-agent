@@ -720,7 +720,7 @@ tower-agent --codemode --codemode-mount /data:/data:ro   # 额外只读挂载；
 
 接线在 `Session::enable_codemode(...)`（`session.rs`）：解析挂载 → 构造工具 → 推入 `base_tools` → `refresh_tools()`（下一轮 turn 生效）；失败只告警、不致命。`--list-tools --codemode` 也会列出它（只读名字与描述， **不构造工具**，否则为了列个名字要编译 7.4 MB）。
 
-**刻意没动 `default_tools`**：它被很多测试用到，而构造 codemode 要编译组件——放进默认列表会让每个用默认工具的测试都变慢；所以 codemode 只在开关打开时才构造。
+**刻意没把 codemode 放进内置工具插件集合**：构造 codemode 要编译组件，放进默认列表会让每个使用标准工具集的宿主都变慢；所以 codemode 只在开关打开时才由装配层追加。
 
 > **插件化（已接线）**：codemode 是一个 **静态插件**（`CodemodePlugin`：`protected` + `provides tool.codemode`），
 > 与 `tower-agent-wasmtime` 的 `WasmtimePlugin`（`protected` + 能力 `sandbox.wasmtime`）一起不允许被

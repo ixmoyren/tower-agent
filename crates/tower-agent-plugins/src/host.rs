@@ -210,8 +210,15 @@ impl PluginAccess {
 
 #[cfg(test)]
 mod tests {
+    use std::task::{Context, Poll};
+
+    use futures_util::future::BoxFuture;
     use semver::Version;
+    use tower::Service;
     use tower_agent_provider::{Arguments, ToolCall};
+    use tower_agent_runtime::{
+        AgentError, AgentTool, AgentToolResult, ToolCallRequest, ToolResultStream,
+    };
 
     use super::*;
     use crate::{Dependency, PluginKind};
@@ -226,8 +233,25 @@ mod tests {
         })
     }
 
+    #[derive(Clone)]
+    struct Echo;
+
+    impl Service<ToolCallRequest> for Echo {
+        type Response = ToolResultStream;
+        type Error = AgentError;
+        type Future = BoxFuture<'static, Result<ToolResultStream, AgentError>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: ToolCallRequest) -> Self::Future {
+            Box::pin(async { Ok(ToolResultStream::once(AgentToolResult::text("ok"))) })
+        }
+    }
+
     fn host() -> HostApi {
-        HostApi::from_tools([tower_agent_tools::create_ls_tool(std::env::temp_dir())])
+        HostApi::from_tools([AgentTool::new("ls", Echo)])
     }
 
     fn manifest(name: &str) -> PluginManifest {

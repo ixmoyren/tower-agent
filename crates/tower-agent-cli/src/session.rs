@@ -223,9 +223,11 @@ impl Session {
         let system_prompt = format!(
             "你是 tower-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
          使用工具而不是猜测文件内容；修改文件前先读一遍。",
-            tower_agent_plugins::DEFAULT_TOOL_NAMES.join(", ")
+            tower_agent::tools::DEFAULT_TOOL_NAMES.join(", ")
         );
-        let base_tools = tower_agent_plugins::default_tools(&cwd);
+        let base_tools = tower_agent::assembly::HostPlugins::new(&cwd)
+            .tools()
+            .expect("内置工具插件应可解析");
         let script_hooks = Arc::new(ScriptHookRegistry::new());
         #[cfg(not(feature = "codemode-python"))]
         let _ = codemode_enabled;
@@ -1712,7 +1714,7 @@ on("tool_call", "block");
         let names: Vec<&str> = state.tools.iter().map(|tool| tool.name()).collect();
         // 内置工具在最前；启用 mods 时其后会追加 `mod_*` 作者工具。
         assert!(
-            names.starts_with(&tower_agent_plugins::DEFAULT_TOOL_NAMES),
+            names.starts_with(&tower_agent::tools::DEFAULT_TOOL_NAMES),
             "内置工具应按顺序领先：{names:?}"
         );
         assert!(state.system_prompt.contains("read"));

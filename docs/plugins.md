@@ -8,7 +8,7 @@
 
 把 tower-agent 从「编译期内置能力集合」升级为「可组合、可扩展、可热插拔的能力平台」，满足：
 
-1. **内置能力插件化**：核心插件与内置 tool 走统一注册/解析体系，而不是写死在 `tower_agent_tools::default_tools()`。
+1. **内置能力插件化**：核心插件与内置 tool 走统一注册/解析体系；工具 crate 提供七个独立静态插件，宿主装配层负责把它们登记到注册表。
 2. **三种插件形态**：静态（tower Layer）、动态（stabby `cdylib`）、热重载（monty，Python 子集沙箱），覆盖从「零开销内置」到「热加载的 codemode 脚本」的整条光谱。
 3. **跨形态能力调用**：动态与 JIT 插件可以互相调用对方提供的能力。
 4. **确定性解析**：无循环依赖；菱形依赖用版本机制收敛；同名插件按形态优先级覆盖。
@@ -268,9 +268,9 @@ stabby::export! {
 2. **每个 tool 都是 tower 中的 layer**：`tools` crate 里每个工具除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tower_agent_tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上，得到发给 agent 的可执行服务。工具层可以与 tower 生态的其它 layer（`timeout` / `limit` / `buffer` ……）自由组合。
 3. **工具钩子也是 layer**：`tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`，分别对应 pi 的 `tool_call`（可放行/改写/拦截）与 `tool_result`（逐条改写结果）钩子。
 4. **typed 工具注册**：`tower_agent_runtime::ToolRegistration::new::<P, _, _>(...)` 用 schemars 生成参数 schema、用 serde 反序列化入参，校验失败编码为 `is_error` 工具结果。
-5. `plugins` 宿主把这些工具逐个注册为静态插件，并通过 `default_registry` / `resolve_default` / `default_tools` 提供内置集合；`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在解析结果上做过滤。
+5. `tower-agent-tools` 导出七个独立静态插件和 `builtin_plugins(cwd)` 插件集合，但**不创建注册表、不解析、不安装**；`tower-agent::assembly::HostPlugins` 负责登记到 `PluginRegistry` 并解析安装。`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在装配后的解析结果上过滤。
 6. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为工具的实现细节，不对外暴露成能力。
-7. 不再有独立的 `plugins-builtin` crate：内置工具插件由 `plugins` 宿主直接装配，`plugins → tools` 依赖单向。
+7. 内置工具覆盖以**插件名**为单位：替换 `read` 就注册另一个名为 `read` 的高优先级插件，只影响 `read`；`tool.read` 仅作为能力/依赖标识，不作为工具插件覆盖入口。
 8. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `tower-agent-cli::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
 
 ## 10. crate 划分
@@ -282,9 +282,9 @@ crates/
   tower-agent-monty/        热重载插件宿主（monty + monty-pool，子进程崩溃隔离）
 ```
 
-- 依赖方向：`plugins-sdk → plugins`（仅共享类型）；`plugins → tools`（宿主装配内置工具插件），`tools` 是工具实现所在 crate。
+- 依赖方向：`plugins → runtime`（只提供宿主机制）；`tools → plugins + runtime + provider`（工具实现 + 独立插件声明）；`tower-agent` 门面依赖二者并负责装配。
 - 热重载宿主独立成 crate `tower-agent-monty`（不依赖具体动态插件 ABI）。
-- `agent` / `ai` / `tools` 不反向依赖 `plugins`；`plugins` 依赖它们以包装 `AgentTool`、`BoxStreamService` 等。
+- `plugins` 不依赖任何具体工具实现；`tools` 实现 `StaticPlugin` 并通过 `PluginContext` 登记工具。
 
 ## 11. Feature / 构建
 
@@ -355,7 +355,7 @@ pub enum PluginError {
 ## 16. 已确认决策
 
 1. **多版本**：静态插件 **不支持多版本**（单一实例，版本必须满足所有消费者的 `^` 要求）；动态与 JIT 按 **major 多版本并存**。
-2. **覆盖粒度**：既支持插件名整体覆盖（形态优先级 `静态 < 动态 < JIT`），也允许 **对单个能力显式覆盖**（`CapabilityOverride`）。
+2. **覆盖粒度**：内置工具按插件名整体覆盖（形态优先级 `静态 < 动态 < JIT`），例如用动态/JIT 的同名 `read` 替换静态 `read`；`CapabilityOverride` 只用于非工具能力的依赖绑定，不作为内置工具覆盖方式。
 3. **权限**：采用 **运行时提示**（首次调用需要权限的能力时询问用户，按会话缓存；无人值守默认拒绝）。
 4. **热更一致性**：调用在 **发起时绑定版本**；in-flight 调用在旧版本上完成，之后的新调用用新版本。
 5. **版本 / ABI 兼容**：一律 `^`（semver 兼容）； **major 不兼容即拒绝**，不静默降级。

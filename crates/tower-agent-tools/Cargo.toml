@@ -1,6 +1,6 @@
 [package]
 name = "tower-agent-tools"
-description = "tower-agent built-in tools (pi `coding-agent` core/tools)."
+description = "tower-agent built-in tools and their seven independent static plugin declarations."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -26,3 +26,5 @@ tower = { workspace = true }
 unicode-normalization = "0.1"
 brush-core = { git = "https://github.com/reubeno/brush", version = "0.5.0" }
 brush-builtins = { git = "https://github.com/reubeno/brush", version = "0.2.0" }
+tower-agent-plugins.workspace = true
+semver.workspace = true

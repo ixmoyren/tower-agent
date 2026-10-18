@@ -14,7 +14,7 @@ workspace = true
 
 [features]
 default = ["codemode", "codemode-python", "codemode-js"]
-codemode = ["dep:tower-agent", "tower-agent/codemode"]
+codemode = ["tower-agent/codemode"]
 codemode-python = [
     "codemode",
     "tower-agent/codemode-python",
@@ -27,7 +27,6 @@ codemode-js = [
 ]
 
 [dependencies]
-tower-agent = { workspace = true, default-features = false, optional = true }
 tower-agent-core = { workspace = true }
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
@@ -45,6 +44,7 @@ tower-agent-storage.workspace = true
 tower-agent-turso.workspace = true
 tower-agent-codemode-core.workspace = true
 tower-agent-ui.workspace = true
+tower-agent = { workspace = true, default-features = false }
 
 [dev-dependencies]
 tower-agent-provider = { workspace = true, features = ["test-util"] }

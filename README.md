@@ -42,7 +42,7 @@
 | `tower-agent-core`       | **契约**：`AgentRequest`/`AgentResponse`/`AgentEventStream`、消息与事件、工具边界、Layer 扩展点、错误 |
 | `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
 | `tower-agent-provider`   | **provider**：多 provider LLM Service、`Models` 路由、认证、模型目录                                  |
-| `tower-agent-tools`      | **内置工具**：read / shell / edit / write / grep / find / ls                                          |
+| `tower-agent-tools`      | **内置工具与插件合集**：七个工具实现及各自独立的静态插件声明                                           |
 | `tower-agent-plugins`    | **插件宿主**：注册表、生命周期、HostApi、权限、三类加载器                                             |
 | `tower-agent-plugin-sdk` | **插件作者 SDK**：`declare_plugin!`、静态 / 动态 ABI 契约                                             |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
@@ -53,8 +53,9 @@
 | `tower-agent-cli`        | **CLI 宿主**：二进制名 `tower-agent`，以 `Service` / `Layer` 组合装配会话                             |
 
 **分层原则**：`tower-agent-core` 只放契约与类型， **不依赖** runtime / plugins / 前端；
-编排循环、队列、事件总线在 `runtime`；`tower-agent-ui` 承载前端无关的会话状态与命令，
-`tower-agent-tui` 只做 ratatui 渲染；provider / 工具 / 插件各自独立成 crate。门面 crate 不依赖终端前端。
+编排循环、队列、事件总线在 `runtime`；`tools` 提供工具实现与插件声明，`plugins` 提供注册表等宿主机制，
+内置工具只由门面装配层登记；`tower-agent-ui` 承载前端无关的会话状态与命令，
+`tower-agent-tui` 只做 ratatui 渲染。门面 crate 不依赖终端前端。
 
 ### 三种插件形态
 

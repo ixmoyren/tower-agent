@@ -5364,7 +5364,6 @@ dependencies = [
  "tower",
  "tower-agent-provider",
  "tower-agent-runtime",
- "tower-agent-tools",
 ]
 
 [[package]]
@@ -5434,12 +5433,14 @@ dependencies = [
  "globset",
  "ignore",
  "regex",
+ "semver",
  "serde_json",
  "similar",
  "tempfile",
  "tokio",
  "tokio-util",
  "tower",
+ "tower-agent-plugins",
  "tower-agent-provider",
  "tower-agent-runtime",
  "unicode-normalization",
