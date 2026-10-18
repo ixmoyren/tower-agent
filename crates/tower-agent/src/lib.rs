@@ -20,7 +20,9 @@ pub use tower_agent_tools as tools;
 
 pub mod assembly;
 
-#[cfg(feature = "mods")]
+#[cfg(feature = "codemode-js")]
+pub use tower_agent_codemode as codemode;
+#[cfg(feature = "codemode-python")]
 pub use tower_agent_monty as monty;
 #[cfg(feature = "plugin-sdk")]
 pub use tower_agent_plugin_sdk as plugin_sdk;

@@ -126,7 +126,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 |------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
 | P1   | **统一能力层**：抽出 `CapabilitySurface`（exec / fs / tool_call / tool_register / state / log / ui）到新的内部 crate `tower-agent-codemode-core`（引擎无关，避免 monty ↔ codemode 依赖成环）；monty 接上 `exec`（coreutils-wasm）；JS 引擎接上 `tool_call` / `tool_register` | 两个引擎各有一组同样的能力测试                                                                       |
 | P2   | **统一提示词 + 引擎选择**：`PromptBuilder` 由 `CapabilitySurface` 生成；引擎**全局默认 + 脚本可覆盖**（Q1）：`--codemode-engine monty\|js` 定进程默认，脚本头声明语言时覆盖它                                                                                                | 同一任务在两种引擎下都能跑通；提示词随能力/引擎变化                                                  |
-| P3   | **合并 feature / CLI**：`mods` 与 `codemode` 合并为 `codemode`（两个引擎各一个子 feature：`codemode-python` / `codemode-js`，**都保留**，Q2）；`--codemode*` 一整套开关；`mod_*` 作者工具并入 codemode                                                                       | `--no-default-features` 只留内置工具；`-p codemode-python` / `-p codemode-js` 各自可编译，也可一起编 |
+| P3   | **合并 feature / CLI**：feature 已收敛为 `codemode`（共享层）+ `codemode-python` / `codemode-js`（Q2）；CLI 开关与 `mod_*` 作者工具改名仍待后续任务                                                               | 无默认只留内置工具；Python / JS 可分别启用，也可同时启用                                               |
 | P4   | **统一会话与存储**：脚本仓库（持久 / 临时）、会话根、快照、权限，一套模型两种引擎共用                                                                                                                                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
 | P5   | **接扩展点 v0**：`tower-agent-plugin-sdk` 的扩展点 = **工具注册 + `tool_call` / `tool_result` 钩子**（Q4）；codemode 把 host function 映射过去                                                                                                                               | 一个脚本能注册工具并在下一轮生效（与现在 monty 等价）+ 能在工具执行前改写/拦截、执行后改写结果       |
 
@@ -139,7 +139,8 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 ### 0.8 影响面
 
 - crate：`tower-agent-codemode`（宿主，吃掉 monty 的宿主职责或改为引擎适配器）、`tower-agent-monty`（Python 引擎）、`tower-agent-wasmtime`（不变）、 **新增内部 crate `tower-agent-codemode-core`**（能力层 / 提示词 / 脚本模型，引擎无关）、 **扩展 `tower-agent-plugin-sdk`**（不新增对外 SDK crate）。
-- feature：`tower-agent` 门面 / `tower-agent-cli` 的 `mods` + `codemode` → `codemode` + `codemode-python` + `codemode-js`。
+- feature：`tower-agent` 门面 / `tower-agent-cli` 已收敛为 `codemode` + `codemode-python` + `codemode-js`；
+  默认三者都开，`mods` feature 已删除且没有兼容别名。
 - CLI：`--codemode` / `--codemode-engine` / `--codemode-session*` / 权限开关；`TPA_NO_MODS` 废弃。
 - 文档：`docs/codemode.md`（本文件，v2 提案 + JS 细节）、`docs/sdk.md`（扩展点设计，落在 plugin-sdk）、`docs/plugins.md`（§4.3 / §16 需改：JIT 形态与 codemode 的关系）、`docs/design.md`（§5 CLI 段落与待办）。
 - 测试：能力层的"双引擎一致性"测试（同一脚本语义在两种语言下等价）、提示词快照测试、权限矩阵测试。

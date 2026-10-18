@@ -20,9 +20,9 @@ use tokio::sync::mpsc;
 use tower::ServiceExt as _;
 use tower_agent_codemode_core::{ScriptLanguage, ScriptMetadata};
 use tower_agent_core::UiState;
-#[cfg(feature = "mods")]
+#[cfg(feature = "codemode-python")]
 use tower_agent_monty::ModManager;
-#[cfg(feature = "codemode")]
+#[cfg(feature = "codemode-js")]
 use tower_agent_plugins::StaticPlugin as _;
 use tower_agent_storage::{ConfigScope, ProviderCredential};
 
@@ -47,8 +47,8 @@ pub struct Session {
     cwd: PathBuf,
     /// mods 未启用时的工具目录（内置工具）。
     base_tools: Mutex<Vec<AgentTool>>,
-    /// mods 宿主；解释器内嵌在 `tower-agent-monty` 中，默认启用（`TPA_NO_MODS` 可关闭）。
-    #[cfg(feature = "mods")]
+    /// codemode Python 宿主；解释器内嵌在 `tower-agent-monty` 中，默认启用。
+    #[cfg(feature = "codemode-python")]
     mods: Option<Arc<ModManager>>,
     /// 工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
     tool_filter: Mutex<ToolFilter>,
@@ -104,7 +104,7 @@ impl Session {
     /// 启用 mods 时把 codemode 作为**受保护静态插件**注册进统一注册表（名字 `codemode`、
     /// 能力 `tool.codemode` 因此进 `protected_*`，动态 / JIT 插件不能顶替）；未启用 mods
     /// 时退化成直接追加到地基工具集。
-    #[cfg(feature = "codemode")]
+    #[cfg(feature = "codemode-js")]
     pub fn enable_codemode(
         &self,
         workspace: &Path,
@@ -122,7 +122,7 @@ impl Session {
             ),
             None => tower_agent_codemode::SessionRoot::Ephemeral,
         };
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         let exec_surface = self
             .mods
             .as_ref()
@@ -133,7 +133,7 @@ impl Session {
             })
             .transpose()?;
         let plugin = tower_agent_codemode::CodemodePlugin::new(workspace, root).with_mounts(parsed);
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         if let Some(mods) = &self.mods {
             mods.register_static_plugin(Arc::new(plugin))
                 .map_err(|error| error.to_string())?;
@@ -199,8 +199,8 @@ impl Session {
         let base_tools = tower_agent_plugins::default_tools(&cwd);
         // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
         // 内置静态插件与 JIT mod 共用一张注册表：工具目录来自「解析 + 安装」。
-        // monty 解释器随 `tower-agent-monty` 内嵌（CLI feature `mods`），`TPA_NO_MODS` 可关闭。
-        #[cfg(feature = "mods")]
+        // monty 解释器随 `tower-agent-monty` 内嵌（CLI feature `codemode-python`）。
+        #[cfg(feature = "codemode-python")]
         let mods = if std::env::var_os("TPA_NO_MODS").is_none() {
             // 插件集合与 mods 宿主都来自组装层（含 wasmtime 等受保护宿主能力），
             // 不在会话里硬编码。
@@ -219,12 +219,12 @@ impl Session {
             None
         };
 
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         let initial_tools = match &mods {
             Some(mods) => mods.tools(),
             None => base_tools.clone(),
         };
-        #[cfg(not(feature = "mods"))]
+        #[cfg(not(feature = "codemode-python"))]
         let initial_tools = base_tools.clone();
 
         let mut options = AgentOptions::new(stream);
@@ -239,7 +239,7 @@ impl Session {
             control,
             cwd,
             base_tools: Mutex::new(base_tools),
-            #[cfg(feature = "mods")]
+            #[cfg(feature = "codemode-python")]
             mods,
             tool_filter: Mutex::new(ToolFilter::default()),
             codemode_engine: Mutex::new(ScriptLanguage::JavaScript),
@@ -364,11 +364,11 @@ impl Session {
     /// mods 的共享 UI 状态（未启用 mods 时为 `None`）。
     #[must_use]
     pub fn ui_state(&self) -> Option<UiState> {
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         {
             self.mods.as_ref().map(|mods| mods.ui())
         }
-        #[cfg(not(feature = "mods"))]
+        #[cfg(not(feature = "codemode-python"))]
         {
             None
         }
@@ -376,7 +376,7 @@ impl Session {
 
     /// 后台预热 mods 沙箱（编译组件 + 预建实例）；在运行时内调用才生效。
     pub fn prewarm_mods(&self) {
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         if let Some(mods) = &self.mods {
             mods.spawn_warmup();
         }
@@ -384,14 +384,14 @@ impl Session {
 
     /// 加载持久化的 mod（`dirs` 的 config 目录）；返回加载数量。
     pub async fn load_persisted_mods(&self) -> usize {
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         {
             match &self.mods {
                 Some(mods) => mods.load_persisted().await,
                 None => 0,
             }
         }
-        #[cfg(not(feature = "mods"))]
+        #[cfg(not(feature = "codemode-python"))]
         {
             0
         }
@@ -400,7 +400,7 @@ impl Session {
     /// 从 `dirs` 的 config 目录（`tower-agent/plugins`）加载动态插件；返回加载数量。
     #[allow(unsafe_code)] // 加载用户配置目录里的动态库，视作受信任。
     pub fn load_dynamic_plugins(&self) -> usize {
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         {
             let Some(mods) = &self.mods else {
                 return 0;
@@ -413,7 +413,7 @@ impl Session {
                 }
             }
         }
-        #[cfg(not(feature = "mods"))]
+        #[cfg(not(feature = "codemode-python"))]
         {
             0
         }
@@ -424,12 +424,12 @@ impl Session {
     /// mod 在运行中 `tool_register` 之后，下一轮 turn 开始前会走到这里，因此新工具
     /// 会被 agent 看到。
     fn refresh_tools(&self) {
-        #[cfg(feature = "mods")]
+        #[cfg(feature = "codemode-python")]
         let catalog = match &self.mods {
             Some(mods) => mods.tools(),
             None => self.base_tools.lock().expect("base tools poisoned").clone(),
         };
-        #[cfg(not(feature = "mods"))]
+        #[cfg(not(feature = "codemode-python"))]
         let catalog = self.base_tools.lock().expect("base tools poisoned").clone();
         let filter = self
             .tool_filter
@@ -493,11 +493,11 @@ impl Session {
 ///
 /// 没有编译进 mods 能力时不存在作者工具，一律不算保留名。
 fn is_host_reserved(name: &str) -> bool {
-    #[cfg(feature = "mods")]
+    #[cfg(feature = "codemode-python")]
     {
         tower_agent_monty::is_reserved_name(name)
     }
-    #[cfg(not(feature = "mods"))]
+    #[cfg(not(feature = "codemode-python"))]
     {
         let _ = name;
         false
@@ -907,7 +907,7 @@ pub async fn run_tui(
     });
 
     let plugins = tower_agent_tui::frontend_plugins();
-    #[cfg(feature = "mods")]
+    #[cfg(feature = "codemode-python")]
     let plugins = {
         let mut plugins = plugins;
         if let Some(mods) = &session.mods {

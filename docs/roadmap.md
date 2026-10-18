@@ -18,7 +18,7 @@
 
 - ◐ **统一能力层**（`CapabilitySurface`）：`tower-agent-codemode-core` 已落语言 / 权限 / 能力面 / 结构化错误；两个引擎已通过 exec / fs / tool_call / tool_register / state / log / ui 能力矩阵；待钩子与其余能力补齐。 **P0**
 - ◐ **统一提示词 + 引擎选择**：`PromptBuilder`、CLI / 配置 / 脚本三级优先级均已落地；待统一的 feature/host 分发把选择结果接到实际引擎。 **P0**
-- ❌ **合并 feature / CLI**：`mods` + `codemode` → `codemode` + `codemode-python` + `codemode-js`（两个引擎都保留，Q2）；`mod_*` 作者工具并入。 **P0**
+- ◐ **合并 feature / CLI**：feature 已收敛为 `codemode` + `codemode-python` + `codemode-js`；待 CLI 开关与作者工具词汇收敛。 **P0**
 - ❌ **脚本仓库**（Q6 = c）：storage 为真源 + 显式导出/导入（每脚本一个文件，元数据永远在 storage）。 **P0**
 - ❌ **统一会话与存储**：`ScriptStore`、会话根、快照、权限一套模型。 **P1**
 - ❌ **扩展点 v0**（落 `tower-agent-plugin-sdk`）：工具注册 + `tool_call` / `tool_result` 钩子（Q4）；Rust 侧先可用，脚本侧 host function 跟上。 **P0**

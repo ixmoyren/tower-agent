@@ -19,20 +19,20 @@ use std::{path::PathBuf, sync::Arc};
 use tower_agent_core::AgentTool;
 use tower_agent_plugins::{PluginError, PluginRegistry, StaticPlugin};
 
-#[cfg(feature = "codemode")]
+#[cfg(feature = "codemode-js")]
 pub use tower_agent_codemode::{Mount, SessionRoot};
-#[cfg(feature = "mods")]
+#[cfg(feature = "codemode-python")]
 use tower_agent_core::UiState;
 
 /// 宿主静态插件集合的组装器。
 pub struct HostPlugins {
     cwd: PathBuf,
     extra: Vec<Arc<dyn StaticPlugin>>,
-    #[cfg(feature = "codemode")]
+    #[cfg(feature = "codemode-js")]
     codemode: Option<CodemodeSetup>,
 }
 
-#[cfg(feature = "codemode")]
+#[cfg(feature = "codemode-js")]
 struct CodemodeSetup {
     session: SessionRoot,
     mounts: Vec<Mount>,
@@ -45,7 +45,7 @@ impl HostPlugins {
         Self {
             cwd: cwd.into(),
             extra: Vec::new(),
-            #[cfg(feature = "codemode")]
+            #[cfg(feature = "codemode-js")]
             codemode: None,
         }
     }
@@ -54,7 +54,7 @@ impl HostPlugins {
     ///
     /// `session` 决定沙箱里 `/` 是临时目录（会话即焚）还是持久目录；`mounts` 是会话根之外
     /// 的额外挂载。构造本身很便宜——组件要到安装时才编译（由插件内部缓存）。
-    #[cfg(feature = "codemode")]
+    #[cfg(feature = "codemode-js")]
     #[must_use]
     pub fn with_codemode(mut self, session: SessionRoot, mounts: Vec<Mount>) -> Self {
         self.codemode = Some(CodemodeSetup { session, mounts });
@@ -76,7 +76,7 @@ impl HostPlugins {
         registry
             .register_plugin(Arc::new(tower_agent_wasmtime::WasmtimePlugin::new()))
             .expect("wasmtime 清单固定且自洽");
-        #[cfg(feature = "codemode")]
+        #[cfg(feature = "codemode-js")]
         if let Some(setup) = self.codemode {
             let plugin = tower_agent_codemode::CodemodePlugin::new(self.cwd.clone(), setup.session)
                 .with_mounts(setup.mounts);
@@ -102,9 +102,9 @@ impl HostPlugins {
     /// 宿主静态插件集合定下来后，`tower_agent_monty` 在其上叠加自己的运行时地基
     /// （受保护静态插件 `agent-monty` + 作者工具 `mod_*`）。会热重载 / 动态插件的宿主
     /// 用这个；只要内置工具 + 宿主能力的宿主用 [`HostPlugins::tools`]。
-    #[cfg(feature = "mods")]
+    #[cfg(feature = "codemode-python")]
     pub fn mods(self, ui: UiState) -> Result<Arc<tower_agent_monty::ModManager>, PluginError> {
-        #[cfg(feature = "codemode")]
+        #[cfg(feature = "codemode-js")]
         let capability_surface = self
             .codemode
             .as_ref()
@@ -121,7 +121,7 @@ impl HostPlugins {
             })
             .transpose()?;
         let manager = tower_agent_monty::ModManager::new(ui, self.registry())?;
-        #[cfg(feature = "codemode")]
+        #[cfg(feature = "codemode-js")]
         if let Some(surface) = capability_surface {
             manager.set_capability_surface(surface);
         }

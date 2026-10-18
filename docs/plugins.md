@@ -382,10 +382,10 @@ pub enum PluginError {
   `WasmtimePlugin`：静态 / `protected` / `provides("sandbox","wasmtime")` / 空安装）。已确认新增依赖不成环。
 - **组装层落位（2026-10-12 追加）**：宿主静态插件集合收敛到 `tower-agent::assembly::HostPlugins`
   （门面 crate，依赖 `tower-agent` 的 axum 等宿主同样能用）；`ModManager` 不再自己塞 wasmtime。
-- **能力矩阵 feature 化（2026-10-12 追加）**：`tower-agent` 门面 `[features]` =
-  `sandbox-wasmtime`（wasmtime 占位插件）/ `codemode`（codemode 插件）/ `mods`（monty JIT 宿主），
-  组装层按 feature 决定注册哪些静态插件；`tower-agent-cli` 同样有 `mods` / `codemode` feature
-  （默认都开），关掉后二进制只剩内置工具。两端 `--no-default-features` 都已验证编译。
+- **能力矩阵 feature 化**：`tower-agent` 门面 `[features]` =
+  `sandbox-wasmtime` / `codemode`（共享入口）/ `codemode-python`（monty）/
+  `codemode-js`（rquickjs）。`tower-agent-cli` 使用同一组 feature，默认三者都开；
+  `mods` feature 已删除。两端 `--no-default-features` 以及两个单引擎组合都已验证编译。
 
 ### 16.2 待办（按顺序；落地后勾选）
 
@@ -409,13 +409,11 @@ pub enum PluginError {
   `[features] default = ["sandbox-wasmtime", "codemode"]`、`sandbox-wasmtime = ["dep:tower-agent-wasmtime"]`、
   `codemode = ["dep:tower-agent-codemode", "sandbox-wasmtime"]`；组装层用 `#[cfg(feature = "…")]`
   决定注册哪些插件，`--no-default-features` 下只剩内置工具（已验证编译）。见 §11。
-- [x] **5. mods（monty）也 feature 化**：`tower-agent` 加 `mods = ["dep:tower-agent-monty", "sandbox-wasmtime"]`
-  可选依赖；组装层 `HostPlugins::mods(ui)` 在插件集合之上建 `ModManager`，monty 只再叠加自己的
-  运行时地基。关掉 `mods` 时 monty 连它的 wasmtime 沙箱实现一起不编进来——「monty 硬依赖
-  wasmtime」只剩在 monty 内部成立（要 mods 就必须有沙箱），对宿主不再构成约束。
-- [x] **6. CLI 二进制的 feature 化**：`tower-agent-cli` 加 `[features] default = ["mods", "codemode"]`，
-  `mods` / `codemode` 分别把 `tower-agent-monty` / `tower-agent-codemode` 变成 optional 依赖；
-  `session` 与 `main` 里所有 mods / codemode 触点都 `#[cfg]` 包住——无 mods 时回退到 `base_tools`、
-  作者工具的保留名判定恒假、TUI 不挂 mods 面板；无 codemode 时 `--codemode*` 明确报「本构建未包含」。
+- [x] **5. Python / JavaScript 引擎 feature 化**：`codemode` 是共享入口，
+  `codemode-python = ["codemode", "dep:tower-agent-monty"]`、
+  `codemode-js = ["codemode", "dep:tower-agent-codemode"]`；默认三者都开，两个引擎也可各自单独编译。
+- [x] **6. CLI 二进制的 feature 化**：`tower-agent-cli` 使用同名三 feature，并通过
+  `tower-agent/codemode-*` 继续传递引擎选择；无默认时只剩内置工具，单 Python / 单 JS
+  以及共享层单独启用均已验证编译。CLI 开关收敛与旧 mods 环境变量清理留到 T3.2。
   `tokio` 补 `rt-multi-thread`（少了 monty 的隐式 feature 后，`main` 的多线程 runtime 才成立）。
   `cargo check/test -p tower-agent-cli --no-default-features` 已验证（只剩内置工具）。

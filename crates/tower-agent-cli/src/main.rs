@@ -261,7 +261,7 @@ fn main() -> ExitCode {
     });
     session.set_codemode_engine(codemode_engine);
     if args.codemode {
-        #[cfg(feature = "codemode")]
+        #[cfg(feature = "codemode-js")]
         if let Err(error) = session.enable_codemode(
             &cwd,
             args.codemode_session.as_deref(),
@@ -269,7 +269,7 @@ fn main() -> ExitCode {
         ) {
             eprintln!("codemode 未启用：{error}");
         }
-        #[cfg(not(feature = "codemode"))]
+        #[cfg(not(feature = "codemode-js"))]
         eprintln!("codemode 未启用：本构建未包含 codemode（缺少 `codemode` feature）。");
     }
     // 还没有 provider 时在 TUI 里先给一句提示，告诉用户用 `/login` 配置。
@@ -325,7 +325,7 @@ fn main() -> ExitCode {
 }
 
 fn print_sessions() -> ExitCode {
-    #[cfg(feature = "codemode")]
+    #[cfg(feature = "codemode-js")]
     {
         let Some(root) = tower_agent_codemode::sessions_root() else {
             eprintln!("拿不到配置目录，无法列出会话。");
@@ -342,7 +342,7 @@ fn print_sessions() -> ExitCode {
         }
         ExitCode::SUCCESS
     }
-    #[cfg(not(feature = "codemode"))]
+    #[cfg(not(feature = "codemode-js"))]
     {
         eprintln!("本构建未包含 codemode（缺少 `codemode` feature）。");
         ExitCode::FAILURE
@@ -350,7 +350,7 @@ fn print_sessions() -> ExitCode {
 }
 
 fn clear_session(name: &str) -> ExitCode {
-    #[cfg(feature = "codemode")]
+    #[cfg(feature = "codemode-js")]
     {
         let Some(root) = tower_agent_codemode::sessions_root() else {
             eprintln!("拿不到配置目录，无法清理会话。");
@@ -371,7 +371,7 @@ fn clear_session(name: &str) -> ExitCode {
             }
         }
     }
-    #[cfg(not(feature = "codemode"))]
+    #[cfg(not(feature = "codemode-js"))]
     {
         let _ = name;
         eprintln!("本构建未包含 codemode（缺少 `codemode` feature）。");
@@ -505,7 +505,7 @@ fn print_tools(codemode: bool) {
     // codemode 只在 `--codemode` 打开时才进工具集；这里只列名字与描述，**不构造工具**
     // （构造要编译 7.4 MB 组件，为了列个名字不值）。
     if codemode {
-        #[cfg(feature = "codemode")]
+        #[cfg(feature = "codemode-js")]
         {
             println!(
                 "  {:<12} {}",
@@ -517,7 +517,7 @@ fn print_tools(codemode: bool) {
             );
             println!("  （--codemode-session <name> 可把会话根持久化到 config 目录）");
         }
-        #[cfg(not(feature = "codemode"))]
+        #[cfg(not(feature = "codemode-js"))]
         println!("  （本构建未包含 codemode，`--codemode` 无效）");
     }
 }

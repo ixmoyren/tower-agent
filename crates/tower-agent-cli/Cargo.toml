@@ -13,11 +13,21 @@ path = "src/main.rs"
 workspace = true
 
 [features]
-default = ["mods", "codemode"]
-# JIT mods 宿主（monty）；关掉后二进制只剩内置工具。
-mods = ["tower-agent/mods", "dep:tower-agent-monty"]
-# codemode（`--codemode` 与 `--codemode-sessions*`）。
-codemode = ["dep:tower-agent-codemode"]
+default = ["codemode", "codemode-python", "codemode-js"]
+# codemode 的共享入口，不引入具体解释器。
+codemode = ["dep:tower-agent", "tower-agent/codemode"]
+# Python（monty）解释器。
+codemode-python = [
+    "codemode",
+    "tower-agent/codemode-python",
+    "dep:tower-agent-monty",
+]
+# JavaScript（rquickjs）解释器。
+codemode-js = [
+    "codemode",
+    "tower-agent/codemode-js",
+    "dep:tower-agent-codemode",
+]
 
 [dependencies]
 tower-agent = { workspace = true, default-features = false, optional = true }

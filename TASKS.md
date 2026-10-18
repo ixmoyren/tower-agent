@@ -10,8 +10,8 @@
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
 | 当前阶段   | **Phase 3（合并 feature / CLI / 词汇）**       |
-| 下一个任务 | **T3.1**                                       |
-| 代码状态   | **T1–T2 已完成**：统一能力层、提示词与引擎优先级已落地 |
+| 下一个任务 | **T3.2**                                       |
+| 代码状态   | **T1–T2、T3.1 已完成**：能力层、引擎选择与 feature 合并已落地 |
 
 ---
 
@@ -142,7 +142,7 @@
 
 ## 3. Phase 3 — 合并 feature / CLI / 词汇（P3 + Q3）
 
-### [ ] T3.1 feature 合并
+### [x] T3.1 feature 合并
 
 - **依赖**：T1.2、T1.3（两个引擎都能独立编）
 - **做什么**：
@@ -272,3 +272,4 @@
 | 2026-10-18 | T1.4 | 新增 `capability_parity` 双引擎矩阵：exec / fs / tool_call / tool_register / state / log / ui 全部通过；补齐 JS state/log/ui 与 fs 权限 |
 | 2026-10-18 | T2.1 | `codemode-core` 新增 `PromptBuilder`：由能力集、挂载、限额与语言生成 description / instructions；Python / JS / 能力关闭快照通过 |
 | 2026-10-18 | T2.2 | 新增 `--codemode-engine monty\|js`、`codemode.engine` 有效配置与 `ScriptMetadata.language`；脚本 > CLI > 配置 > 默认 JS，CLI 50 测试通过 |
+| 2026-10-18 | T3.1 | 删除 `mods` feature；门面与 CLI 统一为 `codemode` + `codemode-python` + `codemode-js`；默认、无默认及单引擎组合全部编译通过 |

@@ -33,7 +33,7 @@ fn wasmtime_capability_is_registered_and_protected() {
     );
 }
 
-#[cfg(feature = "codemode")]
+#[cfg(feature = "codemode-js")]
 #[test]
 fn codemode_is_registered_and_protected() {
     use tower_agent::assembly::{HostPlugins, SessionRoot};
@@ -52,7 +52,7 @@ fn codemode_is_registered_and_protected() {
     assert!(registry.ensure_not_protected("codemode").is_err());
 }
 
-#[cfg(feature = "mods")]
+#[cfg(feature = "codemode-python")]
 #[test]
 fn mods_host_is_assembled_on_top_of_the_plugins() {
     let manager = tower_agent::assembly::HostPlugins::new(".")

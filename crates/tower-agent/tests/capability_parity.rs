@@ -1,6 +1,6 @@
 //! Capability matrix shared by the Python/monty and JavaScript/rquickjs engines.
 
-#![cfg(all(feature = "mods", feature = "codemode"))]
+#![cfg(all(feature = "codemode-python", feature = "codemode-js"))]
 
 use futures_util::StreamExt as _;
 use serde_json::Value;

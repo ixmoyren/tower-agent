@@ -1,6 +1,6 @@
 //! End-to-end coverage for monty scripts using the shared exec capability.
 
-#![cfg(all(feature = "mods", feature = "codemode"))]
+#![cfg(all(feature = "codemode-python", feature = "codemode-js"))]
 
 use futures_util::StreamExt as _;
 use tower::ServiceExt as _;
