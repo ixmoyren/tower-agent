@@ -30,7 +30,8 @@ codemode-js = [
 tower-agent-core = { workspace = true }
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
-tower-agent-plugin = { workspace = true, features = ["dynamic", "provider"] }
+tower-agent-plugin = { workspace = true }
+tower-agent-plugin-sdk = { workspace = true, features = ["dynamic", "provider"] }
 tower-agent-tui = { workspace = true }
 tower-agent-monty = { workspace = true, optional = true }
 tower-agent-codemode = { workspace = true, optional = true }

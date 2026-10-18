@@ -2,8 +2,8 @@
 //!
 //! This crate owns concrete vendor implementations and gives each provider an
 //! independent plugin declaration. It also contains the configurable
-//! OpenAI-compatible and JSONL sidecar plugins. Native dynamic provider loading
-//! belongs to `tower-agent-plugin` because it adapts the generic plugin ABI.
+//! OpenAI-compatible and JSONL sidecar plugins. Provider capability adapters
+//! belong to `tower-agent-plugin-sdk`.
 
 mod command;
 pub mod provider;
@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use semver::Version;
 use tower_agent_plugin::StaticPlugin;
+use tower_agent_plugin_sdk::ProviderPluginRegistration;
 use tower_agent_provider::{
     ANTHROPIC_MESSAGES_API, BoxProviderService, CredentialDescriptor, GOOGLE_GENERATIVE_AI_API,
     OPENAI_COMPLETIONS_API, OPENAI_RESPONSES_API, ProviderBuild, ProviderConfig,
@@ -38,7 +39,6 @@ pub use provider::{
     openai::{OpenAiConfig, OpenAiProvider},
     openai_responses::{OpenAiResponsesConfig, OpenAiResponsesProvider},
 };
-use tower_agent_plugin::ProviderPluginRegistration;
 
 pub use command::CommandProviderPlugin;
 

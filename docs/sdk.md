@@ -38,8 +38,8 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 
 | crate                    | 现在负责                                                                                   | 问题                                       |
 |--------------------------|--------------------------------------------------------------------------------------------|--------------------------------------------|
-| `tower-agent-plugin`    | 插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                         | 面向"插件系统"，不是"扩展点"               |
-| `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / `tool::ToolMetadata` / `ToolRegistration` / 动态入口 | 工具注册 + 打包/ABI                        |
+| `tower-agent-plugin`    | 通用插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                     | 面向"插件系统"，不是"扩展点"               |
+| `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / tool 注册 / Provider 能力 / 动态入口 | 扩展能力与打包/ABI                         |
 | `tower-agent-runtime`    | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`              | 有钩子，但很薄、且不统一                   |
 | `tower-agent-monty` / `tower-agent-codemode` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
 
@@ -50,7 +50,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 - `tool`：工具注册（含 pi 的 `exposure` / `namespace` / `annotations` / `outputSchema`）
 - `command`：斜杠命令、快捷键、CLI flag
 - `hook`：事件 / 钩子（工具调用前后、消息、回合、压缩…）
-- `provider`：provider / virtual model / MCP server 注册
+- `provider`：Provider 注册、JSONL wire、动态 Provider 适配；virtual model / MCP 后续扩展
 - `ui`：UI 贡献（状态栏 / 面板 / 渲染器）
 - `session`：发消息、追加条目、会话控制
 - `host`：`HostApi` / 能力调用（ **已有**，保留）
@@ -68,7 +68,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 | `ctx.executeTool(name, args)`（嵌套调用、`parentToolCallId`、记账）            | ❌                                                                                                                   | 需要 runtime 支持"工具内再调工具"的记录与事件 | `plugin_sdk::tool::call(...)`             | ✅（monty 已有 `tool_call`）     |
 | `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ Rust 与 codemode 脚本均支持 `tool_call` / `tool_result` hook；其余事件仍为通知面 | 其余事件                                      | `plugin_sdk::hook::on(Event, handler)`    | ✅ v0 工具前后事件               |
 | `registerCommand` / `registerShortcut` / `registerFlag`                        | ❌ 斜杠命令是硬编码表                                                                                                | 命令/快捷键/flag 注册表 + 前端接线            | `plugin_sdk::command::*`                  | ❌                               |
-| `registerProvider` / `registerVirtualModel`                                    | ❌ provider 由 CLI 直接编排                                                                                          | 把 provider 组装变成注册项                    | `plugin_sdk::provider::register(...)`     | ❌                               |
+| `registerProvider` / `registerVirtualModel`                                    | ◐ Provider 作为普通 Static / Dynamic 插件注册 `Arc<dyn ProviderPlugin>`；virtual model 未实现                           | virtual model 目录与动态替换                  | `plugin_sdk::provider::ProviderPluginRegistration` | ❌                               |
 | `registerMcpServer`                                                            | ❌ MCP 未移植                                                                                                        | MCP 客户端                                    | `plugin_sdk::provider::register_mcp(...)` | ❌                               |
 | `sendMessage` / `sendUserMessage` / `appendEntry`                              | ❌                                                                                                                   | 会话注入入口                                  | `plugin_sdk::session::*`                  | ❌                               |
 | `ctx.ui.*`（对话框 / 状态 / widget / footer / 自定义组件）                     | ◐ `ui_status` / `ui_panel` / `ui_tool_render` 写进前端无关的 `UiState`                                               | 交互式 UI（确认框、输入框）与渲染器注册       | `plugin_sdk::ui::*`                       | ◐（monty 已有 `ui_*`）           |
@@ -226,7 +226,7 @@ JSON 回传脚本（未授权 / 未知能力 / 引擎错误 / 超时 / 取消 / 
 | S2 ✅ | 脚本侧 host function（v0 范围）：`tool_call` / `tool_register` / `on(tool_call)` / `on(tool_result)`；权限矩阵；prompt 同步；两引擎已改变真实 agent 行为 |
 | S3   | `command` / `ui` 扩展点；Rust 与脚本都能注册斜杠命令                                                                                                |
 | S4   | runtime 事件面补齐（§3.1 的第 3–5 条），脚本可真的“改行为”                                                                                          |
-| S5   | `provider` / `mcp` / `resources`（对齐 pi 的主要扩展点）                                                                                            |
+| S5   | Provider 注册能力 ✅；`mcp` / `resources` 后续补齐                                                                                                  |
 
 ## 8. 待决问题
 

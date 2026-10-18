@@ -4,19 +4,23 @@
 //! - 插件回调宿主能力时用 [`HostApi`] / [`PluginAccess`]（跨形态调用不直连，见第 8 节）；
 //! - [`ToolRegistration`] 是 `tower_agent_runtime::ToolRegistration` 的再导出，供插件把 `AgentTool`
 //!   暴露成 `tool.<name>` 能力。
+//! - `provider` feature 提供 Provider 能力适配；Provider 本身仍是普通 Static / Dynamic / JIT
+//!   插件，通过通用 [`PluginContext`] registration slot 注册 `ProviderPlugin`。
 //!
-//! 依赖方向：`plugins-sdk → plugins`（仅共享类型与宿主句柄），插件 crate 依赖本 SDK。
-//! 动态插件的 stabby 入口（`declare_plugin!` 的动态形态）随 `plugins` 的 `dynamic`
+//! 依赖方向：`plugin-sdk → plugin`（共享类型与宿主句柄），插件 crate 依赖本 SDK。
+//! 动态插件的 stabby 入口（`declare_plugin!` 的动态形态）随 `plugin` 的 `dynamic`
 //! feature 一起落地；当前提供的是静态插件路径与共用的宿主句柄类型。
 
 pub mod hook;
+#[cfg(feature = "provider")]
+pub mod provider;
 pub mod tool;
 
+#[cfg(all(feature = "provider", feature = "dynamic"))]
+pub use provider::DynamicProviderPlugin;
+#[cfg(feature = "provider")]
+pub use provider::ProviderPluginRegistration;
 pub use tool::{AgentToolMetadataExt, ToolMetadata};
-#[cfg(feature = "provider")]
-pub use tower_agent_plugin::ProviderPluginRegistration;
-#[cfg(feature = "provider")]
-pub use tower_agent_plugin::provider;
 pub use tower_agent_plugin::{
     AgentLayer, CapabilityId, EventHandler, HostApi, InflightGuard, Lifecycle, Permission,
     PermissionDecision, PermissionPolicy, PermissionPrompter, PluginAccess, PluginContext,
@@ -34,6 +38,8 @@ pub use tower_agent_runtime::{ToolAnnotations, ToolExposure, ToolNamespace, Tool
 /// 插件作者需要与宿主同一版本的 `rkyv`（归档格式与之绑定）。
 #[cfg(feature = "dynamic")]
 pub use rkyv;
+#[cfg(feature = "dynamic")]
+pub use tower_agent_plugin::dynamic;
 #[cfg(feature = "dynamic")]
 pub use tower_agent_plugin::dynamic::{
     AbiBuffer, AbiCapability, AbiHostCall, AbiHostResult, AbiKind, AbiManifest, AbiNode,

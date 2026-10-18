@@ -19,7 +19,7 @@ default = [
 # 可选的前端无关 UI 会话插件 / 协议 / 插件 SDK。
 ui = ["dep:tower-agent-ui"]
 protocol = ["dep:tower-agent-protocol"]
-plugin-sdk = ["dep:tower-agent-plugin-sdk"]
+plugin-sdk = []
 # 默认存储后端：内嵌 Turso（持久化 config / provider 凭据 / 会话 / 历史 / 记忆）。
 storage-turso = ["dep:tower-agent-turso"]
 # 宿主插件能力：由 feature 决定「tower-agent 提供哪些插件」。
@@ -36,12 +36,12 @@ tower-agent-core = { workspace = true }
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-tools = { workspace = true }
-tower-agent-plugin = { workspace = true, features = ["provider"] }
+tower-agent-plugin = { workspace = true }
 tower-agent-wasmtime = { workspace = true, optional = true }
 tower-agent-codemode = { workspace = true, optional = true }
 tower-agent-monty = { workspace = true, optional = true }
 tower-agent-protocol = { workspace = true, optional = true }
-tower-agent-plugin-sdk = { workspace = true, optional = true }
+tower-agent-plugin-sdk = { workspace = true, features = ["provider"] }
 tower-agent-turso = { workspace = true, optional = true }
 tower-agent-ui = { workspace = true, optional = true }
 tower-agent-provider-builtin.workspace = true

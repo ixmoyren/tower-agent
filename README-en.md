@@ -70,10 +70,10 @@ dependencies are declared once through workspace dependencies.
 | `tower-agent-core`       | **Contracts**: `AgentRequest`/`AgentResponse`/`AgentEventStream`, messages & events, tool boundary, layer extension points, errors |
 | `tower-agent-runtime`    | **Runtime**: the `Agent` loop, queues, event bus; stateless / pooled `Service` adapters                                            |
 | `tower-agent-provider`   | **Provider protocol**: messages/models/request schemas, stream services, `Models`, HTTP/SSE, plugin contracts                      |
-| `tower-agent-provider-builtin` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, sidecars                                      |
+| `tower-agent-provider-builtin` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, and sidecars, registered through the SDK  |
 | `tower-agent-tools`      | **Built-in tools**: read / shell / edit / write / grep / find / ls, each as an independent static plugin                          |
-| `tower-agent-plugin`    | **Plugin host**: registry, lifecycle, HostApi, permissions; optional `provider` adapter plus `dynamic` provider bridge               |
-| `tower-agent-plugin-sdk` | **Plugin author SDK**: `declare_plugin!`, static / dynamic ABI contracts                                                           |
+| `tower-agent-plugin`    | **General plugin host**: registry, resolution, lifecycle, HostApi, permissions, and extension slots; Provider-agnostic              |
+| `tower-agent-plugin-sdk` | **Plugin capability SDK**: static / dynamic ABI, host capabilities, Provider registration and wire, dynamic Provider adaptation     |
 | `tower-agent-ui`         | **Frontend-neutral UI backend**: event reduction, session view, slash commands, static UI plugins                                  |
 | `tower-agent-monty`      | **codemode Python host**: embedded monty (Python subset) sandbox plugins + hot-reload script manager                               |
 | `tower-agent-wasmtime`   | **General Wasmtime sandbox base**: component model, WASI, resource limits, JIT cache, and instance pool                           |

@@ -276,8 +276,9 @@ stabby::export! {
 ### 9.1 Provider 插件
 
 - `tower-agent-provider::ProviderPlugin` 是用户 provider 的稳定契约：提供 `ProviderDescriptor`，并把 `ProviderConfig` 构造成 `ProviderBuild`（API → `BoxProviderService`，以及模型目录）。
-- `tower-agent-plugin` 的可选 `provider` feature 提供 `ProviderPluginRegistration`：插件名和能力均为 `provider.<id>`，它向通用 `PluginContext` 注册 `Arc<dyn ProviderPlugin>` extension。该 feature 还提供 Sidecar / 动态 Provider 共用的 JSONL wire；默认插件宿主不启用它。
-- `tower-agent-plugin` 同时启用 `provider` 和 `dynamic` 时提供 `provider::dynamic::DynamicProviderPlugin`。它消费通用 `LoadedPlugin` / `AbiToolCall` / `AbiToolResult` ABI，不再定义 Provider 专用动态入口。
+- `tower-agent-plugin` 保持领域无关，只管理通用插件和 extension slot，不依赖 `tower-agent-provider`。
+- `tower-agent-plugin-sdk` 的可选 `provider` feature 提供 Provider 能力：`ProviderPluginRegistration` 把 Provider 注册为普通静态插件，JSONL wire 供 Sidecar 和动态 Provider 共用。
+- SDK 同时启用 `provider` 和 `dynamic` 时提供 `provider::dynamic::DynamicProviderPlugin`。它消费通用 `LoadedPlugin` / `AbiToolCall` / `AbiToolResult` ABI；Provider 仍然只是一个向通用插件注册 Provider extension 的动态插件。
 - Provider 注册复用通用 `PluginKind` 和 `PluginRegistry`：静态 provider 使用 `PluginKind::Static`，原生动态库 provider 使用 `PluginKind::Dynamic`，因此同名覆盖与 shadow 规则和工具插件完全一致。`ProviderRegistry` 只是安装后的运行时索引。
 - `tower-agent-provider-builtin` 把 Anthropic、OpenAI Chat、OpenAI Responses、Google 和 DeepSeek 分别声明为静态插件；CLI 的 `--provider`、`/login`、`/model` 都从 `ProviderRegistry` 查询，不再维护硬编码 provider 枚举。
 - `ProviderDescriptor` 声明默认 API、默认模型、凭据环境变量和默认选择优先级；宿主统一执行凭据优先级 `CLI > 环境变量 > storage`。

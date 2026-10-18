@@ -55,10 +55,10 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | `tower-agent-core`       | **契约**：`AgentRequest`/`AgentResponse`/`AgentEventStream`、消息与事件、工具边界、Layer 扩展点、错误 |
 | `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
 | `tower-agent-provider`   | **Provider 协议**：消息/模型/请求/事件、Stream Service、Models、HTTP/SSE、插件契约；不含具体厂商实现 |
-| `tower-agent-provider-builtin` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar                    |
+| `tower-agent-provider-builtin` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar，通过 SDK 注册 Provider 能力 |
 | `tower-agent-tools`      | **内置工具与插件合集**：七个工具实现及各自独立的静态插件声明                                           |
-| `tower-agent-plugin`    | **插件宿主**：注册表、生命周期、HostApi、权限；`provider` feature 提供 Provider 适配器，配合 `dynamic` 提供动态桥接 |
-| `tower-agent-plugin-sdk` | **插件作者 SDK**：`declare_plugin!`、静态 / 动态 ABI 契约                                             |
+| `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；不依赖 Provider 领域 |
+| `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider 注册与 wire、动态 Provider 适配              |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
 | `tower-agent-monty`      | **codemode Python 宿主**：内嵌 monty（Python 子集）沙箱插件 + 热重载脚本管理器                       |
 | `tower-agent-wasmtime`   | **通用 Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存与实例池                               |

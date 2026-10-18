@@ -1566,16 +1566,12 @@ dependencies = [
 name = "tower-agent-plugin"
 version = "0.1.0"
 dependencies = [
- "futures-util",
  "libloading",
  "rkyv",
  "semver",
- "serde",
  "serde_json",
  "stabby",
- "tokio",
  "tower",
- "tower-agent-provider",
  "tower-agent-runtime",
 ]
 
@@ -1583,12 +1579,15 @@ dependencies = [
 name = "tower-agent-plugin-sdk"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "rkyv",
  "schemars",
  "semver",
  "serde",
  "serde_json",
  "stabby",
+ "tokio",
+ "tower",
  "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",

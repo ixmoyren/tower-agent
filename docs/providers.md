@@ -7,8 +7,9 @@ Provider 插件把宿主配置转换成 LLM 流式 Service 和模型目录。Age
 
 - `tower-agent-provider`：消息、模型、请求/事件 schema、Stream Service、Models、HTTP/SSE、ProviderPlugin 契约。
 - `tower-agent-provider-builtin`：Anthropic/OpenAI/Google 等具体协议实现、faux 测试实现，以及 OpenAI-compatible / Sidecar 等具体 Provider 插件。
-- `tower-agent-plugin/provider`：Provider 插件接入通用 registry 的 `ProviderPluginRegistration`，以及 Sidecar 与动态 Provider 共用的 JSONL wire 协议；默认不启用。
-- `tower-agent-plugin/provider + dynamic`：`DynamicProviderPlugin`，把通用动态插件 ABI 适配成 Provider 插件；不会维护 Provider 专用动态 ABI。
+- `tower-agent-plugin`：与 Provider 无关的通用插件宿主；负责 Static / Dynamic / JIT 的注册、解析、覆盖和生命周期。
+- `tower-agent-plugin-sdk/provider`：SDK 提供的 Provider 能力，包括 `ProviderPlugin` 注册适配、Sidecar / 动态 Provider 的 JSONL wire，以及 `DynamicProviderPlugin` 桥接。
+- Provider 本身不是特殊插件类型：具体实现就是一个 Static、Dynamic 或 JIT 插件，在其安装过程中通过 SDK 注册 `Arc<dyn ProviderPlugin>` extension。
 
 ## 内置 provider
 
@@ -33,8 +34,8 @@ Provider 插件把宿主配置转换成 LLM 流式 Service 和模型目录。Age
 tower-agent-plugin-sdk = { version = "0.1.0", features = ["provider"] }
 ```
 
-它会把 `tower-agent-plugin/provider`、ProviderPlugin 契约和
-`ProviderPluginRegistration` 一并暴露出来；不使用该 feature 时不引入 Provider 扩展适配器。
+它会把 `tower-agent-plugin-sdk::provider`、ProviderPlugin 契约和
+`ProviderPluginRegistration` 暴露出来；不使用该 feature 时不引入 Provider 能力适配器。
 
 ```rust
 use std::sync::Arc;
@@ -243,7 +244,7 @@ declare_dynamic_plugin!(
 {"type":"done","text":"hello"}
 ```
 
-动态适配器位于 `tower-agent-plugin` 的 `provider::dynamic`，需要同时启用 `provider`
+动态适配器位于 `tower-agent-plugin-sdk` 的 `provider::dynamic`，需要同时启用 `provider`
 和 `dynamic` feature。当前动态插件 ABI v1 是调用返回后批量读取 JSONL；Sidecar ABI
 支持实时 stdout 流。
 
@@ -254,7 +255,7 @@ Provider 专用 ABI：
 ```sh
 cargo build --manifest-path examples/provider-dyn/Cargo.toml
 TPA_PROVIDER_DYNAMIC_EXAMPLE=examples/provider-dyn/target/debug/libtpa_provider_dynamic_example.so \
-  cargo test -p tower-agent-plugin --features dynamic,provider provider::dynamic::tests
+  cargo test -p tower-agent-plugin-sdk --features dynamic,provider provider::dynamic::tests
 ```
 
 ## 边界

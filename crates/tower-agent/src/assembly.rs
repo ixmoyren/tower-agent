@@ -19,9 +19,8 @@
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
 
 use tower_agent_core::AgentTool;
-use tower_agent_plugin::{
-    PluginError, PluginKind, PluginRegistry, ProviderPluginRegistration, StaticPlugin,
-};
+use tower_agent_plugin::{PluginError, PluginKind, PluginRegistry, StaticPlugin};
+use tower_agent_plugin_sdk::ProviderPluginRegistration;
 use tower_agent_provider::{ProviderPlugin, ProviderRegistry};
 
 #[cfg(feature = "codemode-js")]

@@ -18,7 +18,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["process", "io-util"] }
 tower.workspace = true
-tower-agent-plugin = { workspace = true, features = ["provider"] }
+tower-agent-plugin = { workspace = true }
+tower-agent-plugin-sdk = { workspace = true, features = ["provider"] }
 tower-agent-provider.workspace = true
 
 [dev-dependencies]

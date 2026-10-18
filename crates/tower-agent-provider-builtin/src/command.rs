@@ -18,7 +18,7 @@ use tokio::{
     time::{Instant, sleep_until},
 };
 use tower::Service;
-use tower_agent_plugin::provider::wire::{SidecarAssembler, SidecarEvent, SidecarRequest};
+use tower_agent_plugin_sdk::provider::wire::{SidecarAssembler, SidecarEvent, SidecarRequest};
 use tower_agent_provider::{
     AssistantEventStream, CredentialDescriptor, Model, PiError, ProviderBuild, ProviderConfig,
     ProviderDescriptor, ProviderPlugin, ProviderPluginError, ProviderServiceExt, StreamRequest,

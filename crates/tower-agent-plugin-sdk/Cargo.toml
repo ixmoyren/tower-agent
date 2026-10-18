@@ -1,6 +1,6 @@
 [package]
 name = "tower-agent-plugin-sdk"
-description = "tower-agent plugin author SDK: declare_plugin!, HostApi handle, tool registration."
+description = "tower-agent plugin capability SDK: plugin macros, HostApi, tools, and optional Provider support."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,11 +18,19 @@ serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
 tower-agent-provider = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
 
 [features]
 default = []
 dynamic = ["tower-agent-plugin/dynamic", "dep:stabby", "dep:rkyv"]
-provider = ["tower-agent-plugin/provider", "dep:tower-agent-provider"]
+provider = [
+    "dep:tower-agent-provider",
+    "dep:futures-util",
+    "dep:tokio",
+    "dep:tower",
+]
 
 [dev-dependencies]
 futures-util.workspace = true

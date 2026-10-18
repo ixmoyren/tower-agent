@@ -1,9 +1,9 @@
-//! Optional Provider plugin capability.
+//! Provider capability for plugin authors and hosts.
 //!
-//! Enabled with the `provider` feature. The default plugin host remains
-//! domain-agnostic; enabling this module contributes provider plugins as
-//! `Arc<dyn ProviderPlugin>` extensions. Native dynamic provider loading is
-//! additionally gated by the `dynamic` feature.
+//! A provider is not a special plugin kind. It is a normal static, dynamic, or
+//! JIT plugin that installs [`ProviderPlugin`] values into the generic
+//! [`PluginContext`] extension slot. This module owns the provider-specific
+//! adaptation while `tower-agent-plugin` remains domain-agnostic.
 
 #[cfg(feature = "dynamic")]
 pub mod dynamic;

@@ -5249,6 +5249,7 @@ dependencies = [
  "tower-agent-core",
  "tower-agent-monty",
  "tower-agent-plugin",
+ "tower-agent-plugin-sdk",
  "tower-agent-provider",
  "tower-agent-provider-builtin",
  "tower-agent-runtime",
@@ -5344,7 +5345,6 @@ dependencies = [
  "libloading 0.9.0",
  "rkyv",
  "semver",
- "serde",
  "serde_json",
  "stabby",
  "tokio",
@@ -5410,6 +5410,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tower-agent-plugin",
+ "tower-agent-plugin-sdk",
  "tower-agent-provider",
 ]
 

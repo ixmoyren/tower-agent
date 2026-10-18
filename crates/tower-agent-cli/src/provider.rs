@@ -180,7 +180,7 @@ fn configured_provider_plugin(
                 .library
                 .ok_or_else(|| format!("provider `{id}` requires `library` for dynamic"))?;
             let mut plugin = unsafe {
-                tower_agent::plugin::provider::dynamic::DynamicProviderPlugin::load(library)
+                tower_agent_plugin_sdk::provider::dynamic::DynamicProviderPlugin::load(library)
             }
             .map_err(|error| error.to_string())?;
             if let Some(model) = config.default_model {

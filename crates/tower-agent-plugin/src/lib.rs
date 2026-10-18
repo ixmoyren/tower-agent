@@ -7,8 +7,8 @@
 //!   版本收敛（静态单实例；动态/JIT 按 major 多版本）、依赖图与环检测；
 //! - [`StaticPlugin`] 是 M1 唯一有载荷的形态：编译进宿主，`install` 时把工具登记到
 //!   [`PluginContext`]；
-//! - 插件宿主只负责注册、解析、安装与生命周期，不内置具体工具实现；宿主装配层
-//!   负责把各能力插件（包括内置工具插件）注册进来；
+//! - 插件宿主只负责通用注册、解析、安装、生命周期与 extension slot，不内置任何领域能力；
+//!   工具、Provider 等能力由 `tower-agent-plugin-sdk` 和对应插件 crate 提供；
 //! - [`Lifecycle`] / [`PluginState`]：生命周期状态机与 in-flight 记账（第 7 节）；
 //! - [`HostApi`] / [`PluginAccess`] / [`PermissionPolicy`]：宿主中介调用与运行时权限（第 8、12 节）。
 
@@ -21,8 +21,6 @@ pub mod layer;
 mod lifecycle;
 mod model;
 mod permission;
-#[cfg(feature = "provider")]
-pub mod provider;
 mod registry;
 mod static_plugin;
 
@@ -44,10 +42,6 @@ pub use model::{
     ProvidedCapability,
 };
 pub use permission::{PermissionDecision, PermissionPolicy, PermissionPrompter};
-#[cfg(feature = "provider")]
-pub use provider::ProviderPluginRegistration;
-#[cfg(all(feature = "provider", feature = "dynamic"))]
-pub use provider::dynamic::DynamicProviderPlugin;
 pub use registry::{Binding, PluginRegistry, Resolution, ResolvedPlugin, ShadowedPlugin};
 pub use static_plugin::{PluginContext, StaticPlugin};
 
