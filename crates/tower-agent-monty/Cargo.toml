@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 tower-agent-core = { workspace = true }
-tower-agent-plugins = { workspace = true, features = ["dynamic"] }
+tower-agent-plugin = { workspace = true, features = ["dynamic"] }
 tower-agent-provider = { workspace = true }
 tower-agent-runtime = { workspace = true }
 tower-agent-storage.workspace = true

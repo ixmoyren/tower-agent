@@ -49,9 +49,10 @@ dependencies are declared once through workspace dependencies.
 | `tower-agent`            | **Facade**: re-exports core / runtime / provider / tools / plugins (optional tui/protocol/plugin-sdk)                              |
 | `tower-agent-core`       | **Contracts**: `AgentRequest`/`AgentResponse`/`AgentEventStream`, messages & events, tool boundary, layer extension points, errors |
 | `tower-agent-runtime`    | **Runtime**: the `Agent` loop, queues, event bus; stateless / pooled `Service` adapters                                            |
-| `tower-agent-provider`   | **Providers**: multi-provider LLM `Service`s, the `Models` router, auth, model catalog                                             |
+| `tower-agent-provider`   | **Provider protocol**: messages/models/request schemas, stream services, `Models`, HTTP/SSE, plugin contracts                      |
+| `tower-agent-provider-builtin` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, sidecars                                      |
 | `tower-agent-tools`      | **Built-in tools**: read / shell / edit / write / grep / find / ls                                                                 |
-| `tower-agent-plugins`    | **Plugin host**: registry, lifecycle, HostApi, permissions, three loaders                                                          |
+| `tower-agent-plugin`    | **Plugin host**: registry, lifecycle, HostApi, permissions; optional `provider` adapter plus `dynamic` provider bridge               |
 | `tower-agent-plugin-sdk` | **Plugin author SDK**: `declare_plugin!`, static / dynamic ABI contracts                                                           |
 | `tower-agent-monty`      | **Hot-reload backend**: embedded monty (Python subset) sandbox plugins + codemode script manager                                    |
 | `tower-agent-wasmtime`   | **wasm sandbox base**: wasmtime engine/component, WASI, resource limits, JIT cache and instance pool                               |

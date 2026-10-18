@@ -12,6 +12,6 @@ workspace = true
 dirs = { workspace = true }
 semver = { workspace = true }
 thiserror = { workspace = true }
-tower-agent-plugins = { workspace = true }
+tower-agent-plugin = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }

@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     AbiToolCall, AbiValue, ArchivedAbiToolResult, LoadedPlugin, PluginError, PluginState,
 };
 

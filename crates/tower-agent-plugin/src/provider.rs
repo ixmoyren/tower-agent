@@ -1,25 +1,46 @@
-//! Adapter from a provider plugin to the generic static-plugin host.
+//! Optional Provider plugin capability.
+//!
+//! Enabled with the `provider` feature. The default plugin host remains
+//! domain-agnostic; enabling this module contributes provider plugins as
+//! `Arc<dyn ProviderPlugin>` extensions. Native dynamic provider loading is
+//! additionally gated by the `dynamic` feature.
+
+#[cfg(feature = "dynamic")]
+pub mod dynamic;
+pub mod wire;
 
 use std::sync::Arc;
 
+use crate::{CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin};
 use tower_agent_provider::ProviderPlugin;
 
-use crate::{CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin};
+#[cfg(feature = "dynamic")]
+pub use dynamic::DynamicProviderPlugin;
 
 /// Register a [`ProviderPlugin`] as an independent static plugin.
 ///
 /// The plugin is named `provider.<id>` and provides the matching
-/// `provider.<id>` capability, so provider replacement has plugin-level
-/// granularity.
+/// `provider.<id>` capability.
 pub struct ProviderPluginRegistration {
     plugin: Arc<dyn ProviderPlugin>,
+    kind: PluginKind,
 }
 
 impl ProviderPluginRegistration {
-    /// Wrap a provider plugin.
+    /// Wrap a provider plugin as a static plugin.
     #[must_use]
     pub fn new(plugin: Arc<dyn ProviderPlugin>) -> Self {
-        Self { plugin }
+        Self {
+            plugin,
+            kind: PluginKind::Static,
+        }
+    }
+
+    /// Set the plugin kind used by registry resolution.
+    #[must_use]
+    pub fn with_kind(mut self, kind: PluginKind) -> Self {
+        self.kind = kind;
+        self
     }
 
     /// Access the wrapped provider plugin.
@@ -36,13 +57,13 @@ impl StaticPlugin for ProviderPluginRegistration {
         PluginManifest::new(
             format!("provider.{}", descriptor.id),
             descriptor.version.clone(),
-            PluginKind::Static,
+            self.kind,
         )
         .providing(capability, descriptor.version)
     }
 
     fn install(&self, context: &mut PluginContext) -> Result<(), PluginError> {
-        context.register_provider_plugin(Arc::clone(&self.plugin));
+        context.register_extension(Arc::clone(&self.plugin));
         Ok(())
     }
 }
@@ -76,10 +97,11 @@ mod tests {
     }
 
     #[test]
-    fn provider_plugin_has_plugin_level_manifest_and_is_installed() {
+    fn provider_plugin_manifest_and_extension_are_installed() {
         let plugin = ProviderPluginRegistration::new(Arc::new(TestProvider));
         let manifest = plugin.manifest();
         assert_eq!(manifest.name, "provider.test");
+        assert_eq!(manifest.kind, PluginKind::Static);
         assert!(
             manifest
                 .provides_capability(&CapabilityId::new("provider", "test"))
@@ -88,6 +110,10 @@ mod tests {
 
         let mut context = PluginContext::new();
         plugin.install(&mut context).expect("install provider");
-        assert_eq!(context.provider_plugins().len(), 1);
+        assert_eq!(context.extensions::<Arc<dyn ProviderPlugin>>().count(), 1);
+
+        let dynamic =
+            ProviderPluginRegistration::new(Arc::new(TestProvider)).with_kind(PluginKind::Dynamic);
+        assert_eq!(dynamic.manifest().kind, PluginKind::Dynamic);
     }
 }

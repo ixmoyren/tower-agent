@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// pi 里这条 provider 的 api 标识。
-pub const API: &str = "openai-responses";
+pub use tower_agent_provider::OPENAI_RESPONSES_API as API;
 /// 默认 API base URL（含 `/v1`）。
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 /// Responses 拒绝小于 16 的输出上限（pi `OPENAI_RESPONSES_MIN_OUTPUT_TOKENS`）。

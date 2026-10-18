@@ -10,7 +10,7 @@ use std::{
 };
 
 use semver::Version;
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
 };
 
@@ -69,7 +69,7 @@ define_tool_plugin!(LsPlugin, "ls", crate::create_ls_tool);
 /// Build the seven built-in plugin instances without registering them.
 ///
 /// A host assembly layer is responsible for registering these values with a
-/// [`tower_agent_plugins::PluginRegistry`], resolving them, and installing their
+/// [`tower_agent_plugin::PluginRegistry`], resolving them, and installing their
 /// tools.
 #[must_use]
 pub fn builtin_plugins(cwd: impl AsRef<Path>) -> Vec<Arc<dyn StaticPlugin>> {
@@ -87,7 +87,7 @@ pub fn builtin_plugins(cwd: impl AsRef<Path>) -> Vec<Arc<dyn StaticPlugin>> {
 
 #[cfg(test)]
 mod tests {
-    use tower_agent_plugins::PluginRegistry;
+    use tower_agent_plugin::PluginRegistry;
 
     use super::*;
 

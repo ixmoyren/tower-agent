@@ -1,7 +1,6 @@
-//! `ai` — Rust 对应 pi 的 `packages/ai`。
+//! Provider protocol and runtime contracts.
 //!
-//! 本 crate 当前只落地第一个移植单元：`StreamFn → Service` 的类型与 trait 边界。
-//! 行为仍以 pi 参考实现为准。
+//! Concrete vendor implementations live in `tower-agent-provider-builtin`.
 //!
 //! 关键契约：
 //! - 一次 provider 流式调用 = 一次 [`tower::Service::call`]。
@@ -9,6 +8,7 @@
 //! - 请求一旦建立成功，模型/运行期失败必须编码进流（[`AssistantMessageEvent::Error`]），
 //!   与 pi `StreamFunction` 的"不得抛错、错误编码进流"契约一致。
 
+mod api;
 mod error;
 mod event;
 pub mod http;
@@ -23,6 +23,9 @@ mod service;
 pub mod sse;
 mod stream;
 
+pub use api::{
+    ANTHROPIC_MESSAGES_API, GOOGLE_GENERATIVE_AI_API, OPENAI_COMPLETIONS_API, OPENAI_RESPONSES_API,
+};
 pub use error::{BoxError, PiError};
 pub use event::{AssistantMessageEvent, DoneReason, ErrorReason};
 pub use json::{JsonObject, JsonValue};
@@ -39,15 +42,9 @@ pub use plugin::{
 };
 pub use provider::{
     BoxProviderService, ProviderService, ProviderServiceExt,
-    anthropic::{API as ANTHROPIC_MESSAGES_API, AnthropicConfig, AnthropicProvider},
-    google::{API as GOOGLE_GENERATIVE_AI_API, GoogleConfig, GoogleProvider},
     layers::{
         HeaderTransport, ObserveTransport, PayloadHook, ResponseHook, RetryTransport,
         TimeoutService,
-    },
-    openai::{API as OPENAI_COMPLETIONS_API, OpenAiConfig, OpenAiProvider},
-    openai_responses::{
-        API as OPENAI_RESPONSES_API, OpenAiResponsesConfig, OpenAiResponsesProvider,
     },
 };
 pub use request::{

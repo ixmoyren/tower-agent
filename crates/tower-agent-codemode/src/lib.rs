@@ -34,7 +34,7 @@ use tower_agent_core::{
     AgentError, AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolCallRequest,
     ToolRenderer, ToolResultStream, UiState,
 };
-use tower_agent_plugins::{CapabilityId, HostApi, Permission, PermissionPolicy};
+use tower_agent_plugin::{CapabilityId, HostApi, Permission, PermissionPolicy};
 use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
 use tower_agent_wasmtime::{HostState, SandboxEngine, SandboxError, SandboxOptions};
 use wasmtime::{Store, StoreLimitsBuilder};

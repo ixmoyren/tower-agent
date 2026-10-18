@@ -1,4 +1,4 @@
-//! 传输层中间件测试：头部注入与重试（design.md 第 7 节第 7 条）。
+//! Transport middleware tests: header injection and retry.
 
 #[path = "provider_support/mod.rs"]
 mod support;

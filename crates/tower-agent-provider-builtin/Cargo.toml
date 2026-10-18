@@ -1,6 +1,6 @@
 [package]
 name = "tower-agent-provider-builtin"
-description = "Static provider plugins for tower-agent's built-in LLM integrations."
+description = "Concrete provider plugins: built-in HTTP integrations, OpenAI-compatible config, and JSONL sidecars."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,19 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+test-util = []
+
 [dependencies]
+futures-util.workspace = true
 semver.workspace = true
-tower-agent-plugins.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+tower.workspace = true
+tower-agent-plugin = { workspace = true, features = ["provider"] }
 tower-agent-provider.workspace = true
+
+[dev-dependencies]
+bytes = "1.12.1"
+tokio-util.workspace = true

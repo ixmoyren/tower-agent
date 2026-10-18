@@ -127,7 +127,7 @@ impl CodemodeTool {
     pub fn new(options: CodemodeOptions) -> Result<Self, CodemodeError> {
         Self::new_with_host(
             options,
-            tower_agent_plugins::HostApi::from_tools(Vec::<AgentTool>::new()),
+            tower_agent_plugin::HostApi::from_tools(Vec::<AgentTool>::new()),
             tower_agent_codemode_core::ScriptPermissions::default(),
         )
     }
@@ -135,23 +135,23 @@ impl CodemodeTool {
     /// 起 worker，并把宿主工具表与脚本权限交给 codemode 宿主。
     pub fn new_with_host(
         options: CodemodeOptions,
-        host: tower_agent_plugins::HostApi,
+        host: tower_agent_plugin::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
     ) -> Result<Self, CodemodeError> {
         Self::new_with_host_and_policy(
             options,
             host,
             permissions,
-            tower_agent_plugins::PermissionPolicy::unattended(),
+            tower_agent_plugin::PermissionPolicy::unattended(),
         )
     }
 
     /// 起 worker，并注入缺失能力使用的运行时授权策略。
     pub fn new_with_host_and_policy(
         options: CodemodeOptions,
-        host: tower_agent_plugins::HostApi,
+        host: tower_agent_plugin::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
-        permission_policy: tower_agent_plugins::PermissionPolicy,
+        permission_policy: tower_agent_plugin::PermissionPolicy,
     ) -> Result<Self, CodemodeError> {
         Self::new_with_host_policy_and_hooks(options, host, permissions, permission_policy, None)
     }
@@ -159,9 +159,9 @@ impl CodemodeTool {
     /// 起 worker，并注入运行时授权策略与共享脚本 hook 注册表。
     pub fn new_with_host_policy_and_hooks(
         options: CodemodeOptions,
-        host: tower_agent_plugins::HostApi,
+        host: tower_agent_plugin::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
-        permission_policy: tower_agent_plugins::PermissionPolicy,
+        permission_policy: tower_agent_plugin::PermissionPolicy,
         hook_registry: Option<Arc<tower_agent_codemode_core::ScriptHookRegistry>>,
     ) -> Result<Self, CodemodeError> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
@@ -271,7 +271,7 @@ impl CodemodeTool {
             workspace,
             session,
             mounts,
-            tower_agent_plugins::HostApi::from_tools(Vec::<AgentTool>::new()),
+            tower_agent_plugin::HostApi::from_tools(Vec::<AgentTool>::new()),
             tower_agent_codemode_core::ScriptPermissions::default(),
         )
     }
@@ -281,7 +281,7 @@ impl CodemodeTool {
         workspace: impl AsRef<std::path::Path>,
         session: SessionRoot,
         mounts: &[crate::Mount],
-        host: tower_agent_plugins::HostApi,
+        host: tower_agent_plugin::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
     ) -> Result<Self, CodemodeError> {
         Self::for_workspace_with_host_and_policy(
@@ -290,7 +290,7 @@ impl CodemodeTool {
             mounts,
             host,
             permissions,
-            tower_agent_plugins::PermissionPolicy::unattended(),
+            tower_agent_plugin::PermissionPolicy::unattended(),
         )
     }
 
@@ -299,9 +299,9 @@ impl CodemodeTool {
         workspace: impl AsRef<std::path::Path>,
         session: SessionRoot,
         mounts: &[crate::Mount],
-        host: tower_agent_plugins::HostApi,
+        host: tower_agent_plugin::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
-        permission_policy: tower_agent_plugins::PermissionPolicy,
+        permission_policy: tower_agent_plugin::PermissionPolicy,
     ) -> Result<Self, CodemodeError> {
         Self::for_workspace_with_host_policy_and_hooks(
             workspace,
@@ -319,9 +319,9 @@ impl CodemodeTool {
         workspace: impl AsRef<std::path::Path>,
         session: SessionRoot,
         mounts: &[crate::Mount],
-        host: tower_agent_plugins::HostApi,
+        host: tower_agent_plugin::HostApi,
         permissions: tower_agent_codemode_core::ScriptPermissions,
-        permission_policy: tower_agent_plugins::PermissionPolicy,
+        permission_policy: tower_agent_plugin::PermissionPolicy,
         hook_registry: Option<Arc<tower_agent_codemode_core::ScriptHookRegistry>>,
     ) -> Result<Self, CodemodeError> {
         let (root, temp) = match session {

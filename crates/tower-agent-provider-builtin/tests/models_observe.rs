@@ -1,4 +1,4 @@
-//! `Models` 路由与 `onPayload` / `onResponse` 观测层。
+//! Models routing and payload/response observation.
 
 #[path = "provider_support/mod.rs"]
 mod support;
@@ -8,9 +8,10 @@ use std::sync::{Arc, Mutex};
 use support::{ScriptedResponse, ScriptedTransport, collect, kinds, request, test_model, user};
 use tower::ServiceExt as _;
 use tower_agent_provider::{
-    ANTHROPIC_MESSAGES_API, AnthropicProvider, GOOGLE_GENERATIVE_AI_API, GoogleProvider, Models,
-    OPENAI_COMPLETIONS_API, ObserveTransport, OpenAiProvider, PiError, RetryTransport,
+    ANTHROPIC_MESSAGES_API, GOOGLE_GENERATIVE_AI_API, Models, OPENAI_COMPLETIONS_API,
+    ObserveTransport, PiError, RetryTransport,
 };
+use tower_agent_provider_builtin::{AnthropicProvider, GoogleProvider, OpenAiProvider};
 
 /// 观测到的响应：(状态码, x-request-id)。
 type ObservedResponses = Arc<Mutex<Vec<(u16, Option<String>)>>>;

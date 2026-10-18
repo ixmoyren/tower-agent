@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// pi 里这条 provider 的 api 标识。
-pub const API: &str = "anthropic-messages";
+pub use tower_agent_provider::ANTHROPIC_MESSAGES_API as API;
 /// 默认 API base URL。
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 /// 默认 `anthropic-version` 请求头。

@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// pi 里这条 provider 的 api 标识。
-pub const API: &str = "openai-completions";
+pub use tower_agent_provider::OPENAI_COMPLETIONS_API as API;
 /// 默认 API base URL（含 `/v1`）。
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 

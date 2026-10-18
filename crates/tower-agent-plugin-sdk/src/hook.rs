@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use tower_agent_plugins::{ToolLayer, tower_tool_layer};
+use tower_agent_plugin::{ToolLayer, tower_tool_layer};
 use tower_agent_runtime::{
     AfterToolResultLayer, AgentError, AgentToolResult, BeforeToolCallLayer, ToolCallDecision,
     ToolCallRequest,

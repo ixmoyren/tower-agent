@@ -23,7 +23,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_agent_core::AgentMessage;
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
 };
 

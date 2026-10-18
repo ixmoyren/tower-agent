@@ -1,0 +1,14 @@
+[package]
+name = "tpa-provider-dynamic-example"
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tower-agent-plugin-sdk = { path = "../../crates/tower-agent-plugin-sdk", features = ["dynamic", "provider"] }
+stabby = "72.1.16"
+
+[workspace]

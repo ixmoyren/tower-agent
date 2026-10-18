@@ -12,7 +12,7 @@ workspace = true
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tower-agent-core.workspace = true
-tower-agent-plugins.workspace = true
+tower-agent-plugin.workspace = true
 tower-agent-provider.workspace = true
 tower-agent-runtime.workspace = true
 

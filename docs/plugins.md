@@ -230,7 +230,7 @@ Discover ─▶ Load ─▶ Validate(manifest/ABI/权限) ─▶ Resolve(图/版
 - **调用在发起时绑定版本**：in-flight 调用继续在旧版本上完成，`Reload` 之后发起的新调用使用新版本；一次调用不会跨版本。
 - 任何阶段失败都回滚到上一个稳定状态，并保持其余插件不受影响（隔离失败）。
 
-> 实现状态：`tower_agent_plugins::Lifecycle` / `PluginState` / `InflightGuard` 已落地（合法迁移、`Started ↔ Stopped` 供 JIT 重载、`Unload` 前要求 `Stopped` 且 in-flight 归零，否则 `UnloadBusy`）。动态/JIT 的实际 `dlopen` / 编译换绑随加载器落地。
+> 实现状态：`tower_agent_plugin::Lifecycle` / `PluginState` / `InflightGuard` 已落地（合法迁移、`Started ↔ Stopped` 供 JIT 重载、`Unload` 前要求 `Stopped` 且 in-flight 归零，否则 `UnloadBusy`）。动态/JIT 的实际 `dlopen` / 编译换绑随加载器落地。
 
 ## 8. 宿主 API / SDK
 
@@ -240,7 +240,7 @@ Discover ─▶ Load ─▶ Validate(manifest/ABI/权限) ─▶ Resolve(图/版
 - **可插拔能力**：`tool.*`、`sandbox.*`、`memory.*`、`persist.*`、`code.*`。
 - 插件只能调用其清单 `requires` 声明过的能力，且受 `permissions` 约束（第 12 节）。
 
-> 实现状态：`tower_agent_plugins::HostApi` / `PluginAccess` 已落地——宿主按能力名中介调用 `tool.<name>`，`access_for(manifest)` 按 `requires` 收窄视图，未声明的调用直接 `PermissionDenied`。
+> 实现状态：`tower_agent_plugin::HostApi` / `PluginAccess` 已落地——宿主按能力名中介调用 `tool.<name>`，`access_for(manifest)` 按 `requires` 收窄视图，未声明的调用直接 `PermissionDenied`。
 
 ### 8.2 SDK
 
@@ -276,7 +276,9 @@ stabby::export! {
 ### 9.1 Provider 插件
 
 - `tower-agent-provider::ProviderPlugin` 是用户 provider 的稳定契约：提供 `ProviderDescriptor`，并把 `ProviderConfig` 构造成 `ProviderBuild`（API → `BoxProviderService`，以及模型目录）。
-- `ProviderPluginRegistration` 把 provider 插件适配为独立静态插件；插件名和能力均为 `provider.<id>`。用户 provider 通过 `HostPlugins::with_provider(...)` 注入，与内置 provider 使用同一装配路径。
+- `tower-agent-plugin` 的可选 `provider` feature 提供 `ProviderPluginRegistration`：插件名和能力均为 `provider.<id>`，它向通用 `PluginContext` 注册 `Arc<dyn ProviderPlugin>` extension。该 feature 还提供 Sidecar / 动态 Provider 共用的 JSONL wire；默认插件宿主不启用它。
+- `tower-agent-plugin` 同时启用 `provider` 和 `dynamic` 时提供 `provider::dynamic::DynamicProviderPlugin`。它消费通用 `LoadedPlugin` / `AbiToolCall` / `AbiToolResult` ABI，不再定义 Provider 专用动态入口。
+- Provider 注册复用通用 `PluginKind` 和 `PluginRegistry`：静态 provider 使用 `PluginKind::Static`，原生动态库 provider 使用 `PluginKind::Dynamic`，因此同名覆盖与 shadow 规则和工具插件完全一致。`ProviderRegistry` 只是安装后的运行时索引。
 - `tower-agent-provider-builtin` 把 Anthropic、OpenAI Chat、OpenAI Responses、Google 和 DeepSeek 分别声明为静态插件；CLI 的 `--provider`、`/login`、`/model` 都从 `ProviderRegistry` 查询，不再维护硬编码 provider 枚举。
 - `ProviderDescriptor` 声明默认 API、默认模型、凭据环境变量和默认选择优先级；宿主统一执行凭据优先级 `CLI > 环境变量 > storage`。
 
@@ -284,12 +286,12 @@ stabby::export! {
 
 ```text
 crates/
-  tower-agent-plugins/      宿主核心：模型、注册表、解析、生命周期、静态插件、插件层（AgentLayer/ToolLayer/EventHandler）、动态加载器（feature = dynamic）
+  tower-agent-plugin/      宿主核心：模型、注册表、解析、生命周期、静态插件、插件层（AgentLayer/ToolLayer/EventHandler）、动态加载器（feature = dynamic）
   tower-agent-plugin-sdk/   插件作者 SDK：宏、HostApi、插件层类型
   tower-agent-monty/        热重载插件宿主（monty + monty-pool，子进程崩溃隔离）
 ```
 
-- 依赖方向：`plugins → runtime`（只提供宿主机制）；`tools → plugins + runtime + provider`（工具实现 + 独立插件声明）；`tower-agent` 门面依赖二者并负责装配。
+- 依赖方向：`plugins → runtime`；启用 `plugins/provider` 后额外依赖 provider；`tools → plugins + runtime + provider`；`tower-agent` 门面依赖这些插件集合并负责装配。
 - 热重载宿主独立成 crate `tower-agent-monty`（不依赖具体动态插件 ABI）。
 - `plugins` 不依赖任何具体工具实现；`tools` 实现 `StaticPlugin` 并通过 `PluginContext` 登记工具。
 
@@ -313,7 +315,7 @@ dynamic = ["dep:stabby", "dep:libloading"]
 - 沙箱作为 **动态插件**提供 `sandbox.exec`，把不可信执行隔到子进程/受限运行时。
 - 热更/卸载的边界：只允许在引用计数归零后释放；JIT 换绑是原子操作。
 
-> 实现状态：`tower_agent_plugins::PermissionPolicy` / `PermissionPrompter` / `PermissionDecision` 已接入 codemode 的两个引擎——脚本记录里的 `ScriptPermissions` 是持久预授权集合；缺失能力首次调用时进入统一策略，`AllowOnce` 不缓存、`AllowSession` 按会话缓存、`Deny` 拒绝，无人值守（`--print` 或无 prompter）默认拒绝。`Session::with_permission_policy` / `CodemodePlugin::with_permission_policy` 是前端注入点；具体 TUI 确认框形态仍可由前端继续定制。
+> 实现状态：`tower_agent_plugin::PermissionPolicy` / `PermissionPrompter` / `PermissionDecision` 已接入 codemode 的两个引擎——脚本记录里的 `ScriptPermissions` 是持久预授权集合；缺失能力首次调用时进入统一策略，`AllowOnce` 不缓存、`AllowSession` 按会话缓存、`Deny` 拒绝，无人值守（`--print` 或无 prompter）默认拒绝。`Session::with_permission_policy` / `CodemodePlugin::with_permission_policy` 是前端注入点；具体 TUI 确认框形态仍可由前端继续定制。
 
 ## 13. 错误处理
 

@@ -100,6 +100,53 @@ fn a_user_provider_can_replace_one_builtin_provider_plugin() {
     );
 }
 
+#[test]
+fn dynamic_provider_uses_generic_plugin_resolution_and_shadowing() {
+    use std::sync::Arc;
+
+    use semver::Version;
+    use tower_agent::provider::{
+        ProviderBuild, ProviderConfig, ProviderDescriptor, ProviderPlugin, ProviderPluginError,
+    };
+
+    struct DynamicAnthropic;
+
+    impl ProviderPlugin for DynamicAnthropic {
+        fn descriptor(&self) -> ProviderDescriptor {
+            ProviderDescriptor::new("anthropic", "Dynamic Anthropic", Version::new(2, 0, 0))
+                .api("anthropic-messages")
+                .default_model("dynamic-model")
+        }
+
+        fn build(&self, _config: &ProviderConfig) -> Result<ProviderBuild, ProviderPluginError> {
+            Err(ProviderPluginError::Build {
+                provider: "anthropic".into(),
+                message: "not built in this assembly test".into(),
+            })
+        }
+    }
+
+    let registry = tower_agent::assembly::HostPlugins::new(".")
+        .with_provider_kind(
+            Arc::new(DynamicAnthropic),
+            tower_agent::plugin::PluginKind::Dynamic,
+        )
+        .registry();
+    let resolution = registry.resolve().expect("resolve plugins");
+    let active = resolution
+        .plugins()
+        .iter()
+        .find(|plugin| plugin.id.name == "provider.anthropic")
+        .expect("active provider plugin");
+    assert_eq!(active.kind, tower_agent::plugin::PluginKind::Dynamic);
+    assert!(
+        resolution
+            .shadows()
+            .iter()
+            .any(|shadow| shadow.id.name == "provider.anthropic")
+    );
+}
+
 #[cfg(feature = "sandbox-wasmtime")]
 #[test]
 fn wasmtime_capability_is_registered_and_protected() {

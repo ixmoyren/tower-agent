@@ -26,5 +26,5 @@ tower = { workspace = true }
 unicode-normalization = "0.1"
 brush-core = { git = "https://github.com/reubeno/brush", version = "0.5.0" }
 brush-builtins = { git = "https://github.com/reubeno/brush", version = "0.2.0" }
-tower-agent-plugins.workspace = true
+tower-agent-plugin.workspace = true
 semver.workspace = true

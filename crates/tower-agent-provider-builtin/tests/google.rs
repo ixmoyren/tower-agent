@@ -1,4 +1,4 @@
-//! Google Generative AI provider 的端到端测试（脚本化传输层，无网络）。
+//! Google Generative AI provider end-to-end tests.
 
 #[path = "provider_support/mod.rs"]
 mod support;
@@ -8,9 +8,9 @@ use support::{
     ScriptedResponse, ScriptedTransport, collect, kinds, request, system, test_model, user,
 };
 use tower_agent_provider::{
-    AssistantMessageEvent, ContentBlock, GoogleProvider, PiError, StopReason, Tool,
-    ToolResultMessage,
+    AssistantMessageEvent, ContentBlock, PiError, StopReason, Tool, ToolResultMessage,
 };
+use tower_agent_provider_builtin::GoogleProvider;
 
 fn google_model() -> tower_agent_provider::Model {
     tower_agent_provider::Model {

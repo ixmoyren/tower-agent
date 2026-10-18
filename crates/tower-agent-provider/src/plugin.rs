@@ -427,8 +427,30 @@ impl ProviderRegistry {
 
 #[cfg(test)]
 mod tests {
+    use std::task::{Context, Poll};
+
+    use futures_util::{future::BoxFuture, stream};
+    use tower::Service;
+
     use super::*;
-    use crate::provider::faux::{FauxProvider, model};
+    use crate::{AssistantEventStream, PiError, ProviderServiceExt, StreamRequest};
+
+    #[derive(Clone)]
+    struct TestStreamService;
+
+    impl Service<StreamRequest> for TestStreamService {
+        type Response = AssistantEventStream;
+        type Error = PiError;
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: StreamRequest) -> Self::Future {
+            Box::pin(async { Ok(AssistantEventStream::new(stream::iter(Vec::new()))) })
+        }
+    }
 
     struct TestProvider;
 
@@ -449,12 +471,15 @@ mod tests {
                     env: Some("TEST_API_KEY".into()),
                 });
             }
-            let mut model = model();
-            model.provider = "test".into();
-            model.api = "test-api".into();
-            model.id = "test-model".into();
+            let model = Model {
+                id: "test-model".into(),
+                name: "test-model".into(),
+                provider: "test".into(),
+                api: "test-api".into(),
+                ..Model::default()
+            };
             let mut services = BTreeMap::new();
-            services.insert("test-api".into(), FauxProvider::new().boxed());
+            services.insert("test-api".into(), TestStreamService.boxed_provider());
             Ok(ProviderBuild::new(services, vec![model]))
         }
     }

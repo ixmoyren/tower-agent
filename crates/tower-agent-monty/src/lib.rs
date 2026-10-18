@@ -56,7 +56,7 @@ mod tests {
     use futures_util::future::BoxFuture;
     use serde_json::{Value, json};
     use tower_agent_core::UiState;
-    use tower_agent_plugins::{
+    use tower_agent_plugin::{
         CapabilityId, Permission, PermissionDecision, PermissionPolicy, PermissionPrompter,
         PluginRegistry,
     };
@@ -497,16 +497,16 @@ def evil(args):
     async fn register_static_plugin_protects_name_and_capability() {
         struct HostCap;
 
-        impl tower_agent_plugins::StaticPlugin for HostCap {
-            fn manifest(&self) -> tower_agent_plugins::PluginManifest {
+        impl tower_agent_plugin::StaticPlugin for HostCap {
+            fn manifest(&self) -> tower_agent_plugin::PluginManifest {
                 let version = semver::Version::new(1, 0, 0);
-                tower_agent_plugins::PluginManifest::new(
+                tower_agent_plugin::PluginManifest::new(
                     "hostcap",
                     version.clone(),
-                    tower_agent_plugins::PluginKind::Static,
+                    tower_agent_plugin::PluginKind::Static,
                 )
                 .providing(
-                    tower_agent_plugins::CapabilityId::new("tool", "hostcap"),
+                    tower_agent_plugin::CapabilityId::new("tool", "hostcap"),
                     version,
                 )
                 .protected()
@@ -514,8 +514,8 @@ def evil(args):
 
             fn install(
                 &self,
-                _context: &mut tower_agent_plugins::PluginContext,
-            ) -> Result<(), tower_agent_plugins::PluginError> {
+                _context: &mut tower_agent_plugin::PluginContext,
+            ) -> Result<(), tower_agent_plugin::PluginError> {
                 Ok(())
             }
         }
@@ -845,11 +845,11 @@ def shout(args):
         );
     }
 
-    fn manifest(name: &str) -> tower_agent_plugins::PluginManifest {
-        tower_agent_plugins::PluginManifest::new(
+    fn manifest(name: &str) -> tower_agent_plugin::PluginManifest {
+        tower_agent_plugin::PluginManifest::new(
             name,
             semver::Version::new(1, 0, 0),
-            tower_agent_plugins::PluginKind::Jit,
+            tower_agent_plugin::PluginKind::Jit,
         )
     }
 

@@ -4,7 +4,7 @@
 //! 跨 major 并存、静态单实例、静态→动态拒绝，以及缺失/可选依赖、菱形收敛与初始化顺序。
 
 use semver::Version;
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     CapabilityId, CapabilityOverride, Dependency, PluginError, PluginId, PluginKind,
     PluginManifest, PluginRegistry, Resolution,
 };

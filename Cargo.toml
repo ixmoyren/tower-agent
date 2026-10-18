@@ -30,7 +30,7 @@ tower-agent-runtime = { path = "crates/tower-agent-runtime" }
 tower-agent-provider = { path = "crates/tower-agent-provider" }
 tower-agent-provider-builtin = { path = "crates/tower-agent-provider-builtin" }
 tower-agent-tools = { path = "crates/tower-agent-tools" }
-tower-agent-plugins = { path = "crates/tower-agent-plugins" }
+tower-agent-plugin = { path = "crates/tower-agent-plugin" }
 tower-agent-plugin-sdk = { path = "crates/tower-agent-plugin-sdk" }
 tower-agent-ui = { path = "crates/tower-agent-ui" }
 tower-agent-tui = { path = "crates/tower-agent-tui" }

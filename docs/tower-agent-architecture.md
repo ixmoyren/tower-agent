@@ -24,11 +24,11 @@
 tower-agent/                 （facade：re-export core + runtime + provider + tools + plugins）
   tower-agent-core/          核心能力：Request/Response、消息/事件、tool 边界、Layer 扩展点、错误
   tower-agent-runtime/       有状态运行时：编排循环、队列、事件总线；无状态/池化 Service 适配
-  tower-agent-provider/      provider Services（现 ai）
-  tower-agent-provider-builtin/ 内置 provider 静态插件与 ProviderRegistry
+  tower-agent-provider/      Provider 协议：消息/模型/请求/Service/Models/HTTP/SSE
+  tower-agent-provider-builtin/ 具体 provider 实现与静态插件声明
   tower-agent-tools/         内置工具实现 + 七个独立静态插件声明（read/shell/edit/write/grep/find/ls）
   tower-agent-protocol/      帧 / CBOR / RPC（按需保留）
-  tower-agent-plugins/       插件宿主：注册表 / 生命周期 / HostApi / 权限 / 三类加载器
+  tower-agent-plugin/       插件宿主：注册表 / 生命周期 / HostApi / 权限 / 三类加载器
   tower-agent-plugin-sdk/    插件作者 SDK（静态宏 / 动态 ABI / monty 契约）
   tower-agent-plugin-abi/    （新）插件 ABI 类型，独立于宿主，避免插件拖入整棵 host
   tower-agent-monty/         （新）基于 monty 的热重载/沙箱插件后端
@@ -109,7 +109,7 @@ tower-agent/                 （facade：re-export core + runtime + provider + t
     - 热更新：重新 `MontyRun::new(...)`（或 `MontyRepl` feed）后 **原子换绑**；`MontyRepl` 的 `dump()` / `Dump::load()` 提供会话快照，可用于「换绑时迁移状态」。
     - 崩溃隔离（可选）：`monty-pool` 用子进程 worker，崩溃后替换。
     - 资源限制：`ResourceTracker` / `ResourceLimits`（执行时长、递归、GC 调度）。
-- `plugins` 的 `jit = ["dep:roto"]` 与 `crates/tower-agent-plugins/src/jit.rs` 退役，改为 `monty` feature + 新后端。
+- `plugins` 的 `jit = ["dep:roto"]` 与 `crates/tower-agent-plugin/src/jit.rs` 退役，改为 `monty` feature + 新后端。
 
 ### 4.7 命名与仓库
 
@@ -176,13 +176,13 @@ transcript（会话记录 / 上下文）是 **按顺序发给模型的全部消�
 
 - **P0 清理与冻结契约**：删掉 `crates/plugin-dyn-echo`、`crates/plugin-sandbox` 空目录，恢复 `cargo metadata`（已恢复）；在 `tower-agent-core` 冻结 `AgentRequest` / `AgentResponse` / `AgentEventStream` / tool 边界 / Layer 契约。
 - **P1 ✅ 抽 core**：`tower-agent-core` 已建立并迁入契约类型（`error` / `event` / `tool` / `layer` / `registration` / `service`：`AgentRequest` / `AgentResponse` / `AgentEventStream` / `BoxAgentService` / `AgentServiceExt`）；`agent` 通过 re-export 保持 `tower_agent_runtime::*` 路径兼容，行为与 pi 对齐测试不变。
-- **P2 ✅ 改名与 facade**：全部 crate 加 `tower-agent` 前缀并落到 `crates/tower-agent-*` 目录——`tower-agent-core` / `tower-agent-runtime` / `tower-agent-provider` / `tower-agent-tools` / `tower-agent-plugins` / `tower-agent-plugin-sdk` / `tower-agent-ui` / `tower-agent-tui` / `tower-agent-protocol` / `tower-agent-cli`（二进制名 `tower-agent`），并新增 facade crate `tower-agent`（再导出各层；`ui` / `protocol` / `plugin-sdk` 为可选 feature，终端 `tui` 不进入门面）。
+- **P2 ✅ 改名与 facade**：全部 crate 加 `tower-agent` 前缀并落到 `crates/tower-agent-*` 目录——`tower-agent-core` / `tower-agent-runtime` / `tower-agent-provider` / `tower-agent-tools` / `tower-agent-plugin` / `tower-agent-plugin-sdk` / `tower-agent-ui` / `tower-agent-tui` / `tower-agent-protocol` / `tower-agent-cli`（二进制名 `tower-agent`），并新增 facade crate `tower-agent`（再导出各层；`ui` / `protocol` / `plugin-sdk` 为可选 feature，终端 `tui` 不进入门面）。
 - **P3 ✅ 无状态 / 池化 / 流式**：`tower-agent-runtime` 新增 `AgentService`（无状态：请求带完整 transcript，每次用全新 `Agent` 跑一轮）、`AgentStreamService`（`Response = AgentEventStream`）、`AgentPool`（信号量限制并发、`poll_ready` 背压）、`MemorySessionStore`；`tower-agent-core` 新增 `SessionStore` 与 `AgentRequest.session_id`（按 C：无状态契约 + 可选会话存储）。
 - **P4 ✅ cli 走 Service/Layer**：`tower-agent-cli` 新增 `stack::assemble`，用 `ServiceBuilder` + `ConcurrencyLimitLayer` 把 runtime 装配成类型擦除的 `BoxAgentService`（单写者串行 turn）；控制面抽成 `AgentControl`/`BoxAgentControl`（订阅、状态、切模型/工具/流、取消、重置）。`Session` 只持 `BoxAgentService` + `BoxAgentControl`，turn 走 `Service::oneshot`，不再直接持 `Agent` 具体类型。provider 侧中间件（retry/timeout）仍由 `provider` 模块装配。
 
 **后续（本轮不做）**
 
-- **P5 ✅ 静态插件 Layer 化**：`tower-agent-plugins::layer` 提供对象安全的 `AgentLayer` / `ToolLayer` / `EventHandler`（含闭包与 tower `Layer` 适配器 `tower_agent_layer` / `tower_tool_layer`）；`PluginContext` 增加登记 + `apply_agent_layers` / `apply_tool_layers` / `dispatch_event`；`StaticPlugin` 增加 `agent_layers()` / `tool_layers()` / `tools()` / `event_handlers()` 默认方法，`Resolution::install` 统一收集。
+- **P5 ✅ 静态插件 Layer 化**：`tower-agent-plugin::layer` 提供对象安全的 `AgentLayer` / `ToolLayer` / `EventHandler`（含闭包与 tower `Layer` 适配器 `tower_agent_layer` / `tower_tool_layer`）；`PluginContext` 增加登记 + `apply_agent_layers` / `apply_tool_layers` / `dispatch_event`；`StaticPlugin` 增加 `agent_layers()` / `tool_layers()` / `tools()` / `event_handlers()` 默认方法，`Resolution::install` 统一收集。
 - **P6 ✅ monty 替换 Roto**：删除 Roto（`jit` feature + `jit.rs`），新增 `tower-agent-monty`（基于 `monty-pool` 的子进程崩溃隔离）：宿主函数经 `TurnEvent::FunctionCall` 回调 `MontyHost`，`reload` 原子替换源码、`reload_checked` 失败保留旧版本。
 - **P7 ✅ UI 后端与 TUI 拆分**：`tower-agent-ui` 提供前端无关的 `AgentUi`、事件归约、命令协议与静态插件；`tower-agent-tui` 仅保留 ratatui 页面和终端输入。门面 crate 不再依赖 `tower-agent-tui`。
 - **P8 入口适配器**：axum / tonic / mcp / web。

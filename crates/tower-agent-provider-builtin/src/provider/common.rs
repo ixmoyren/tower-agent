@@ -1,4 +1,4 @@
-//! provider 之间共享的辅助（请求构造、成本、错误处理）。
+//! Helpers shared by concrete provider implementations.
 
 use serde_json::{Value as JsonValue, json};
 

@@ -27,6 +27,6 @@ pub use tower_agent_core::{
     AgentEvent, AgentMessage, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer,
     UiContribution, UiState, render_template,
 };
-pub use tower_agent_plugins::StaticPlugin;
+pub use tower_agent_plugin::StaticPlugin;
 pub use tower_agent_provider::{ContentBlock, JsonValue, Message, ToolResultMessage, UserContent};
 pub use tower_agent_runtime::Subscription;

@@ -23,7 +23,7 @@ use tower_agent_codemode_core::{
 use tower_agent_core::{
     AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer, UiState,
 };
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     CapabilityId, HostApi, Permission, PermissionPolicy, PluginContext, PluginError, PluginId,
     PluginKind, PluginManifest, PluginRegistry, ShadowedPlugin, StaticPlugin,
 };

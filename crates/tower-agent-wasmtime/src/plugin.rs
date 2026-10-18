@@ -8,7 +8,7 @@
 //! 以便「tower-agent 提供哪些能力」在编译期定制。
 
 use semver::Version;
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
 };
 

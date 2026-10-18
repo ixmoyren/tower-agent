@@ -1,8 +1,11 @@
 //! 静态插件：编译进宿主、构建在 tower `Layer` 之上的插件形态。
 
-use std::{fmt, sync::Arc};
+use std::{
+    any::{Any, TypeId},
+    fmt,
+    sync::Arc,
+};
 
-use tower_agent_provider::ProviderPlugin;
 use tower_agent_runtime::{AgentEvent, AgentTool, BoxAgentService, BoxToolService};
 
 use crate::{
@@ -21,7 +24,21 @@ pub struct PluginContext {
     agent_layers: Vec<Box<dyn AgentLayer>>,
     tool_layers: Vec<Box<dyn ToolLayer>>,
     event_handlers: Vec<Box<dyn EventHandler>>,
-    provider_plugins: Vec<Arc<dyn ProviderPlugin>>,
+    extensions: Vec<PluginExtensionEntry>,
+}
+
+struct PluginExtensionEntry {
+    type_id: TypeId,
+    value: Arc<dyn Any + Send + Sync>,
+    source: Option<(PluginId, PluginKind)>,
+}
+
+/// A typed, type-erased plugin contribution.
+pub struct PluginExtensionRef<'a, T> {
+    /// The contributed value.
+    pub value: &'a T,
+    /// Plugin that contributed the value.
+    pub source: Option<&'a (PluginId, PluginKind)>,
 }
 
 impl fmt::Debug for PluginContext {
@@ -31,7 +48,7 @@ impl fmt::Debug for PluginContext {
             .field("agent_layers", &self.agent_layers.len())
             .field("tool_layers", &self.tool_layers.len())
             .field("event_handlers", &self.event_handlers.len())
-            .field("provider_plugins", &self.provider_plugins.len())
+            .field("extensions", &self.extensions.len())
             .finish()
     }
 }
@@ -81,9 +98,19 @@ impl PluginContext {
         self.event_handlers.push(handler);
     }
 
-    /// Register a provider plugin for the host assembly layer.
-    pub fn register_provider_plugin(&mut self, plugin: Arc<dyn ProviderPlugin>) {
-        self.provider_plugins.push(plugin);
+    /// Register a typed, type-erased contribution for an upper assembly layer.
+    ///
+    /// The plugin host deliberately does not know concrete extension domains.
+    /// Consumers retrieve their own type with [`Self::extensions`].
+    pub fn register_extension<T>(&mut self, value: T)
+    where
+        T: Any + Send + Sync,
+    {
+        self.extensions.push(PluginExtensionEntry {
+            type_id: TypeId::of::<T>(),
+            value: Arc::new(value),
+            source: self.current_source.clone(),
+        });
     }
 
     /// 已登记的 agent 级中间件（按登记顺序）。
@@ -104,10 +131,24 @@ impl PluginContext {
         &self.event_handlers
     }
 
-    /// Provider plugins contributed by static plugins.
-    #[must_use]
-    pub fn provider_plugins(&self) -> &[Arc<dyn ProviderPlugin>] {
-        &self.provider_plugins
+    /// Typed contributions registered by plugins.
+    pub fn extensions<T>(&self) -> impl Iterator<Item = PluginExtensionRef<'_, T>>
+    where
+        T: Any + Send + Sync,
+    {
+        let type_id = TypeId::of::<T>();
+        self.extensions.iter().filter_map(move |entry| {
+            if entry.type_id != type_id {
+                return None;
+            }
+            entry
+                .value
+                .downcast_ref::<T>()
+                .map(|value| PluginExtensionRef {
+                    value,
+                    source: entry.source.as_ref(),
+                })
+        })
     }
 
     /// 把贡献的 agent 层叠到内层服务上；**先登记的在最外层**（与 `ServiceBuilder` 一致）。
@@ -165,5 +206,43 @@ pub trait StaticPlugin: Send + Sync + 'static {
     /// 贡献纯通知事件处理器（默认无）。
     fn event_handlers(&self) -> Vec<Box<dyn EventHandler>> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct First(u32);
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Second(&'static str);
+
+    #[test]
+    fn typed_extensions_are_isolated_and_keep_their_source() {
+        let mut context = PluginContext::new();
+        context.set_current_source(Some((
+            PluginId::new("provider.test", semver::Version::new(1, 0, 0)),
+            PluginKind::Dynamic,
+        )));
+        context.register_extension(First(7));
+        context.register_extension(Second("x"));
+        context.register_extension(First(9));
+
+        let first: Vec<_> = context.extensions::<First>().collect();
+        assert_eq!(
+            first.iter().map(|item| item.value.0).collect::<Vec<_>>(),
+            [7, 9]
+        );
+        assert_eq!(
+            first[0].source.map(|(id, kind)| (id.name.as_str(), *kind)),
+            Some(("provider.test", PluginKind::Dynamic))
+        );
+
+        let second: Vec<_> = context.extensions::<Second>().collect();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].value.0, "x");
+        assert!(context.extensions::<String>().next().is_none());
     }
 }

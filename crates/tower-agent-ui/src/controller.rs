@@ -7,7 +7,7 @@ use std::sync::{
 
 use semver::Version;
 use tower_agent_core::{AgentEvent, AgentMessage};
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     CapabilityId, EventHandler, PluginContext, PluginError, PluginKind, PluginManifest,
     StaticPlugin, event_handler,
 };
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn agent_ui_is_a_static_plugin_with_an_event_reducer() {
-        use tower_agent_plugins::StaticPlugin as _;
+        use tower_agent_plugin::StaticPlugin as _;
 
         let ui = AgentUi::new("test");
         let manifest = ui.manifest();

@@ -21,7 +21,8 @@ pub mod layer;
 mod lifecycle;
 mod model;
 mod permission;
-mod provider;
+#[cfg(feature = "provider")]
+pub mod provider;
 mod registry;
 mod static_plugin;
 
@@ -43,7 +44,10 @@ pub use model::{
     ProvidedCapability,
 };
 pub use permission::{PermissionDecision, PermissionPolicy, PermissionPrompter};
+#[cfg(feature = "provider")]
 pub use provider::ProviderPluginRegistration;
+#[cfg(all(feature = "provider", feature = "dynamic"))]
+pub use provider::dynamic::DynamicProviderPlugin;
 pub use registry::{Binding, PluginRegistry, Resolution, ResolvedPlugin, ShadowedPlugin};
 pub use static_plugin::{PluginContext, StaticPlugin};
 

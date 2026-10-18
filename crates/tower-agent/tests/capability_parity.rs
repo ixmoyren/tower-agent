@@ -10,7 +10,7 @@ use tower_agent::monty::{ModOptions, ModPermissions};
 use tower_agent::provider::{Arguments, ContentBlock, ToolCall};
 use tower_agent_codemode::{CodemodeHost, CodemodeOptions};
 use tower_agent_codemode_core::ScriptPermissions;
-use tower_agent_plugins::HostApi;
+use tower_agent_plugin::HostApi;
 
 const CAPABILITY_MATRIX: [&str; 7] = [
     "exec",

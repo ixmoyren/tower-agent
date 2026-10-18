@@ -6,7 +6,7 @@
 | 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、[`codemode.md`](./codemode.md) §0                      |
 | 参考基线 | pi `packages/coding-agent/src/core/extensions/`（`ExtensionAPI`、41 个事件）                                     |
 
-本文档回答： **"给 agent 加能力"这件事应该长什么样**，以及它如何落在现有 `tower-agent-plugin-sdk` / `tower-agent-plugins`，并与 codemode 脚本共用同一套语义。
+本文档回答： **"给 agent 加能力"这件事应该长什么样**，以及它如何落在现有 `tower-agent-plugin-sdk` / `tower-agent-plugin`，并与 codemode 脚本共用同一套语义。
 
 ---
 
@@ -29,7 +29,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 
 非目标：
 
-- 不重新发明一套与 `tower-agent-plugins` 并行注册表。SDK 是 **扩展点定义 + 注册入口**，`PluginRegistry` 仍是背后的解析 / 版本 / 覆盖机制。
+- 不重新发明一套与 `tower-agent-plugin` 并行注册表。SDK 是 **扩展点定义 + 注册入口**，`PluginRegistry` 仍是背后的解析 / 版本 / 覆盖机制。
 - 不在本阶段对齐 pi 的全部 41 个事件；先做"够脚本改行为"的一条线（见 §3 缺口列）。
 
 ## 2. 与现有 crate 的关系
@@ -38,12 +38,12 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 
 | crate                    | 现在负责                                                                                   | 问题                                       |
 |--------------------------|--------------------------------------------------------------------------------------------|--------------------------------------------|
-| `tower-agent-plugins`    | 插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                         | 面向"插件系统"，不是"扩展点"               |
+| `tower-agent-plugin`    | 插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                         | 面向"插件系统"，不是"扩展点"               |
 | `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / `tool::ToolMetadata` / `ToolRegistration` / 动态入口 | 工具注册 + 打包/ABI                        |
 | `tower-agent-runtime`    | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`              | 有钩子，但很薄、且不统一                   |
 | `tower-agent-monty` / `tower-agent-codemode` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
 
-结论（`codemode.md` Q7 已定）： **扩展点作者 API 直接加在 `tower-agent-plugin-sdk` 上**，按模块分层；`tower-agent-plugins` 仍是背后的注册表与生命周期机制。
+结论（`codemode.md` Q7 已定）： **扩展点作者 API 直接加在 `tower-agent-plugin-sdk` 上**，按模块分层；`tower-agent-plugin` 仍是背后的注册表与生命周期机制。
 
 `tower-agent-plugin-sdk` 的目标形态（模块划分，不是新 crate）：
 

@@ -1,5 +1,6 @@
-//! provider 层：把 [`StreamRequest`] 变成 provider 的 HTTP 请求，再把响应流翻成
-//! [`AssistantEventStream`]。
+//! Provider protocol layer: define the request/service boundary and reusable
+//! transport middleware. Concrete vendor implementations live in
+//! `tower-agent-provider-builtin`.
 //!
 //! 分层（design.md 4.3）：`Models 路由 → timeout → retry → auth(header 注入) → provider`。
 //! provider 只依赖 [`crate::http::HttpTransport`]，所以整条链路在测试里可以用脚本化
@@ -9,14 +10,7 @@
 //! 走 `Service::Error`；**provider 明确报告**的失败（非重试的 4xx、流中的 `error` 事件）
 //! 编码进流，与 pi「错误编码进流」的契约一致。
 
-pub mod anthropic;
-pub(crate) mod common;
-#[cfg(any(test, feature = "test-util"))]
-pub mod faux;
-pub mod google;
 pub mod layers;
-pub mod openai;
-pub mod openai_responses;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

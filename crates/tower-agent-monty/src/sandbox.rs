@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use tower_agent_plugins::PluginError;
+use tower_agent_plugin::PluginError;
 use tower_agent_wasmtime::{
     HostState, Sandbox as GenericSandbox, SandboxEngine, SandboxError, SandboxOptions,
 };

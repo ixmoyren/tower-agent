@@ -19,7 +19,9 @@
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
 
 use tower_agent_core::AgentTool;
-use tower_agent_plugins::{PluginError, PluginRegistry, ProviderPluginRegistration, StaticPlugin};
+use tower_agent_plugin::{
+    PluginError, PluginKind, PluginRegistry, ProviderPluginRegistration, StaticPlugin,
+};
 use tower_agent_provider::{ProviderPlugin, ProviderRegistry};
 
 #[cfg(feature = "codemode-js")]
@@ -83,12 +85,21 @@ impl HostPlugins {
 
     /// Register one provider plugin through the generic plugin host.
     #[must_use]
-    pub fn with_provider(mut self, plugin: Arc<dyn ProviderPlugin>) -> Self {
+    pub fn with_provider(self, plugin: Arc<dyn ProviderPlugin>) -> Self {
+        self.with_provider_kind(plugin, PluginKind::Static)
+    }
+
+    /// Register one provider plugin with an explicit plugin kind.
+    #[must_use]
+    pub fn with_provider_kind(mut self, plugin: Arc<dyn ProviderPlugin>, kind: PluginKind) -> Self {
         let descriptor = plugin.descriptor();
-        self.excluded_plugins
-            .insert(format!("provider.{}", descriptor.id));
-        self.extra
-            .push(Arc::new(ProviderPluginRegistration::new(plugin)));
+        if kind == PluginKind::Static {
+            self.excluded_plugins
+                .insert(format!("provider.{}", descriptor.id));
+        }
+        self.extra.push(Arc::new(
+            ProviderPluginRegistration::new(plugin).with_kind(kind),
+        ));
         self
     }
 
@@ -138,9 +149,9 @@ impl HostPlugins {
     pub fn assemble(self) -> Result<HostAssembly, PluginError> {
         let context = self.registry().resolve()?.install()?;
         let mut providers = ProviderRegistry::new();
-        for plugin in context.provider_plugins() {
+        for extension in context.extensions::<Arc<dyn ProviderPlugin>>() {
             providers
-                .register(Arc::clone(plugin))
+                .register(Arc::clone(extension.value))
                 .map_err(|error| PluginError::Install {
                     plugin: "provider".into(),
                     message: error.to_string(),

@@ -1,4 +1,4 @@
-//! 模型目录与 `Models::refresh`。
+//! Model catalog and `Models::refresh`.
 
 #[path = "provider_support/mod.rs"]
 mod support;

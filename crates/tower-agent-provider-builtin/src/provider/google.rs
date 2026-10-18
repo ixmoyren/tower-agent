@@ -27,7 +27,7 @@ use crate::{
 };
 
 /// pi 里这条 provider 的 api 标识。
-pub const API: &str = "google-generative-ai";
+pub use tower_agent_provider::GOOGLE_GENERATIVE_AI_API as API;
 /// 默认 API base URL（不含版本段）。
 pub const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 /// 默认 API 版本。

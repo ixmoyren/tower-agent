@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use tower_agent_plugins::{Lifecycle, PluginError, PluginManifest, PluginState};
+use tower_agent_plugin::{Lifecycle, PluginError, PluginManifest, PluginState};
 
 use crate::{
     MontyHost,

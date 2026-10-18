@@ -1,4 +1,4 @@
-//! 确定性离线 provider，**测试 provider**：不联网、不调用模型，只按固定规则产生事件流。
+//! Deterministic offline provider used by tests and `test-util` consumers.
 //!
 //! 它挂在 `test-util` feature 下（见 `Cargo.toml`），正常构建不会编进任何二进制；
 //! 需要它的消费者（例如 `cli` 的会话测试）在 `[dev-dependencies]` 里带 feature 引入即可。

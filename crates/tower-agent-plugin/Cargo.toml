@@ -1,5 +1,5 @@
 [package]
-name = "tower-agent-plugins"
+name = "tower-agent-plugin"
 description = "tower-agent plugin host mechanisms: kinds, registry, dependency/version resolution."
 version.workspace = true
 edition.workspace = true
@@ -16,13 +16,24 @@ stabby = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tower = { workspace = true }
-tower-agent-provider.workspace = true
+tower-agent-provider = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+futures-util = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [features]
 default = ["static"]
 static = []
 dynamic = ["dep:stabby", "dep:libloading", "dep:rkyv", "dep:serde_json"]
+provider = [
+    "dep:tower-agent-provider",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:futures-util",
+    "dep:tokio",
+]
 
 [dev-dependencies]
 futures-util = { workspace = true }
 tokio = { workspace = true }
+tower-agent-provider.workspace = true

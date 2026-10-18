@@ -10,20 +10,22 @@ workspace = true
 
 [dependencies]
 tower-agent-runtime = { workspace = true }
-tower-agent-plugins = { workspace = true }
+tower-agent-plugin = { workspace = true }
 semver = { workspace = true }
 stabby = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
-tower-agent-provider.workspace = true
+tower-agent-provider = { workspace = true, optional = true }
 
 [features]
 default = []
-dynamic = ["tower-agent-plugins/dynamic", "dep:stabby", "dep:rkyv"]
+dynamic = ["tower-agent-plugin/dynamic", "dep:stabby", "dep:rkyv"]
+provider = ["tower-agent-plugin/provider", "dep:tower-agent-provider"]
 
 [dev-dependencies]
 futures-util.workspace = true
 tokio.workspace = true
 tower.workspace = true
+tower-agent-provider.workspace = true

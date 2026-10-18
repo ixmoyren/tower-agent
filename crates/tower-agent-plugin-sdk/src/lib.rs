@@ -13,13 +13,18 @@ pub mod hook;
 pub mod tool;
 
 pub use tool::{AgentToolMetadataExt, ToolMetadata};
-pub use tower_agent_plugins::{
+#[cfg(feature = "provider")]
+pub use tower_agent_plugin::ProviderPluginRegistration;
+#[cfg(feature = "provider")]
+pub use tower_agent_plugin::provider;
+pub use tower_agent_plugin::{
     AgentLayer, CapabilityId, EventHandler, HostApi, InflightGuard, Lifecycle, Permission,
     PermissionDecision, PermissionPolicy, PermissionPrompter, PluginAccess, PluginContext,
     PluginError, PluginId, PluginKind, PluginManifest, PluginState, ProvidedCapability,
-    ProviderPluginRegistration, StaticPlugin, ToolLayer, agent_layer, event_handler, tool_layer,
-    tower_agent_layer, tower_tool_layer,
+    StaticPlugin, ToolLayer, agent_layer, event_handler, tool_layer, tower_agent_layer,
+    tower_tool_layer,
 };
+#[cfg(feature = "provider")]
 pub use tower_agent_provider::{
     CredentialDescriptor, ProviderBuild, ProviderConfig, ProviderDescriptor, ProviderPlugin,
     ProviderPluginError, ProviderRegistry, ProviderSession,
@@ -30,7 +35,7 @@ pub use tower_agent_runtime::{ToolAnnotations, ToolExposure, ToolNamespace, Tool
 #[cfg(feature = "dynamic")]
 pub use rkyv;
 #[cfg(feature = "dynamic")]
-pub use tower_agent_plugins::dynamic::{
+pub use tower_agent_plugin::dynamic::{
     AbiBuffer, AbiCapability, AbiHostCall, AbiHostResult, AbiKind, AbiManifest, AbiNode,
     AbiToolCall, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiHostResult, ArchivedAbiToolCall,
     ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, HostVTable, LoadedPlugin, PluginVTable,

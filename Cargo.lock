@@ -5219,8 +5219,8 @@ dependencies = [
  "tower-agent-codemode-core",
  "tower-agent-core",
  "tower-agent-monty",
+ "tower-agent-plugin",
  "tower-agent-plugin-sdk",
- "tower-agent-plugins",
  "tower-agent-protocol",
  "tower-agent-provider",
  "tower-agent-provider-builtin",
@@ -5236,6 +5236,7 @@ name = "tower-agent-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "dirs",
  "futures-util",
  "serde",
  "serde_json",
@@ -5247,8 +5248,9 @@ dependencies = [
  "tower-agent-codemode-core",
  "tower-agent-core",
  "tower-agent-monty",
- "tower-agent-plugins",
+ "tower-agent-plugin",
  "tower-agent-provider",
+ "tower-agent-provider-builtin",
  "tower-agent-runtime",
  "tower-agent-storage",
  "tower-agent-tui",
@@ -5271,7 +5273,7 @@ dependencies = [
  "tower",
  "tower-agent-codemode-core",
  "tower-agent-core",
- "tower-agent-plugins",
+ "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-tools",
  "tower-agent-wasmtime",
@@ -5326,12 +5328,29 @@ dependencies = [
  "tower",
  "tower-agent-codemode-core",
  "tower-agent-core",
- "tower-agent-plugins",
+ "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",
  "tower-agent-storage",
  "tower-agent-wasmtime",
  "wasmtime",
+]
+
+[[package]]
+name = "tower-agent-plugin"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "libloading 0.9.0",
+ "rkyv",
+ "semver",
+ "serde",
+ "serde_json",
+ "stabby",
+ "tokio",
+ "tower",
+ "tower-agent-provider",
+ "tower-agent-runtime",
 ]
 
 [[package]]
@@ -5347,23 +5366,7 @@ dependencies = [
  "stabby",
  "tokio",
  "tower",
- "tower-agent-plugins",
- "tower-agent-provider",
- "tower-agent-runtime",
-]
-
-[[package]]
-name = "tower-agent-plugins"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "libloading 0.9.0",
- "rkyv",
- "semver",
- "serde_json",
- "stabby",
- "tokio",
- "tower",
+ "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",
 ]
@@ -5398,8 +5401,15 @@ dependencies = [
 name = "tower-agent-provider-builtin"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "futures-util",
  "semver",
- "tower-agent-plugins",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tower-agent-plugin",
  "tower-agent-provider",
 ]
 
@@ -5430,7 +5440,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tower-agent-codemode-core",
  "tower-agent-core",
- "tower-agent-plugins",
+ "tower-agent-plugin",
 ]
 
 [[package]]
@@ -5452,7 +5462,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower",
- "tower-agent-plugins",
+ "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",
  "unicode-normalization",
@@ -5501,7 +5511,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tower-agent-core",
- "tower-agent-plugins",
+ "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",
 ]
@@ -5513,7 +5523,7 @@ dependencies = [
  "dirs",
  "semver",
  "thiserror 2.0.21",
- "tower-agent-plugins",
+ "tower-agent-plugin",
  "wasmtime",
  "wasmtime-wasi",
 ]

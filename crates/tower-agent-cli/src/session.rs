@@ -4,11 +4,11 @@
 //!
 //! - [`Session`] 通过 [`crate::stack`] 用 `ServiceBuilder` 装配出类型擦除的
 //!   `BoxAgentService`（跑 turn）与 `BoxAgentControl`（订阅事件、切模型/工具、取消、重置），
-//!   自身不直接持有 `Agent` 具体类型；内置工具由 `tower_agent_plugins` 装配；
+//!   自身不直接持有 `Agent` 具体类型；内置工具由 `tower_agent_plugin` 装配；
 //! - 事件通过 [`Session::subscribe`] 拿到的 `tower_agent_runtime::Subscription` 流出，
 //!   既可以交给 [`tower_agent_tui::run_agent_tui`] 渲染，也可以用 [`run_print`] 打成纯文本（便于脚本与测试）；
 //! - provider 由调用方注入（[`Session::new`] 的 `stream` 参数）；测试用确定性的离线
-//!   provider [`tower_agent_provider::provider::faux::FauxProvider`]，二进制则接真实 provider。
+//!   provider [`tower_agent_provider_builtin::provider::faux::FauxProvider`]，二进制则接真实 provider。
 
 use std::{
     collections::BTreeMap,
@@ -23,9 +23,9 @@ use tower_agent_codemode_core::{ScriptHookRegistry, ScriptLanguage, ScriptMetada
 use tower_agent_core::UiState;
 #[cfg(feature = "codemode-python")]
 use tower_agent_monty::ModManager;
-use tower_agent_plugins::PermissionPolicy;
+use tower_agent_plugin::PermissionPolicy;
 #[cfg(feature = "codemode-js")]
-use tower_agent_plugins::StaticPlugin as _;
+use tower_agent_plugin::StaticPlugin as _;
 use tower_agent_storage::{ConfigScope, ProviderCredential};
 
 use crate::store::CliStore;
@@ -157,7 +157,7 @@ impl Session {
             self.refresh_tools();
             return Ok(());
         }
-        let mut context = tower_agent_plugins::PluginContext::new();
+        let mut context = tower_agent_plugin::PluginContext::new();
         plugin
             .install(&mut context)
             .map_err(|error| error.to_string())?;
@@ -1254,8 +1254,8 @@ mod tests {
     use tower_agent_provider::{
         AssistantEventStream, AssistantMessage, AssistantMessageEvent, BoxStreamService,
         ContentBlock, DoneReason, PiError, StopReason, StreamRequest, TextContent, Usage,
-        provider::faux::{FauxProvider, model},
     };
+    use tower_agent_provider_builtin::provider::faux::{FauxProvider, model};
     use tower_agent_ui::CommandHost as _;
 
     use super::{
@@ -1809,7 +1809,7 @@ on("tool_call", "block");
     async fn command_host_reports_and_updates_session_state() {
         let dir = tempfile::tempdir().expect("temp dir");
         let setup = crate::provider::build_from_registry(
-            &crate::provider::provider_registry(dir.path()),
+            &crate::provider::builtin_provider_registry(dir.path()),
             "anthropic",
             Some("claude-test"),
             crate::provider::ProviderStackOptions::default(),
@@ -1879,7 +1879,7 @@ on("tool_call", "block");
     #[tokio::test]
     async fn command_host_login_supports_a_user_provider_plugin() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let mut registry = crate::provider::provider_registry(dir.path());
+        let mut registry = crate::provider::builtin_provider_registry(dir.path());
         registry
             .register(Arc::new(
                 tower_agent::provider_builtin::OpenAiCompatibleProviderPlugin::new(
@@ -1914,7 +1914,7 @@ on("tool_call", "block");
             tokio::runtime::Handle::current(),
         ));
         let setup = crate::provider::build_from_registry(
-            &crate::provider::provider_registry(dir.path()),
+            &crate::provider::builtin_provider_registry(dir.path()),
             "anthropic",
             Some("claude-test"),
             crate::provider::ProviderStackOptions::default(),

@@ -2,8 +2,10 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 /// 模型输入模态（pi `"text" | "image"`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InputModality {
     /// 模型接受文本输入。
     Text,
@@ -12,7 +14,7 @@ pub enum InputModality {
 }
 
 /// 每百万 token 的费率（pi `ModelCostRates`）。
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct ModelCostRates {
     /// 输入 token 费率（美元 / 百万 token）。
     pub input: f64,
@@ -25,7 +27,7 @@ pub struct ModelCostRates {
 }
 
 /// 请求级计价档位（pi `ModelCostTier`）。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ModelCostTier {
     /// 输入 token 费率（美元 / 百万 token）。
     pub input: f64,
@@ -40,7 +42,7 @@ pub struct ModelCostTier {
 }
 
 /// 模型计价（pi `ModelCost`）。
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ModelCost {
     /// 输入 token 费率（美元 / 百万 token）。
     pub input: f64,
@@ -55,7 +57,7 @@ pub struct ModelCost {
 }
 
 /// 可用于 `stream` / `streamSimple` 的 chat 模型（pi `Model`）。
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Model {
     /// 模型标识（pi `Model.id`）。
     pub id: String,

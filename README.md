@@ -42,10 +42,10 @@
 | `tower-agent`            | **门面**：再导出 core / runtime / provider / tools / plugins（可选 ui/protocol/plugin-sdk）           |
 | `tower-agent-core`       | **契约**：`AgentRequest`/`AgentResponse`/`AgentEventStream`、消息与事件、工具边界、Layer 扩展点、错误 |
 | `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
-| `tower-agent-provider`   | **provider**：多 provider LLM Service、`Models` 路由、认证、模型目录                                  |
-| `tower-agent-provider-builtin` | **内置 provider 插件**：五个独立静态插件与统一 `ProviderRegistry`                               |
+| `tower-agent-provider`   | **Provider 协议**：消息/模型/请求/事件、Stream Service、Models、HTTP/SSE、插件契约；不含具体厂商实现 |
+| `tower-agent-provider-builtin` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar                    |
 | `tower-agent-tools`      | **内置工具与插件合集**：七个工具实现及各自独立的静态插件声明                                           |
-| `tower-agent-plugins`    | **插件宿主**：注册表、生命周期、HostApi、权限、三类加载器                                             |
+| `tower-agent-plugin`    | **插件宿主**：注册表、生命周期、HostApi、权限；`provider` feature 提供 Provider 适配器，配合 `dynamic` 提供动态桥接 |
 | `tower-agent-plugin-sdk` | **插件作者 SDK**：`declare_plugin!`、静态 / 动态 ABI 契约                                             |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
 | `tower-agent-monty`      | **热重载后端**：内嵌 monty（Python 子集）沙箱插件 + codemode 脚本管理器                              |
@@ -132,6 +132,7 @@ echo "解释一下 crates/tower-agent-runtime 的编排循环" \
 | 变量          | 作用                                              |
 |---------------|---------------------------------------------------|
 | `TPA_WORKERS` | runtime worker 数（默认 `available_parallelism`） |
+| `TOWER_AGENT_PROVIDERS` | 覆盖 CLI 的用户 provider 配置文件路径 |
 
 ### 仓库结构
 

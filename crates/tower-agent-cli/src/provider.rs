@@ -1,14 +1,55 @@
 //! Provider plugin selection and session setup for the CLI host.
 
-use std::path::Path;
-use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use futures_util::future::BoxFuture;
+use serde::Deserialize;
 use tower::Service;
 use tower_agent_provider::{
     AssistantEventStream, BoxProviderService, BoxStreamService, Model, Models, PiError,
-    ProviderConfig, ProviderPluginError, ProviderRegistry, ProviderServiceExt, StreamRequest,
+    ProviderConfig, ProviderPlugin, ProviderPluginError, ProviderRegistry, ProviderServiceExt,
+    StreamRequest,
 };
+
+const PROVIDERS_PATH_ENV: &str = "TOWER_AGENT_PROVIDERS";
+
+#[derive(Debug, Default, Deserialize)]
+struct ProviderConfigFile {
+    #[serde(default)]
+    providers: BTreeMap<String, UserProviderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UserProviderConfig {
+    kind: String,
+    name: Option<String>,
+    #[serde(default)]
+    base_url: Option<String>,
+    default_model: Option<String>,
+    api_key_env: Option<String>,
+    priority: Option<i32>,
+    #[serde(default)]
+    command: Vec<String>,
+    #[serde(default)]
+    working_directory: Option<PathBuf>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
+    library: Option<PathBuf>,
+    #[serde(default)]
+    metadata: Option<serde_json::Value>,
+}
+
+struct ConfiguredProvider {
+    plugin: Arc<dyn ProviderPlugin>,
+    kind: tower_agent::plugin::PluginKind,
+}
 
 /// Provider stack defaults from the pi reference implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,10 +92,151 @@ impl ProviderSetup {
 
 /// Built-in provider registry assembled through static provider plugins.
 #[must_use]
-pub fn provider_registry(cwd: impl AsRef<Path>) -> ProviderRegistry {
+pub fn builtin_provider_registry(cwd: impl AsRef<Path>) -> ProviderRegistry {
     tower_agent::assembly::HostPlugins::new(cwd.as_ref().to_path_buf())
         .providers()
         .expect("built-in provider plugins must assemble")
+}
+
+/// Provider registry including providers declared in user/project config.
+pub fn provider_registry(cwd: impl AsRef<Path>) -> Result<ProviderRegistry, String> {
+    let cwd = cwd.as_ref();
+    let configs = load_provider_configs(cwd)?;
+    registry_with_configs(cwd, configs)
+}
+
+fn registry_with_configs(
+    cwd: &Path,
+    configs: Vec<(String, UserProviderConfig)>,
+) -> Result<ProviderRegistry, String> {
+    let mut host = tower_agent::assembly::HostPlugins::new(cwd.to_path_buf());
+    for (id, config) in configs {
+        let provider = configured_provider_plugin(&id, config)?;
+        host = host.with_provider_kind(provider.plugin, provider.kind);
+    }
+    host.providers().map_err(|error| error.to_string())
+}
+
+#[allow(unsafe_code)] // Dynamic provider libraries execute in-process.
+fn configured_provider_plugin(
+    id: &str,
+    config: UserProviderConfig,
+) -> Result<ConfiguredProvider, String> {
+    match config.kind.as_str() {
+        "openai-compatible" => {
+            let base_url = config.base_url.ok_or_else(|| {
+                format!("provider `{id}` requires `base_url` for openai-compatible")
+            })?;
+            let default_model = config.default_model.ok_or_else(|| {
+                format!("provider `{id}` requires `default_model` for openai-compatible")
+            })?;
+            let mut plugin = tower_agent::provider_builtin::OpenAiCompatibleProviderPlugin::new(
+                id,
+                config.name.unwrap_or_else(|| id.to_owned()),
+                default_model,
+                config.api_key_env,
+            )
+            .with_base_url(base_url);
+            if let Some(priority) = config.priority {
+                plugin = plugin.with_priority(priority);
+            }
+            Ok(ConfiguredProvider {
+                plugin: Arc::new(plugin),
+                kind: tower_agent::plugin::PluginKind::Static,
+            })
+        }
+        "sidecar" => {
+            if config.command.is_empty() {
+                return Err(format!("provider `{id}` requires a non-empty `command`"));
+            }
+            let default_model = config
+                .default_model
+                .ok_or_else(|| format!("provider `{id}` requires `default_model` for sidecar"))?;
+            let mut plugin = tower_agent::provider_builtin::CommandProviderPlugin::new(
+                id,
+                config.name.unwrap_or_else(|| id.to_owned()),
+                default_model,
+                config.command,
+            );
+            if let Some(env) = config.api_key_env {
+                plugin = plugin.with_api_key_env(env);
+            }
+            if let Some(priority) = config.priority {
+                plugin = plugin.with_priority(priority);
+            }
+            if let Some(cwd) = config.working_directory {
+                plugin = plugin.with_working_directory(cwd);
+            }
+            for (name, value) in config.env {
+                plugin = plugin.with_env(name, value);
+            }
+            Ok(ConfiguredProvider {
+                plugin: Arc::new(plugin),
+                kind: tower_agent::plugin::PluginKind::Static,
+            })
+        }
+        "dynamic" => {
+            let library = config
+                .library
+                .ok_or_else(|| format!("provider `{id}` requires `library` for dynamic"))?;
+            let mut plugin = unsafe {
+                tower_agent::plugin::provider::dynamic::DynamicProviderPlugin::load(library)
+            }
+            .map_err(|error| error.to_string())?;
+            if let Some(model) = config.default_model {
+                plugin = plugin.with_default_model(model);
+            }
+            if let Some(env) = config.api_key_env {
+                plugin = plugin.with_api_key_env(env);
+            }
+            if let Some(priority) = config.priority {
+                plugin = plugin.with_priority(priority);
+            }
+            if let Some(metadata) = config.metadata {
+                plugin = plugin.with_metadata(metadata);
+            }
+            Ok(ConfiguredProvider {
+                plugin: Arc::new(plugin),
+                kind: tower_agent::plugin::PluginKind::Dynamic,
+            })
+        }
+        other => Err(format!(
+            "provider `{id}` uses unsupported kind `{other}` (available: openai-compatible, sidecar, dynamic)"
+        )),
+    }
+}
+
+fn load_provider_configs(cwd: &Path) -> Result<Vec<(String, UserProviderConfig)>, String> {
+    load_provider_configs_from_paths(provider_config_paths(cwd))
+}
+
+fn load_provider_configs_from_paths(
+    paths: impl IntoIterator<Item = PathBuf>,
+) -> Result<Vec<(String, UserProviderConfig)>, String> {
+    let mut merged = BTreeMap::new();
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .map_err(|error| format!("cannot read provider config {}: {error}", path.display()))?;
+        let config: ProviderConfigFile = serde_json::from_str(&source)
+            .map_err(|error| format!("invalid provider config {}: {error}", path.display()))?;
+        merged.extend(config.providers);
+    }
+    Ok(merged.into_iter().collect())
+}
+
+fn provider_config_paths(cwd: &Path) -> Vec<PathBuf> {
+    if let Some(path) = std::env::var_os(PROVIDERS_PATH_ENV) {
+        return vec![PathBuf::from(path)];
+    }
+    let mut paths = Vec::new();
+    if let Some(config_dir) = dirs::config_dir() {
+        paths.push(config_dir.join("tower-agent/providers.json"));
+    }
+    paths.push(cwd.join(".tower-agent/providers.json"));
+    paths
 }
 
 /// Resolve credentials using the descriptor supplied by a provider plugin.
@@ -170,7 +352,7 @@ mod tests {
 
     #[test]
     fn builtin_registry_lists_plugin_descriptors() {
-        let registry = provider_registry(".");
+        let registry = builtin_provider_registry(".");
         let ids: Vec<&str> = registry.provider_ids();
         assert_eq!(
             ids,
@@ -189,7 +371,7 @@ mod tests {
 
     #[test]
     fn registry_builds_a_builtin_provider_without_network_access() {
-        let registry = provider_registry(".");
+        let registry = builtin_provider_registry(".");
         let setup = build_from_registry(
             &registry,
             "anthropic",
@@ -205,7 +387,7 @@ mod tests {
 
     #[test]
     fn missing_credentials_include_the_descriptor_environment() {
-        let registry = provider_registry(".");
+        let registry = builtin_provider_registry(".");
         let Err(error) = build_from_registry(
             &registry,
             "anthropic",
@@ -220,7 +402,7 @@ mod tests {
 
     #[test]
     fn unknown_provider_is_reported() {
-        let registry = provider_registry(".");
+        let registry = builtin_provider_registry(".");
         let Err(error) = build_from_registry(
             &registry,
             "missing",
@@ -241,5 +423,71 @@ mod tests {
         let setup = unconfigured_setup();
         assert_eq!(setup.model.provider, "unconfigured");
         assert!(setup.models.supports(&setup.model));
+    }
+
+    #[test]
+    fn project_config_registers_an_openai_compatible_provider() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = dir.path().join(".tower-agent");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        let path = config_dir.join("providers.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "providers": {
+                    "local": {
+                        "kind": "openai-compatible",
+                        "name": "Local",
+                        "base_url": "http://127.0.0.1:8080/v1",
+                        "default_model": "local-model",
+                        "priority": 900
+                    }
+                }
+            }"#,
+        )
+        .expect("write provider config");
+
+        let configs = load_provider_configs_from_paths([path]).expect("load provider config");
+        let registry = registry_with_configs(dir.path(), configs).expect("build provider registry");
+        let descriptor = registry.descriptor("local").expect("local provider");
+        assert_eq!(descriptor.default_model.as_deref(), Some("local-model"));
+        assert_eq!(descriptor.priority, 900);
+        let setup = build_from_registry(
+            &registry,
+            "local",
+            None,
+            ProviderStackOptions::default(),
+            None,
+        )
+        .expect("build local provider");
+        assert_eq!(setup.model.provider, "local");
+    }
+
+    #[test]
+    fn project_config_registers_a_sidecar_provider() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = dir.path().join(".tower-agent");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        let path = config_dir.join("providers.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "providers": {
+                    "sidecar": {
+                        "kind": "sidecar",
+                        "name": "Sidecar",
+                        "default_model": "sidecar-model",
+                        "command": ["my-provider", "--stdio"]
+                    }
+                }
+            }"#,
+        )
+        .expect("write provider config");
+
+        let configs = load_provider_configs_from_paths([path]).expect("load provider config");
+        let registry = registry_with_configs(dir.path(), configs).expect("build provider registry");
+        let descriptor = registry.descriptor("sidecar").expect("sidecar provider");
+        assert_eq!(descriptor.default_model.as_deref(), Some("sidecar-model"));
+        assert_eq!(descriptor.default_api.as_deref(), Some("command-sidecar"));
     }
 }

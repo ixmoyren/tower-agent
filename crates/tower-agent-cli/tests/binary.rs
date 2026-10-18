@@ -211,6 +211,95 @@ fn real_provider_without_api_key_fails_clearly() {
 }
 
 #[test]
+fn configured_sidecar_provider_runs_without_recompiling() {
+    let home = tempfile::tempdir().expect("home");
+    let work = tempfile::tempdir().expect("work");
+    let providers = home.path().join("providers.json");
+    std::fs::write(
+        &providers,
+        serde_json::json!({
+            "providers": {
+                "sidecar": {
+                    "kind": "sidecar",
+                    "name": "Sidecar",
+                    "default_model": "sidecar-model",
+                    "command": [
+                        "sh",
+                        "-c",
+                        "cat >/dev/null; printf '%s\\n' '{\"type\":\"done\",\"text\":\"sidecar reply\"}'"
+                    ]
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("write provider config");
+    let storage = home.path().join("storage.db");
+    let output = cli_at(&storage.to_string_lossy(), work.path())
+        .env("TOWER_AGENT_PROVIDERS", &providers)
+        .args([
+            "--print",
+            "--no-session",
+            "--no-codemode",
+            "--provider",
+            "sidecar",
+            "hello",
+        ])
+        .output()
+        .expect("run sidecar provider");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("sidecar reply"),
+        "stdout:\n{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn configured_dynamic_provider_runs_without_recompiling() {
+    let Some(library) = std::env::var_os("TPA_PROVIDER_DYNAMIC_EXAMPLE") else {
+        eprintln!("skipping: set TPA_PROVIDER_DYNAMIC_EXAMPLE to the provider cdylib path");
+        return;
+    };
+    let home = tempfile::tempdir().expect("home");
+    let work = tempfile::tempdir().expect("work");
+    let providers = home.path().join("providers.json");
+    std::fs::write(
+        &providers,
+        serde_json::json!({
+            "providers": {
+                "dynamic": {
+                    "kind": "dynamic",
+                    "library": library.to_string_lossy(),
+                    "default_model": "dynamic-model"
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("write provider config");
+    let storage = home.path().join("storage.db");
+    let output = cli_at(&storage.to_string_lossy(), work.path())
+        .env("TOWER_AGENT_PROVIDERS", &providers)
+        .args([
+            "--print",
+            "--no-session",
+            "--no-codemode",
+            "--provider",
+            "dynamic",
+            "hello",
+        ])
+        .output()
+        .expect("run dynamic provider");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("dynamic reply"),
+        "stdout:\n{}",
+        stdout(&output)
+    );
+}
+
+#[test]
 fn missing_prompt_fails_with_usage() {
     // stdin 是空管道时没有提示词可用。
     use std::process::Stdio;

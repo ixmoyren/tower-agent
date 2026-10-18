@@ -19,7 +19,7 @@ use futures_util::future::BoxFuture;
 use serde_json::Value;
 use tower::Service;
 use tower_agent_core::{AgentError, AgentTool, AgentToolResult, ToolCallRequest, ToolResultStream};
-use tower_agent_plugins::{
+use tower_agent_plugin::{
     AbiToolCall, AbiValue, ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, LoadedPlugin,
     PluginContext, PluginError, PluginManifest, PluginRegistry, StaticPlugin,
 };

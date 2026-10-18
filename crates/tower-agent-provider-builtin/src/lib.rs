@@ -1,22 +1,46 @@
-//! Static provider plugins for the built-in LLM integrations.
+//! Provider plugin collection.
 //!
-//! The concrete HTTP implementations live in `tower-agent-provider`. This crate
-//! gives each provider an independent plugin declaration and converts
-//! [`ProviderConfig`] into a provider service plus model metadata.
+//! This crate owns concrete vendor implementations and gives each provider an
+//! independent plugin declaration. It also contains the configurable
+//! OpenAI-compatible and JSONL sidecar plugins. Native dynamic provider loading
+//! belongs to `tower-agent-plugin` because it adapts the generic plugin ABI.
+
+mod command;
+pub mod provider;
+
+pub(crate) use tower_agent_provider::{
+    AssistantEventStream, AssistantMessage, AssistantMessageEvent, BoxStreamService, ContentBlock,
+    DoneReason, ErrorReason, ImageContent, InputModality, Message, Model, PiError, StopReason,
+    StreamRequest, TextContent, ThinkingBudgets, ThinkingContent, ThinkingLevel, Tool, ToolCall,
+    ToolResultMessage, Usage, UserContent, http, sse,
+};
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) use tower_agent_provider::{JsonObject, JsonValue};
+#[cfg(test)]
+pub(crate) use tower_agent_provider::{SimpleStreamOptions, TranscriptContext, UserMessage};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use semver::Version;
-use tower_agent_plugins::{ProviderPluginRegistration, StaticPlugin};
+use tower_agent_plugin::StaticPlugin;
 use tower_agent_provider::{
-    ANTHROPIC_MESSAGES_API, AnthropicProvider, BoxProviderService, CredentialDescriptor,
-    GOOGLE_GENERATIVE_AI_API, GoogleProvider, InputModality, Model, OPENAI_COMPLETIONS_API,
-    OPENAI_RESPONSES_API, OpenAiProvider, OpenAiResponsesProvider, ProviderBuild, ProviderConfig,
+    ANTHROPIC_MESSAGES_API, BoxProviderService, CredentialDescriptor, GOOGLE_GENERATIVE_AI_API,
+    OPENAI_COMPLETIONS_API, OPENAI_RESPONSES_API, ProviderBuild, ProviderConfig,
     ProviderDescriptor, ProviderPlugin, ProviderPluginError, ProviderServiceExt, RetryTransport,
     TimeoutService, http::ReqwestTransport,
 };
+
+pub use provider::{
+    anthropic::{AnthropicConfig, AnthropicProvider},
+    google::{GoogleConfig, GoogleProvider},
+    openai::{OpenAiConfig, OpenAiProvider},
+    openai_responses::{OpenAiResponsesConfig, OpenAiResponsesProvider},
+};
+use tower_agent_plugin::ProviderPluginRegistration;
+
+pub use command::CommandProviderPlugin;
 
 const VERSION: Version = Version::new(1, 0, 0);
 const DEFAULT_TIMEOUT_MS: u64 = 600_000;
@@ -263,6 +287,13 @@ impl OpenAiCompatibleProviderPlugin {
     #[must_use]
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = Some(base_url.into());
+        self
+    }
+
+    /// Set the default-provider selection priority.
+    #[must_use]
+    pub fn with_priority(mut self, priority: i32) -> Self {
+        self.descriptor.priority = priority;
         self
     }
 }
