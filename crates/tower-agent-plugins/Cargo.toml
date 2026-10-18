@@ -16,6 +16,7 @@ stabby = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tower = { workspace = true }
+tower-agent-provider.workspace = true
 
 [features]
 default = ["static"]
@@ -24,5 +25,4 @@ dynamic = ["dep:stabby", "dep:libloading", "dep:rkyv", "dep:serde_json"]
 
 [dev-dependencies]
 futures-util = { workspace = true }
-tower-agent-provider = { workspace = true }
 tokio = { workspace = true }

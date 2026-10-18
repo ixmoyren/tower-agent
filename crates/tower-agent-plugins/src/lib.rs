@@ -21,6 +21,7 @@ pub mod layer;
 mod lifecycle;
 mod model;
 mod permission;
+mod provider;
 mod registry;
 mod static_plugin;
 
@@ -42,6 +43,7 @@ pub use model::{
     ProvidedCapability,
 };
 pub use permission::{PermissionDecision, PermissionPolicy, PermissionPrompter};
+pub use provider::ProviderPluginRegistration;
 pub use registry::{Binding, PluginRegistry, Resolution, ResolvedPlugin, ShadowedPlugin};
 pub use static_plugin::{PluginContext, StaticPlugin};
 

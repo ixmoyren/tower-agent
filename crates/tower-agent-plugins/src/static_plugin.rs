@@ -1,7 +1,8 @@
 //! 静态插件：编译进宿主、构建在 tower `Layer` 之上的插件形态。
 
-use std::fmt;
+use std::{fmt, sync::Arc};
 
+use tower_agent_provider::ProviderPlugin;
 use tower_agent_runtime::{AgentEvent, AgentTool, BoxAgentService, BoxToolService};
 
 use crate::{
@@ -20,6 +21,7 @@ pub struct PluginContext {
     agent_layers: Vec<Box<dyn AgentLayer>>,
     tool_layers: Vec<Box<dyn ToolLayer>>,
     event_handlers: Vec<Box<dyn EventHandler>>,
+    provider_plugins: Vec<Arc<dyn ProviderPlugin>>,
 }
 
 impl fmt::Debug for PluginContext {
@@ -29,6 +31,7 @@ impl fmt::Debug for PluginContext {
             .field("agent_layers", &self.agent_layers.len())
             .field("tool_layers", &self.tool_layers.len())
             .field("event_handlers", &self.event_handlers.len())
+            .field("provider_plugins", &self.provider_plugins.len())
             .finish()
     }
 }
@@ -78,6 +81,11 @@ impl PluginContext {
         self.event_handlers.push(handler);
     }
 
+    /// Register a provider plugin for the host assembly layer.
+    pub fn register_provider_plugin(&mut self, plugin: Arc<dyn ProviderPlugin>) {
+        self.provider_plugins.push(plugin);
+    }
+
     /// 已登记的 agent 级中间件（按登记顺序）。
     #[must_use]
     pub fn agent_layers(&self) -> &[Box<dyn AgentLayer>] {
@@ -94,6 +102,12 @@ impl PluginContext {
     #[must_use]
     pub fn event_handlers(&self) -> &[Box<dyn EventHandler>] {
         &self.event_handlers
+    }
+
+    /// Provider plugins contributed by static plugins.
+    #[must_use]
+    pub fn provider_plugins(&self) -> &[Arc<dyn ProviderPlugin>] {
+        &self.provider_plugins
     }
 
     /// 把贡献的 agent 层叠到内层服务上；**先登记的在最外层**（与 `ServiceBuilder` 一致）。
@@ -125,7 +139,7 @@ impl PluginContext {
 /// 静态插件。
 ///
 /// 静态插件编译进宿主：`manifest` 声明能力，`install` 在解析完成后被调用，
-/// 把工具 / 中间件层 / 事件处理器登记进 [`PluginContext`]。
+/// 把工具 / 中间件层 / 事件处理器 / provider 插件登记进 [`PluginContext`]。
 pub trait StaticPlugin: Send + Sync + 'static {
     /// 插件清单。
     fn manifest(&self) -> PluginManifest;

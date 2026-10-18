@@ -5210,6 +5210,7 @@ name = "tower-agent"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "semver",
  "serde_json",
  "tempfile",
  "tokio",
@@ -5222,6 +5223,7 @@ dependencies = [
  "tower-agent-plugins",
  "tower-agent-protocol",
  "tower-agent-provider",
+ "tower-agent-provider-builtin",
  "tower-agent-runtime",
  "tower-agent-tools",
  "tower-agent-turso",
@@ -5383,12 +5385,22 @@ dependencies = [
  "futures-core",
  "futures-util",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tower",
+]
+
+[[package]]
+name = "tower-agent-provider-builtin"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "tower-agent-plugins",
+ "tower-agent-provider",
 ]
 
 [[package]]

@@ -1,0 +1,14 @@
+[package]
+name = "tower-agent-provider-builtin"
+description = "Static provider plugins for tower-agent's built-in LLM integrations."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+semver.workspace = true
+tower-agent-plugins.workspace = true
+tower-agent-provider.workspace = true

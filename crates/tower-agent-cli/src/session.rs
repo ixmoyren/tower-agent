@@ -11,6 +11,7 @@
 //!   provider [`tower_agent_provider::provider::faux::FauxProvider`]，二进制则接真实 provider。
 
 use std::{
+    collections::BTreeMap,
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -29,8 +30,8 @@ use tower_agent_storage::{ConfigScope, ProviderCredential};
 
 use crate::store::CliStore;
 use tower_agent_provider::{
-    BoxStreamService, ContentBlock, Message, Model, ModelThinkingLevel, TextContent, UserContent,
-    UserMessage,
+    BoxStreamService, ContentBlock, Message, Model, ModelThinkingLevel, ProviderRegistry,
+    TextContent, UserContent, UserMessage,
 };
 use tower_agent_runtime::{
     AgentError, AgentEvent, AgentMessage, AgentOptions, AgentRequest, AgentState, AgentTool,
@@ -67,6 +68,10 @@ pub struct Session {
     transcript: Option<Arc<crate::store::Transcript>>,
     /// 上下文压缩器（核心能力，由 agent 循环在每次请求前自动执行）；未启用时为 `None`。
     compactor: Option<Arc<Compactor>>,
+    /// Provider plugins available to `/login` and `/model`.
+    providers: Arc<ProviderRegistry>,
+    /// Credentials known to this process, used by provider switches.
+    provider_credentials: Mutex<BTreeMap<String, String>>,
 }
 
 /// 工具过滤：`none` 清空，`allow` 白名单（空 = 全放行），`exclude` 黑名单。
@@ -271,6 +276,11 @@ impl Session {
         options.before_tool_call = Some(script_before_tool_call(Arc::clone(&script_hooks)));
         options.after_tool_call = Some(script_after_tool_result(Arc::clone(&script_hooks)));
         let (service, control) = crate::stack::assemble(options);
+        let providers = Arc::new(
+            tower_agent::assembly::HostPlugins::new(&cwd)
+                .providers()
+                .expect("built-in provider plugins must assemble"),
+        );
         Self {
             service: Mutex::new(service),
             control,
@@ -285,6 +295,8 @@ impl Session {
             store: None,
             transcript: None,
             compactor,
+            providers,
+            provider_credentials: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -308,6 +320,37 @@ impl Session {
         }
         self.store = Some(store);
         self
+    }
+
+    /// Replace the provider plugin registry used by session commands.
+    #[must_use]
+    pub fn with_provider_registry(mut self, providers: Arc<ProviderRegistry>) -> Self {
+        self.providers = providers;
+        self
+    }
+
+    /// Seed provider credentials from persisted storage for runtime provider switches.
+    #[must_use]
+    pub fn with_provider_credentials(
+        mut self,
+        credentials: impl IntoIterator<Item = (String, String)>,
+    ) -> Self {
+        self.provider_credentials
+            .get_mut()
+            .expect("provider credential mutex poisoned")
+            .extend(credentials);
+        self
+    }
+
+    /// Provider plugin ids available to this session.
+    #[must_use]
+    pub fn provider_ids(&self) -> String {
+        self.providers
+            .descriptors()
+            .into_iter()
+            .map(|descriptor| descriptor.id)
+            .collect::<Vec<_>>()
+            .join(" / ")
     }
 
     /// Attach the shared runtime permission policy used by both codemode engines.
@@ -795,16 +838,6 @@ pub fn thinking_level_name(level: ModelThinkingLevel) -> &'static str {
 /// pi 的思考级别取值（帮助文案与错误提示共用）。
 pub const THINKING_LEVELS: &str = "off, minimal, low, medium, high, xhigh, max";
 
-/// 用户可选的 provider 列表（`/model` 的错误提示用；不含测试用的 faux）。
-#[must_use]
-pub fn available_providers() -> String {
-    crate::provider::ProviderKind::ALL
-        .iter()
-        .map(|kind| kind.canonical_name())
-        .collect::<Vec<_>>()
-        .join(" / ")
-}
-
 impl tower_agent_ui::CommandHost for Session {
     fn new_session(&self) -> Result<(), String> {
         self.reset().map_err(|error| error.to_string())?;
@@ -857,78 +890,83 @@ impl tower_agent_ui::CommandHost for Session {
         let current = self.state().model;
         let Some(arg) = arg else {
             return Ok(format!(
-                "current model: {} (provider {} / api {})\nusage: /model <provider>/<id> or /model <id>",
-                current.id, current.provider, current.api
+                "current model: {} (provider {} / api {})\n\
+                 available providers: {}\n\
+                 usage: /model <provider>/<id>, /model <provider>, or /model <id>",
+                current.id,
+                current.provider,
+                current.api,
+                self.provider_ids()
             ));
         };
 
-        let (requested, id) = match arg.split_once('/') {
-            Some((provider, id)) => (Some(provider.trim()), id.trim()),
+        let (requested_provider, requested_model) = match arg.split_once('/') {
+            Some((provider, model)) => (Some(provider.trim()), model.trim()),
             None => (None, arg.trim()),
         };
-        if id.is_empty() {
-            return Err("model id must not be empty. usage: /model <provider>/<id>".into());
-        }
 
-        // 没写 `provider/` 时：先看它是不是 provider 名（用它的默认模型），否则按当前
-        // provider 的模型 id 处理。
-        let kind = match requested {
-            Some(provider) => crate::provider::ProviderKind::parse(provider).ok_or_else(|| {
-                format!(
-                    "unknown provider: {provider} (available: {})",
-                    available_providers()
-                )
-            })?,
-            None => match crate::provider::ProviderKind::parse(id) {
-                Some(kind) => kind,
-                None => crate::provider::ProviderKind::ALL
-                    .into_iter()
-                    // 先按 (provider, api) 精确匹配（openai 与 deepseek 共用
-                    // `openai-completions`）；再退回只按 provider 标识匹配。
-                    .find(|kind| kind.id() == current.provider && kind.api() == current.api)
-                    .or_else(|| {
-                        crate::provider::ProviderKind::ALL
-                            .into_iter()
-                            .find(|kind| kind.id() == current.provider)
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "cannot determine the current provider ({})",
-                            current.provider
-                        )
-                    })?,
-            },
-        };
-        let model_id = match requested {
-            Some(_) => id,
-            None => {
-                if crate::provider::ProviderKind::parse(id).is_some() {
-                    kind.default_model_id()
-                } else {
-                    id
-                }
+        let provider = requested_provider
+            .filter(|provider| !provider.is_empty())
+            .or_else(|| {
+                self.providers
+                    .descriptor(requested_model)
+                    .map(|_| requested_model)
+            })
+            .unwrap_or(&current.provider);
+        let descriptor = self.providers.descriptor(provider).ok_or_else(|| {
+            format!(
+                "unknown provider: {provider} (available: {})",
+                self.provider_ids()
+            )
+        })?;
+        let switched_by_provider_name =
+            requested_provider.is_none() && descriptor.id == requested_model;
+        let model_id = if switched_by_provider_name {
+            descriptor
+                .default_model
+                .as_deref()
+                .ok_or_else(|| format!("provider `{provider}` does not declare a default model"))?
+        } else {
+            if requested_model.is_empty() {
+                return Err("model id must not be empty. usage: /model <provider>/<id>".into());
             }
+            requested_model
         };
 
-        if kind.id() != current.provider {
-            return Err(format!(
-                "this port fixes the provider at startup (currently {}); restart with \
-                 `--provider` to switch.",
-                current.provider
-            ));
-        }
-
-        let model = crate::provider::model_for(kind, model_id);
-        self.set_model(model.clone());
+        let stored = self
+            .provider_credentials
+            .lock()
+            .expect("provider credential mutex poisoned")
+            .get(provider)
+            .cloned();
+        let api_key = crate::provider::resolve_api_key_for_provider(
+            &self.providers,
+            provider,
+            None,
+            stored.as_deref(),
+        );
+        let setup = crate::provider::build_from_registry(
+            &self.providers,
+            provider,
+            Some(model_id),
+            crate::provider::ProviderStackOptions::default(),
+            api_key.as_deref(),
+        )
+        .map_err(|error| error.to_string())?;
+        self.control.set_stream(setup.stream_fn());
+        self.set_model(setup.model.clone());
         // 写回 pi `settings.json` 的 `defaultProvider` / `defaultModel`。
         self.persist_config(
             crate::store::DEFAULT_PROVIDER,
-            serde_json::json!(model.provider),
+            serde_json::json!(setup.model.provider),
         );
-        self.persist_config(crate::store::DEFAULT_MODEL, serde_json::json!(model.id));
+        self.persist_config(
+            crate::store::DEFAULT_MODEL,
+            serde_json::json!(setup.model.id),
+        );
         Ok(format!(
             "model switched to: {} (provider {})",
-            model.id, model.provider
+            setup.model.id, setup.model.provider
         ))
     }
 
@@ -963,39 +1001,52 @@ impl tower_agent_ui::CommandHost for Session {
         let Some(arg) = arg else {
             return Ok(format!(
                 "usage: /login <provider> <api-key>\navailable providers: {}",
-                available_providers()
+                self.provider_ids()
             ));
         };
         let mut parts = arg.splitn(2, char::is_whitespace);
         let provider = parts.next().unwrap_or_default().trim();
         let api_key = parts.next().map(str::trim).filter(|key| !key.is_empty());
-        let kind = crate::provider::ProviderKind::parse(provider).ok_or_else(|| {
+        let descriptor = self.providers.descriptor(provider).ok_or_else(|| {
             format!(
                 "unknown provider: {provider} (available: {})",
-                available_providers()
+                self.provider_ids()
             )
         })?;
 
         // 没带 key 时退回环境变量；两条路都缺凭据就报错。
         let options = crate::provider::ProviderStackOptions::default();
-        let setup = match api_key {
-            Some(api_key) => {
-                crate::provider::build_with_api_key(kind, None, options, Some(api_key))
-            }
-            None => crate::provider::build(kind, None, options),
-        }
+        let api_key = crate::provider::resolve_api_key_for_provider(
+            &self.providers,
+            &descriptor.id,
+            api_key,
+            None,
+        );
+        let setup = crate::provider::build_from_registry(
+            &self.providers,
+            &descriptor.id,
+            descriptor.default_model.as_deref(),
+            options,
+            api_key.as_deref(),
+        )
         .map_err(|error| error.to_string())?;
 
         self.control.set_stream(setup.stream_fn());
         self.control.set_model(setup.model.clone());
+        if let Some(api_key) = api_key.as_ref() {
+            self.provider_credentials
+                .lock()
+                .expect("provider credential mutex poisoned")
+                .insert(descriptor.id.clone(), api_key.clone());
+        }
         // 对齐 pi：`/login` 把凭据写进 `auth.json`、默认 provider / 模型写进 `settings.json`。
         if let Some(store) = &self.store {
             let model_id = setup.model.id.clone();
             // 只持久化显式给出的 key；`/login <provider>`（回退到环境变量）不把环境里的 key 落盘。
             if let Some(api_key) = api_key {
                 store.queue_put_credential(ProviderCredential {
-                    provider: kind.id().to_string(),
-                    api_key: api_key.to_string(),
+                    provider: descriptor.id.clone(),
+                    api_key,
                     model: Some(model_id.clone()),
                     base_url: None,
                     updated_at: tower_agent_runtime::agent_loop::now_ms(),
@@ -1004,7 +1055,7 @@ impl tower_agent_ui::CommandHost for Session {
             store.queue_set_config(
                 ConfigScope::User,
                 crate::store::DEFAULT_PROVIDER,
-                serde_json::json!(kind.id()),
+                serde_json::json!(descriptor.id),
             );
             store.queue_set_config(
                 ConfigScope::User,
@@ -1014,8 +1065,7 @@ impl tower_agent_ui::CommandHost for Session {
         }
         Ok(format!(
             "provider configured: {} (model {})",
-            kind.canonical_name(),
-            setup.model.id
+            descriptor.id, setup.model.id
         ))
     }
 
@@ -1758,14 +1808,16 @@ on("tool_call", "block");
     #[tokio::test]
     async fn command_host_reports_and_updates_session_state() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let setup = crate::provider::build_with_api_key(
-            crate::provider::ProviderKind::Anthropic,
+        let setup = crate::provider::build_from_registry(
+            &crate::provider::provider_registry(dir.path()),
+            "anthropic",
             Some("claude-test"),
             crate::provider::ProviderStackOptions::default(),
             Some("test-key"),
         )
         .expect("provider setup");
-        let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone());
+        let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone())
+            .with_provider_credentials([("anthropic".into(), "test-key".into())]);
 
         let info = session.session_info().join("\n");
         assert!(info.contains("claude-test"), "got: {info}");
@@ -1825,6 +1877,33 @@ on("tool_call", "block");
     }
 
     #[tokio::test]
+    async fn command_host_login_supports_a_user_provider_plugin() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut registry = crate::provider::provider_registry(dir.path());
+        registry
+            .register(Arc::new(
+                tower_agent::provider_builtin::OpenAiCompatibleProviderPlugin::new(
+                    "local",
+                    "Local",
+                    "local-model",
+                    None,
+                )
+                .with_base_url("http://127.0.0.1:8080/v1"),
+            ))
+            .expect("register custom provider");
+        let setup = crate::provider::unconfigured_setup();
+        let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone())
+            .with_provider_registry(Arc::new(registry));
+
+        let message = session
+            .login(Some("local"))
+            .expect("activate custom provider");
+        assert!(message.contains("local"), "got: {message}");
+        assert_eq!(session.state().model.provider, "local");
+        assert_eq!(session.state().model.id, "local-model");
+    }
+
+    #[tokio::test]
     async fn command_host_persists_config_to_store() {
         let dir = tempfile::tempdir().expect("temp dir");
         let storage = tower_agent_turso::TursoStorage::in_memory()
@@ -1834,15 +1913,17 @@ on("tool_call", "block");
             storage,
             tokio::runtime::Handle::current(),
         ));
-        let setup = crate::provider::build_with_api_key(
-            crate::provider::ProviderKind::Anthropic,
+        let setup = crate::provider::build_from_registry(
+            &crate::provider::provider_registry(dir.path()),
+            "anthropic",
             Some("claude-test"),
             crate::provider::ProviderStackOptions::default(),
             Some("test-key"),
         )
         .expect("provider setup");
         let session = Session::with_model(dir.path(), setup.stream_fn(), setup.model.clone())
-            .with_store(Arc::clone(&store));
+            .with_store(Arc::clone(&store))
+            .with_provider_credentials([("anthropic".into(), "test-key".into())]);
 
         // `/model` / `/thinking` 写回 settings.json 的默认项。
         session.model(Some("claude-other")).expect("switch model");

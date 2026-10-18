@@ -273,6 +273,13 @@ stabby::export! {
 7. 内置工具覆盖以**插件名**为单位：替换 `read` 就注册另一个名为 `read` 的高优先级插件，只影响 `read`；`tool.read` 仅作为能力/依赖标识，不作为工具插件覆盖入口。
 8. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `tower-agent-cli::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
 
+### 9.1 Provider 插件
+
+- `tower-agent-provider::ProviderPlugin` 是用户 provider 的稳定契约：提供 `ProviderDescriptor`，并把 `ProviderConfig` 构造成 `ProviderBuild`（API → `BoxProviderService`，以及模型目录）。
+- `ProviderPluginRegistration` 把 provider 插件适配为独立静态插件；插件名和能力均为 `provider.<id>`。用户 provider 通过 `HostPlugins::with_provider(...)` 注入，与内置 provider 使用同一装配路径。
+- `tower-agent-provider-builtin` 把 Anthropic、OpenAI Chat、OpenAI Responses、Google 和 DeepSeek 分别声明为静态插件；CLI 的 `--provider`、`/login`、`/model` 都从 `ProviderRegistry` 查询，不再维护硬编码 provider 枚举。
+- `ProviderDescriptor` 声明默认 API、默认模型、凭据环境变量和默认选择优先级；宿主统一执行凭据优先级 `CLI > 环境变量 > storage`。
+
 ## 10. crate 划分
 
 ```text

@@ -17,6 +17,7 @@ rkyv = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
+tower-agent-provider.workspace = true
 
 [features]
 default = []
@@ -26,4 +27,3 @@ dynamic = ["tower-agent-plugins/dynamic", "dep:stabby", "dep:rkyv"]
 futures-util.workspace = true
 tokio.workspace = true
 tower.workspace = true
-tower-agent-provider.workspace = true

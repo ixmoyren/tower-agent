@@ -16,6 +16,90 @@ fn builtin_tools_are_assembled() {
     }
 }
 
+#[test]
+fn builtin_and_user_providers_are_assembled_as_plugins() {
+    use std::sync::Arc;
+
+    use semver::Version;
+    use tower_agent::provider::{
+        ProviderBuild, ProviderConfig, ProviderDescriptor, ProviderPlugin, ProviderPluginError,
+    };
+
+    struct CustomProvider;
+
+    impl ProviderPlugin for CustomProvider {
+        fn descriptor(&self) -> ProviderDescriptor {
+            ProviderDescriptor::new("custom", "Custom", Version::new(1, 0, 0))
+                .api("custom-api")
+                .default_model("custom-model")
+        }
+
+        fn build(&self, _config: &ProviderConfig) -> Result<ProviderBuild, ProviderPluginError> {
+            Err(ProviderPluginError::Build {
+                provider: "custom".into(),
+                message: "not built in this assembly test".into(),
+            })
+        }
+    }
+
+    let providers = tower_agent::assembly::HostPlugins::new(".")
+        .with_provider(Arc::new(CustomProvider))
+        .providers()
+        .expect("assemble providers");
+    for expected in [
+        "anthropic",
+        "openai",
+        "openai-responses",
+        "google",
+        "deepseek",
+        "custom",
+    ] {
+        assert!(
+            providers.descriptor(expected).is_some(),
+            "missing provider `{expected}`: {:?}",
+            providers.provider_ids()
+        );
+    }
+}
+
+#[test]
+fn a_user_provider_can_replace_one_builtin_provider_plugin() {
+    use std::sync::Arc;
+
+    use semver::Version;
+    use tower_agent::provider::{
+        ProviderBuild, ProviderConfig, ProviderDescriptor, ProviderPlugin, ProviderPluginError,
+    };
+
+    struct ReplacementAnthropic;
+
+    impl ProviderPlugin for ReplacementAnthropic {
+        fn descriptor(&self) -> ProviderDescriptor {
+            ProviderDescriptor::new("anthropic", "Replacement Anthropic", Version::new(2, 0, 0))
+                .api("anthropic-messages")
+                .default_model("replacement-model")
+        }
+
+        fn build(&self, _config: &ProviderConfig) -> Result<ProviderBuild, ProviderPluginError> {
+            Err(ProviderPluginError::Build {
+                provider: "anthropic".into(),
+                message: "not built in this assembly test".into(),
+            })
+        }
+    }
+
+    let providers = tower_agent::assembly::HostPlugins::new(".")
+        .with_provider(Arc::new(ReplacementAnthropic))
+        .providers()
+        .expect("assemble providers");
+    let descriptor = providers.descriptor("anthropic").expect("replacement");
+    assert_eq!(descriptor.name, "Replacement Anthropic");
+    assert_eq!(
+        descriptor.default_model.as_deref(),
+        Some("replacement-model")
+    );
+}
+
 #[cfg(feature = "sandbox-wasmtime")]
 #[test]
 fn wasmtime_capability_is_registered_and_protected() {

@@ -162,7 +162,7 @@ pub struct CliArgs {
     )]
     pub codemode_script_scope: Option<ConfigScopeArg>,
 
-    /// 选择 provider：anthropic / openai / openai-responses / google（缺省时按环境里的凭据挑）。
+    /// 选择 provider 插件（内置 anthropic / openai / openai-responses / google / deepseek）。
     #[arg(
         long,
         value_name = "provider",

@@ -16,6 +16,7 @@ mod json;
 mod message;
 mod model;
 pub mod models;
+pub mod plugin;
 pub mod provider;
 mod request;
 mod service;
@@ -32,6 +33,10 @@ pub use message::{
 };
 pub use model::{InputModality, Model, ModelCost, ModelCostRates, ModelCostTier};
 pub use models::{ModelSource, Models, ProviderRefresh, RefreshOptions, RefreshReport};
+pub use plugin::{
+    CredentialDescriptor, ProviderBuild, ProviderConfig, ProviderDescriptor, ProviderPlugin,
+    ProviderPluginError, ProviderRegistry, ProviderSession,
+};
 pub use provider::{
     BoxProviderService, ProviderService, ProviderServiceExt,
     anthropic::{API as ANTHROPIC_MESSAGES_API, AnthropicConfig, AnthropicProvider},

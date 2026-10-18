@@ -22,8 +22,9 @@
   `Layer` 组合；同时提供 **有状态会话**、 **无状态 Service** 与 **池化 Service**三种形态。
 - **双响应形态**：非流式 `AgentResponse`（= 流式事件的 fold）与流式 `AgentEventStream`
   （`BoxStream<AgentEvent>`），直接对接 TUI / SSE。
-- **多 provider**：Anthropic Messages、OpenAI Chat Completions（含兼容端点）、
-  OpenAI Responses、Google Generative AI、DeepSeek；统一的 `Models` 路由与目录刷新。
+- **多 provider 插件**：Anthropic Messages、OpenAI Chat Completions（含兼容端点）、
+  OpenAI Responses、Google Generative AI、DeepSeek 都以内置 provider 插件注册；宿主也可实现
+  `ProviderPlugin` 注入自定义 LLM。
 - **七个内置工具**：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`，
   每个工具本身就是一个可组合的 tower `Layer`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)
   ——bash 兼容的 Rust shell，在进程内解释执行，跨平台行为一致）。
@@ -42,6 +43,7 @@
 | `tower-agent-core`       | **契约**：`AgentRequest`/`AgentResponse`/`AgentEventStream`、消息与事件、工具边界、Layer 扩展点、错误 |
 | `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
 | `tower-agent-provider`   | **provider**：多 provider LLM Service、`Models` 路由、认证、模型目录                                  |
+| `tower-agent-provider-builtin` | **内置 provider 插件**：五个独立静态插件与统一 `ProviderRegistry`                               |
 | `tower-agent-tools`      | **内置工具与插件合集**：七个工具实现及各自独立的静态插件声明                                           |
 | `tower-agent-plugins`    | **插件宿主**：注册表、生命周期、HostApi、权限、三类加载器                                             |
 | `tower-agent-plugin-sdk` | **插件作者 SDK**：`declare_plugin!`、静态 / 动态 ABI 契约                                             |

@@ -28,7 +28,7 @@ pub mod stack;
 pub mod store;
 
 use args::{CliArgs, ConfigScopeArg, parse};
-use provider::{ProviderKind, ProviderStackOptions};
+use provider::ProviderStackOptions;
 use session::{Session, run_print, run_tui};
 use std::{
     io::{IsTerminal as _, Read as _},
@@ -142,14 +142,19 @@ fn main() -> ExitCode {
     }
     .process_default();
 
+    let provider_registry = provider::provider_registry(&cwd);
+
     // provider 选择：`--provider` 优先；没给就用存储里的 `defaultProvider`（必须确实
     // 有凭据），其次按 pi 的默认顺序挑第一个在环境里有凭据的，再次挑第一个有存储凭据的。
     // 都没有时：print 模式直接报错；TUI 模式先进界面，用 `/login` 配置。
     let requested = match args.provider.as_deref() {
-        Some(value) => match ProviderKind::parse(value) {
-            Some(kind) => Some(kind),
+        Some(value) => match provider_registry.descriptor(value) {
+            Some(descriptor) => Some(descriptor.id),
             None => {
-                eprintln!("{}", provider::ProviderError::Unknown(value.to_string()));
+                eprintln!(
+                    "未知 provider：{value}（可用：{}）",
+                    provider_registry.provider_ids().join(" / ")
+                );
                 return ExitCode::FAILURE;
             }
         },
@@ -158,46 +163,65 @@ fn main() -> ExitCode {
             eprintln!("`--api-key` 需要配合 `--provider` 使用：本移植版不会替你猜 provider。");
             return ExitCode::FAILURE;
         }
-        None => default_kind(&snapshot),
+        None => default_provider(&snapshot, &provider_registry),
     };
 
-    let setup = match requested {
-        Some(kind) => {
-            // api key：`--api-key` > 环境变量 > 存储凭据；模型：`--model` > 存储默认 > 内置默认。
-            let stored = snapshot.credential(kind.id()).map(|c| c.api_key.as_str());
-            let api_key = provider::resolve_api_key(kind, args.api_key.as_deref(), stored);
-            let model = args
-                .model
-                .as_deref()
-                .or_else(|| default_model_for(kind, &snapshot));
-            let result = provider::build_with_api_key(
-                kind,
-                model,
-                ProviderStackOptions::default(),
-                api_key.as_deref(),
-            );
-            match result {
-                Ok(setup) => setup,
-                // TUI 里缺凭据可以用 `/login` 补，先进界面而不是直接退出。
-                Err(provider::ProviderError::MissingApiKey { .. }) if !print_mode => {
-                    provider::unconfigured_setup()
-                }
-                Err(error) => {
-                    eprintln!("provider 配置失败：{error}");
-                    return ExitCode::FAILURE;
+    let setup =
+        match requested.as_deref() {
+            Some(provider_id) => {
+                // api key：`--api-key` > 环境变量 > 存储凭据；模型：`--model` > 存储默认 > 内置默认。
+                let stored = snapshot
+                    .credential(provider_id)
+                    .map(|credential| credential.api_key.as_str());
+                let api_key = provider::resolve_api_key_for_provider(
+                    &provider_registry,
+                    provider_id,
+                    args.api_key.as_deref(),
+                    stored,
+                );
+                let model = args
+                    .model
+                    .as_deref()
+                    .or_else(|| default_model_for(provider_id, &snapshot));
+                let result = provider::build_from_registry(
+                    &provider_registry,
+                    provider_id,
+                    model,
+                    ProviderStackOptions::default(),
+                    api_key.as_deref(),
+                );
+                match result {
+                    Ok(setup) => setup,
+                    // TUI 里缺凭据可以用 `/login` 补，先进界面而不是直接退出。
+                    Err(tower_agent_provider::ProviderPluginError::MissingCredentials {
+                        ..
+                    }) if !print_mode => provider::unconfigured_setup(),
+                    Err(error) => {
+                        eprintln!("provider 配置失败：{error}");
+                        return ExitCode::FAILURE;
+                    }
                 }
             }
-        }
-        None if print_mode => {
-            eprintln!(
-                "没有可用的 provider：请设置 ANTHROPIC_API_KEY / OPENAI_API_KEY / \
-                 GEMINI_API_KEY / DEEPSEEK_API_KEY，或用 `--provider` + `--api-key` 指定，\
-                 或先用 `/login` 登录。"
-            );
-            return ExitCode::FAILURE;
-        }
-        None => provider::unconfigured_setup(),
-    };
+            None if print_mode => {
+                let providers = provider_registry
+                    .descriptors()
+                    .into_iter()
+                    .filter_map(|descriptor| {
+                        descriptor
+                            .credentials
+                            .env()
+                            .map(|env| format!("{env} ({})", descriptor.id))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" / ");
+                eprintln!(
+                    "没有可用的 provider：请设置 {providers}，或用 `--provider` + `--api-key` \
+                 指定，或先用 `/login` 登录。"
+                );
+                return ExitCode::FAILURE;
+            }
+            None => provider::unconfigured_setup(),
+        };
 
     // 会话续接 / 新建：`--no-session` 关闭持久化；`--session <id>` / `--continue` 续接已有
     // 会话；否则开一个新会话（默认自动保存）。
@@ -249,6 +273,15 @@ fn main() -> ExitCode {
         compactor.restore(restored);
     }
 
+    let mut runtime_credentials: Vec<(String, String)> = snapshot
+        .credentials
+        .iter()
+        .map(|credential| (credential.provider.clone(), credential.api_key.clone()))
+        .collect();
+    if let (Some(provider), Some(api_key)) = (requested.as_deref(), args.api_key.as_deref()) {
+        runtime_credentials.push((provider.to_owned(), api_key.to_owned()));
+    }
+
     let session = Session::with_compaction_and_codemode(
         cwd.clone(),
         setup.stream_fn(),
@@ -256,7 +289,9 @@ fn main() -> ExitCode {
         initial_messages,
         Arc::clone(&compactor),
         !args.no_codemode,
-    );
+    )
+    .with_provider_registry(Arc::new(provider_registry))
+    .with_provider_credentials(runtime_credentials);
     let session = match &transcript {
         Some(transcript) => session.with_transcript(Arc::clone(transcript)),
         None => session,
@@ -620,26 +655,47 @@ fn warn_unknown_tool(name: &str) {
 /// 没显式给 `--provider` 时的 provider 选择（对齐 pi 的优先级）：
 ///
 /// 1. 存储里的 `defaultProvider`（只有当它确实有凭据可用时才采纳）；
-/// 2. 环境变量里的默认顺序（[`provider::default_kind_from_env`]）；
+/// 2. provider 插件描述符的默认优先级；
 /// 3. 第一个有存储凭据的 provider。
-fn default_kind(snapshot: &store::StoreSnapshot) -> Option<ProviderKind> {
-    snapshot
+fn default_provider(
+    snapshot: &store::StoreSnapshot,
+    registry: &tower_agent_provider::ProviderRegistry,
+) -> Option<String> {
+    let configured = snapshot
         .default_provider
         .as_deref()
-        .and_then(ProviderKind::parse)
-        .filter(|kind| kind.has_api_key() || snapshot.credential(kind.id()).is_some())
-        .or_else(provider::default_kind_from_env)
+        .filter(|provider| {
+            registry.descriptor(provider).is_some()
+                && provider::resolve_api_key_for_provider(
+                    registry,
+                    provider,
+                    None,
+                    snapshot
+                        .credential(provider)
+                        .map(|credential| credential.api_key.as_str()),
+                )
+                .is_some()
+        })
+        .map(str::to_owned);
+    configured
         .or_else(|| {
-            ProviderKind::ALL
+            provider::providers_with_env_credentials(registry)
                 .into_iter()
-                .find(|kind| snapshot.credential(kind.id()).is_some())
+                .next()
+        })
+        .or_else(|| {
+            registry
+                .descriptors()
+                .into_iter()
+                .find(|descriptor| snapshot.credential(&descriptor.id).is_some())
+                .map(|descriptor| descriptor.id)
         })
 }
 
 /// 存储里的 `defaultModel`：只有 `defaultProvider` 与当前 provider 一致时才套用
 /// （pi 把 `defaultProvider` / `defaultModel` 成对使用）。
-fn default_model_for(kind: ProviderKind, snapshot: &store::StoreSnapshot) -> Option<&str> {
-    if snapshot.default_provider.as_deref() == Some(kind.id()) {
+fn default_model_for<'a>(provider: &str, snapshot: &'a store::StoreSnapshot) -> Option<&'a str> {
+    if snapshot.default_provider.as_deref() == Some(provider) {
         snapshot.default_model.as_deref()
     } else {
         None

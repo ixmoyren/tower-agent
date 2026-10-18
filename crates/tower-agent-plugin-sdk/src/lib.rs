@@ -17,8 +17,12 @@ pub use tower_agent_plugins::{
     AgentLayer, CapabilityId, EventHandler, HostApi, InflightGuard, Lifecycle, Permission,
     PermissionDecision, PermissionPolicy, PermissionPrompter, PluginAccess, PluginContext,
     PluginError, PluginId, PluginKind, PluginManifest, PluginState, ProvidedCapability,
-    StaticPlugin, ToolLayer, agent_layer, event_handler, tool_layer, tower_agent_layer,
-    tower_tool_layer,
+    ProviderPluginRegistration, StaticPlugin, ToolLayer, agent_layer, event_handler, tool_layer,
+    tower_agent_layer, tower_tool_layer,
+};
+pub use tower_agent_provider::{
+    CredentialDescriptor, ProviderBuild, ProviderConfig, ProviderDescriptor, ProviderPlugin,
+    ProviderPluginError, ProviderRegistry, ProviderSession,
 };
 pub use tower_agent_runtime::{ToolAnnotations, ToolExposure, ToolNamespace, ToolRegistration};
 
