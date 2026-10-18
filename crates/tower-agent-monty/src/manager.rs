@@ -8,7 +8,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use futures_util::{StreamExt as _, future::BoxFuture};
@@ -17,7 +17,8 @@ use monty_types::OsFunctionCall;
 use semver::{Version, VersionReq};
 use serde_json::{Value, json};
 use tower_agent_codemode_core::{
-    Capability, CapabilityError, CapabilitySurface, ExecOptions, ScriptLanguage, ScriptPermissions,
+    Capability, CapabilityError, CapabilitySurface, ExecOptions, ScriptHookEvent,
+    ScriptHookHandler, ScriptHookRegistry, ScriptLanguage, ScriptPermissions,
 };
 use tower_agent_core::{
     AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer, UiState,
@@ -167,6 +168,9 @@ pub struct ModManager {
     kv: Mutex<BTreeMap<String, Value>>,
     /// Persistent codemode script store and the current project scope.
     script_storage: Mutex<Option<ScriptStorage>>,
+    /// Session-scoped script hook registry shared with other codemode engines.
+    hook_registry: Mutex<Option<Arc<ScriptHookRegistry>>>,
+    self_weak: OnceLock<Weak<ModManager>>,
 }
 
 impl std::fmt::Debug for ModManager {
@@ -202,7 +206,10 @@ impl ModManager {
             requires: Mutex::new(BTreeMap::new()),
             kv: Mutex::new(BTreeMap::new()),
             script_storage: Mutex::new(None),
+            hook_registry: Mutex::new(None),
+            self_weak: OnceLock::new(),
         });
+        let _ = manager.self_weak.set(Arc::downgrade(&manager));
         // JIT 运行时以 protected 载荷注册，并在 install 时把作者工具装进工具目录。
         // 工具句柄用 Weak 指回本管理器，避免强引用环。
         let foundation = FoundationPlugin {
@@ -676,6 +683,18 @@ impl ModManager {
             .expect("permission policy poisoned") = policy;
     }
 
+    /// Attach the session hook registry used by script `on(...)` registrations.
+    pub fn set_hook_registry(&self, registry: Arc<ScriptHookRegistry>) {
+        *self.hook_registry.lock().expect("hook registry poisoned") = Some(registry);
+    }
+
+    fn hook_registry(&self) -> Option<Arc<ScriptHookRegistry>> {
+        self.hook_registry
+            .lock()
+            .expect("hook registry poisoned")
+            .clone()
+    }
+
     /// 取某个 mod 的权限（没有记录时返回默认权限）。
     #[must_use]
     pub fn permissions(&self, name: &str) -> ModPermissions {
@@ -860,6 +879,9 @@ impl ModManager {
             .lock()
             .expect("registry poisoned")
             .remove(name);
+        if let Some(registry) = self.hook_registry() {
+            registry.unregister_owner(&format!("monty:{name}"));
+        }
         if let Err(error) = plugin.reload_checked(code).await {
             self.push_specs(name, old_specs);
             self.set_requires(name, old_requires);
@@ -906,6 +928,9 @@ impl ModManager {
             .lock()
             .expect("permissions poisoned")
             .remove(name);
+        if let Some(registry) = self.hook_registry() {
+            registry.unregister_owner(&format!("monty:{name}"));
+        }
         let _ = plugin.stop();
         let _ = plugin.unload();
         self.resolve_and_apply()?;
@@ -933,10 +958,16 @@ impl ModManager {
         self.take_specs(name);
         if let Err(error) = plugin.activate().await {
             self.take_specs(name);
+            if let Some(registry) = self.hook_registry() {
+                registry.unregister_owner(&format!("monty:{name}"));
+            }
             return Err(error);
         }
         if let Err(error) = self.check_shadowing(name) {
             self.take_specs(name);
+            if let Some(registry) = self.hook_registry() {
+                registry.unregister_owner(&format!("monty:{name}"));
+            }
             return Err(error);
         }
         self.set_requires(name, requires);
@@ -947,6 +978,9 @@ impl ModManager {
                 .remove(name);
             self.take_specs(name);
             self.take_requires(name);
+            if let Some(registry) = self.hook_registry() {
+                registry.unregister_owner(&format!("monty:{name}"));
+            }
             return Err(error);
         }
         self.mods
@@ -1107,6 +1141,35 @@ impl ModManager {
                 } else {
                     self.host_tool_unregister(&call)
                 }
+            }
+            "on" | "register_hook" => {
+                self.authorize(&call.plugin, Capability::Hooks)?;
+                if !call.setup {
+                    return Ok(Value::Null);
+                }
+                let event = arg_str(&call, 0, "event")
+                    .and_then(ScriptHookEvent::parse)
+                    .ok_or("on requires event `tool_call` or `tool_result`")?;
+                let function =
+                    arg_str(&call, 1, "handler").ok_or("on requires (event, handler)")?;
+                if !is_python_identifier(function) {
+                    return Err(format!(
+                        "hook handler `{function}` must be a Python identifier"
+                    ));
+                }
+                let registry = self
+                    .hook_registry()
+                    .ok_or("script hook registry is not configured by the host")?;
+                registry.register(
+                    format!("monty:{}", call.plugin),
+                    event,
+                    Arc::new(MontyScriptHook {
+                        manager: self.self_weak.get().cloned().unwrap_or_default(),
+                        plugin: call.plugin.clone(),
+                        function: function.to_owned(),
+                    }),
+                );
+                Ok(Value::Null)
             }
             "log" => {
                 self.authorize(&call.plugin, Capability::State)?;
@@ -1446,6 +1509,38 @@ struct ModHostAdapter {
     plugin: String,
 }
 
+struct MontyScriptHook {
+    manager: Weak<ModManager>,
+    plugin: String,
+    function: String,
+}
+
+impl ScriptHookHandler for MontyScriptHook {
+    fn invoke(
+        &self,
+        _event: ScriptHookEvent,
+        payload: Value,
+    ) -> BoxFuture<'static, Result<Value, String>> {
+        let manager = self.manager.upgrade();
+        let plugin = self.plugin.clone();
+        let function = self.function.clone();
+        Box::pin(async move {
+            let manager = manager.ok_or_else(|| "codemode Python host is gone".to_owned())?;
+            let plugin = manager
+                .mods
+                .lock()
+                .expect("mods poisoned")
+                .get(&plugin)
+                .cloned()
+                .ok_or_else(|| format!("codemode script `{plugin}` is unloaded"))?;
+            plugin
+                .call_function(&function, &payload)
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+}
+
 impl MontyHost for ModHostAdapter {
     fn dispatch(&self, call: HostCall) -> BoxFuture<'static, Result<Value, String>> {
         let manager = self.manager.upgrade();
@@ -1606,4 +1701,13 @@ fn mod_error(name: &str, message: impl Into<String>) -> PluginError {
         plugin: name.to_string(),
         message: message.into(),
     }
+}
+
+fn is_python_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }

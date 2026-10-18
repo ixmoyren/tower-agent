@@ -7,7 +7,7 @@ use std::sync::{
 
 use futures_util::StreamExt as _;
 use tower_agent_codemode::{CodemodeHost, CodemodeOptions, Mount};
-use tower_agent_codemode_core::ScriptPermissions;
+use tower_agent_codemode_core::{ScriptHookEvent, ScriptHookRegistry, ScriptPermissions};
 use tower_agent_core::{AgentTool, ToolCallRequest};
 use tower_agent_plugins::{
     CapabilityId, HostApi, Permission, PermissionDecision, PermissionPolicy, PermissionPrompter,
@@ -176,4 +176,75 @@ tool_register("greet_js", "greet", "", { type: "object" });
         message.contains("\"capability\":\"register_tools\""),
         "actual: {message}"
     );
+}
+
+#[tokio::test]
+async fn js_script_can_register_and_unregister_tool_hooks() {
+    let session = tempfile::tempdir().expect("session");
+    let registry = Arc::new(ScriptHookRegistry::new());
+    let codemode = CodemodeHost::new_with_host(
+        CodemodeOptions::embedded(session.path()),
+        HostApi::from_tools(Vec::<AgentTool>::new()),
+        ScriptPermissions::default(),
+    )
+    .expect("codemode host");
+    codemode.set_hook_registry(Arc::clone(&registry));
+    codemode
+        .run_async(
+            r#"
+function guard(args) {
+  return { seen: args.name, arguments: args.arguments };
+}
+on("tool_call", "guard");
+"#,
+            None,
+        )
+        .await
+        .expect("register hook");
+    assert_eq!(registry.len(), 1);
+
+    let results = registry
+        .invoke(
+            ScriptHookEvent::ToolCall,
+            serde_json::json!({ "name": "write", "arguments": { "path": "a" } }),
+            None,
+        )
+        .await;
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].value.as_ref().expect("hook result"),
+        &serde_json::json!({ "seen": "write", "arguments": { "path": "a" } })
+    );
+
+    drop(codemode);
+    assert!(registry.is_empty(), "host unload must unregister JS hooks");
+}
+
+#[tokio::test]
+async fn js_hook_registration_requires_permission() {
+    let session = tempfile::tempdir().expect("session");
+    let registry = Arc::new(ScriptHookRegistry::new());
+    let codemode = CodemodeHost::new_with_host(
+        CodemodeOptions::embedded(session.path()),
+        HostApi::from_tools(Vec::<AgentTool>::new()),
+        ScriptPermissions {
+            hooks: false,
+            ..ScriptPermissions::default()
+        },
+    )
+    .expect("codemode host");
+    codemode.set_hook_registry(registry);
+    let error = codemode
+        .run_async(
+            r#"
+function guard(args) { return args; }
+on("tool_call", "guard");
+"#,
+            None,
+        )
+        .await
+        .expect_err("hooks must be denied");
+    let message = error.to_string();
+    assert!(message.contains("unauthorized"), "{message}");
+    assert!(message.contains("\"capability\":\"hooks\""), "{message}");
 }

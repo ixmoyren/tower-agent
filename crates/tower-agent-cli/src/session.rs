@@ -18,7 +18,7 @@ use std::{
 
 use tokio::sync::mpsc;
 use tower::ServiceExt as _;
-use tower_agent_codemode_core::{ScriptLanguage, ScriptMetadata};
+use tower_agent_codemode_core::{ScriptHookRegistry, ScriptLanguage, ScriptMetadata};
 use tower_agent_core::UiState;
 #[cfg(feature = "codemode-python")]
 use tower_agent_monty::ModManager;
@@ -57,6 +57,8 @@ pub struct Session {
     codemode_engine: Mutex<ScriptLanguage>,
     /// Runtime permission policy shared by both codemode engines.
     permission_policy: PermissionPolicy,
+    /// Session-scoped script hooks shared by both codemode engines.
+    script_hooks: Arc<ScriptHookRegistry>,
     /// 配置存储：`/login` `/model` `/thinking` 会把结果写回（对齐 pi 的 `auth.json` /
     /// `settings.json`）；未接入存储时为 `None`。
     store: Option<Arc<CliStore>>,
@@ -137,7 +139,8 @@ impl Session {
             .transpose()?;
         let plugin = tower_agent_codemode::CodemodePlugin::new(workspace, root)
             .with_mounts(parsed)
-            .with_permission_policy(self.permission_policy.clone());
+            .with_permission_policy(self.permission_policy.clone())
+            .with_hook_registry(Arc::clone(&self.script_hooks));
         #[cfg(feature = "codemode-python")]
         if let Some(mods) = &self.mods {
             mods.register_static_plugin(Arc::new(plugin))
@@ -222,6 +225,7 @@ impl Session {
             tower_agent_plugins::DEFAULT_TOOL_NAMES.join(", ")
         );
         let base_tools = tower_agent_plugins::default_tools(&cwd);
+        let script_hooks = Arc::new(ScriptHookRegistry::new());
         #[cfg(not(feature = "codemode-python"))]
         let _ = codemode_enabled;
         // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
@@ -235,6 +239,7 @@ impl Session {
                 Ok(manager) => {
                     // 把工作目录只读挂到 /work，供 mod 读取项目文件；写操作被拒。
                     let _ = manager.mount_readonly("/work", &cwd);
+                    manager.set_hook_registry(Arc::clone(&script_hooks));
                     Some(manager)
                 }
                 Err(error) => {
@@ -271,6 +276,7 @@ impl Session {
             tool_filter: Mutex::new(ToolFilter::default()),
             codemode_engine: Mutex::new(ScriptLanguage::JavaScript),
             permission_policy: PermissionPolicy::unattended(),
+            script_hooks,
             store: None,
             transcript: None,
             compactor,
@@ -308,6 +314,12 @@ impl Session {
         }
         self.permission_policy = permission_policy;
         self
+    }
+
+    /// Shared script hook registry used by monty and JavaScript codemode hosts.
+    #[must_use]
+    pub fn script_hooks(&self) -> Arc<ScriptHookRegistry> {
+        Arc::clone(&self.script_hooks)
     }
 
     /// 会话的工作目录。

@@ -45,7 +45,7 @@ pub fn tool_parameters() -> Value {
         "properties": {
             "code": {
                 "type": "string",
-                "description": "一段 JavaScript。可用：`await exec(name, args, opts)`（跑 coreutils）、`await tool_call(name, args)` / `tool_list()`（宿主工具）、`tool_register(name, handler, description, parameters)` / `tool_unregister(name)`（扩展工具）、`fs.readFile/writeFile/readdir`（会话目录）、`console.log`；`return` 的值也会带回。"
+                "description": "一段 JavaScript。可用：`await exec(name, args, opts)`（跑 coreutils）、`await tool_call(name, args)` / `tool_list()`（宿主工具）、`tool_register(name, handler, description, parameters)` / `tool_unregister(name)`（扩展工具）、`on(event, handler)`（注册 tool_call / tool_result hook）、`fs.readFile/writeFile/readdir`（会话目录）、`console.log`；`return` 的值也会带回。"
             },
             "timeout_ms": {
                 "type": "integer",
@@ -71,6 +71,7 @@ pub fn tool_description() -> String {
         "- `fs.readFile(path)` / `fs.writeFile(path, text)` / `fs.readdir(path)` / `fs.exists(path)` / `fs.mkdir(path)` / `fs.rm(path)`：`/` 是会话根（越界路径会抛错）。",
         "- `await tool_call(name, args)` 调用宿主工具，返回文本结果；`tool_list()` 返回可用工具元数据。",
         "- `tool_register(name, handler, description, parameters[, outputSchema])` 注册一个脚本函数作为新工具；`tool_unregister(name)` 只注销脚本自己注册的工具。",
+        "- `on(\"tool_call\" | \"tool_result\", handler)` 注册脚本 hook；同名事件重复注册会替换，脚本卸载时自动注销。",
         "- `state_get(key)` / `state_set(key, value)` 读写脚本私有状态；`log(level, message)` 写日志。",
         "- `ui_status(id, text, color, priority)` / `ui_panel(id, title, lines)` / `ui_clear(id?)` / `ui_tool_render(tool, lines)` 贡献前端无关的 UI。",
         "- 命令有**硬超时**（默认 10 s，`exec(..., { timeoutMs })` 可覆盖；脚本整体默认 30 s）：超时会被取消，不会挂住。",
@@ -152,6 +153,17 @@ impl CodemodeTool {
         permissions: tower_agent_codemode_core::ScriptPermissions,
         permission_policy: tower_agent_plugins::PermissionPolicy,
     ) -> Result<Self, CodemodeError> {
+        Self::new_with_host_policy_and_hooks(options, host, permissions, permission_policy, None)
+    }
+
+    /// 起 worker，并注入运行时授权策略与共享脚本 hook 注册表。
+    pub fn new_with_host_policy_and_hooks(
+        options: CodemodeOptions,
+        host: tower_agent_plugins::HostApi,
+        permissions: tower_agent_codemode_core::ScriptPermissions,
+        permission_policy: tower_agent_plugins::PermissionPolicy,
+        hook_registry: Option<Arc<tower_agent_codemode_core::ScriptHookRegistry>>,
+    ) -> Result<Self, CodemodeError> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
 
@@ -166,6 +178,9 @@ impl CodemodeTool {
                     permission_policy,
                 ) {
                     Ok(host) => {
+                        if let Some(registry) = hook_registry {
+                            host.set_hook_registry(registry);
+                        }
                         let _ = ready_tx.send(Ok(()));
                         host
                     }
@@ -288,6 +303,27 @@ impl CodemodeTool {
         permissions: tower_agent_codemode_core::ScriptPermissions,
         permission_policy: tower_agent_plugins::PermissionPolicy,
     ) -> Result<Self, CodemodeError> {
+        Self::for_workspace_with_host_policy_and_hooks(
+            workspace,
+            session,
+            mounts,
+            host,
+            permissions,
+            permission_policy,
+            None,
+        )
+    }
+
+    /// 完整版：注入宿主工具、权限策略与共享脚本 hook 注册表。
+    pub fn for_workspace_with_host_policy_and_hooks(
+        workspace: impl AsRef<std::path::Path>,
+        session: SessionRoot,
+        mounts: &[crate::Mount],
+        host: tower_agent_plugins::HostApi,
+        permissions: tower_agent_codemode_core::ScriptPermissions,
+        permission_policy: tower_agent_plugins::PermissionPolicy,
+        hook_registry: Option<Arc<tower_agent_codemode_core::ScriptHookRegistry>>,
+    ) -> Result<Self, CodemodeError> {
         let (root, temp) = match session {
             SessionRoot::Ephemeral => {
                 let dir = tempfile::tempdir()
@@ -304,8 +340,13 @@ impl CodemodeTool {
         let mut options = CodemodeOptions::embedded(root)
             .mount(crate::Mount::read_only(workspace.as_ref(), "/work"));
         options.mounts.extend(mounts.iter().cloned());
-        let mut tool =
-            Self::new_with_host_and_policy(options, host, permissions, permission_policy)?;
+        let mut tool = Self::new_with_host_policy_and_hooks(
+            options,
+            host,
+            permissions,
+            permission_policy,
+            hook_registry,
+        )?;
         tool.session = temp;
         Ok(tool)
     }

@@ -26,7 +26,10 @@ use std::{
 use futures_util::{StreamExt as _, future::BoxFuture};
 use serde_json::Value;
 use tower::Service;
-use tower_agent_codemode_core::{Capability, CapabilityError, ScriptPermissions};
+use tower_agent_codemode_core::{
+    Capability, CapabilityError, ScriptHookEvent, ScriptHookHandler, ScriptHookRegistry,
+    ScriptPermissions,
+};
 use tower_agent_core::{
     AgentError, AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolCallRequest,
     ToolRenderer, ToolResultStream, UiState,
@@ -42,7 +45,7 @@ pub use self::component::exports::tower_agent::codemode::sandbox::{
     CommandLog, RunOpts, RunResult,
 };
 use self::component::tower_agent::codemode::host::{
-    ExecOpts, ExecResult, ToolDescriptor as WireToolDescriptor,
+    ExecOpts, ExecResult, HookRegistration, ToolDescriptor as WireToolDescriptor,
     ToolRegistration as WireToolRegistration,
 };
 /// 把 coreutils 命令层包装成两个引擎共用的 `CapabilitySurface`。
@@ -395,6 +398,7 @@ struct HostBackend {
     host: HostApi,
     permissions: ScriptPermissions,
     permission_policy: Mutex<PermissionPolicy>,
+    hook_registry: Mutex<Option<Arc<ScriptHookRegistry>>>,
     current_source: Mutex<Option<String>>,
     script_tools: Mutex<BTreeSet<String>>,
     state: Mutex<BTreeMap<String, Value>>,
@@ -483,6 +487,7 @@ impl CodemodeHost {
             host,
             permissions,
             permission_policy: Mutex::new(permission_policy),
+            hook_registry: Mutex::new(None),
             current_source: Mutex::new(None),
             script_tools: Mutex::new(BTreeSet::new()),
             state: Mutex::new(BTreeMap::new()),
@@ -572,6 +577,22 @@ impl CodemodeHost {
                       -> HostFuture<'_, Result<bool, String>> {
                     let backend = Arc::clone(&backend_for_unregister);
                     Box::new(async move { Ok((backend.tool_unregister(&name),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_hook = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "register-hook",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (registration,): (HookRegistration,)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_hook);
+                    Box::new(async move { Ok((backend.register_script_hook(registration),)) })
                 },
             )
             .map_err(|e| CodemodeError::Link(e.to_string()))?;
@@ -708,6 +729,15 @@ impl CodemodeHost {
             .expect("codemode permission policy poisoned") = permission_policy;
     }
 
+    /// Attach the session hook registry used by JavaScript `on(...)` registrations.
+    pub fn set_hook_registry(&self, hook_registry: Arc<ScriptHookRegistry>) {
+        *self
+            .backend
+            .hook_registry
+            .lock()
+            .expect("codemode hook registry poisoned") = Some(hook_registry);
+    }
+
     /// 会话根目录。
     #[must_use]
     pub fn session_root(&self) -> &Path {
@@ -814,6 +844,16 @@ impl CodemodeHost {
         );
         store.limiter(|state| &mut state.limits);
         Ok(store)
+    }
+}
+
+impl Drop for CodemodeHost {
+    fn drop(&mut self) {
+        if let Ok(registry) = self.backend.hook_registry.lock()
+            && let Some(registry) = registry.as_ref()
+        {
+            registry.unregister_owner("js:codemode");
+        }
     }
 }
 
@@ -976,6 +1016,48 @@ impl HostBackend {
         Ok(true)
     }
 
+    fn register_script_hook(&self, registration: HookRegistration) -> Result<bool, String> {
+        self.authorize(Capability::Hooks)?;
+        let event = ScriptHookEvent::parse(&registration.event).ok_or_else(|| {
+            format!(
+                "unknown hook event `{}` (expected `tool_call` or `tool_result`)",
+                registration.event
+            )
+        })?;
+        if !is_js_identifier(&registration.handler) {
+            return Err(format!(
+                "hook handler `{}` must be a JavaScript identifier",
+                registration.handler
+            ));
+        }
+        let source = self
+            .current_source
+            .lock()
+            .expect("codemode source poisoned")
+            .clone()
+            .ok_or_else(|| "on(...) must run inside a codemode script".to_owned())?;
+        let registry = self
+            .hook_registry
+            .lock()
+            .expect("codemode hook registry poisoned")
+            .clone()
+            .ok_or_else(|| "script hook registry is not configured by the host".to_owned())?;
+        registry.register(
+            "js:codemode",
+            event,
+            Arc::new(JsScriptHook {
+                host: self
+                    .this
+                    .lock()
+                    .expect("codemode host weak poisoned")
+                    .clone(),
+                source,
+                function: registration.handler,
+            }),
+        );
+        Ok(true)
+    }
+
     fn state_get(&self, key: &str) -> Result<Option<String>, String> {
         self.authorize(Capability::State)?;
         self.state
@@ -1094,6 +1176,28 @@ struct ScriptTool {
     host: Weak<CodemodeHost>,
     source: String,
     function: String,
+}
+
+struct JsScriptHook {
+    host: Weak<CodemodeHost>,
+    source: String,
+    function: String,
+}
+
+impl ScriptHookHandler for JsScriptHook {
+    fn invoke(
+        &self,
+        _event: ScriptHookEvent,
+        payload: Value,
+    ) -> BoxFuture<'static, Result<Value, String>> {
+        let host = self.host.upgrade();
+        let source = self.source.clone();
+        let function = self.function.clone();
+        Box::pin(async move {
+            let host = host.ok_or_else(|| "codemode JavaScript host is gone".to_owned())?;
+            host.call_registered_tool(&source, &function, payload).await
+        })
+    }
 }
 
 impl Service<ToolCallRequest> for ScriptTool {

@@ -88,6 +88,7 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
             CODEMODE_WRITE,
             "创建或热重载一个 codemode Python 脚本，并写入当前项目的 ScriptStore：模型生成 Python 代码，代码可调用宿主函数 \
              （exec/tool_call/log/state_*）、注册工具（tool_register）、贡献 UI（ui_status/ui_panel/ui_tool_render）。\
+             可用 on(\"tool_call\"|\"tool_result\", handler) 注册脚本 hook。\
              可用 `requires` 声明依赖的宿主能力（如 `tool.read`），`permissions` 收窄权限；\
              `enabled=false` 只保存不加载，`scope=user` 可写用户级脚本。",
             move |params, _request| {

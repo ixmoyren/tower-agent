@@ -68,7 +68,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 |--------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|-------------------------------------------|----------------------------------|
 | `registerTool`（含 `exposure` / `namespace` / `annotations` / `outputSchema`） | ✅ `AgentTool` 已带 exposure / namespace / annotations；SDK 提供 typed 注册与完整元数据 | provider 可逐步消费新字段                     | `plugin_sdk::tool::ToolMetadata::…`       | ✅（monty 已有 `tool_register`） |
 | `ctx.executeTool(name, args)`（嵌套调用、`parentToolCallId`、记账）            | ❌                                                                                                                   | 需要 runtime 支持"工具内再调工具"的记录与事件 | `plugin_sdk::tool::call(...)`             | ✅（monty 已有 `tool_call`）     |
-| `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ Rust `plugin_sdk::hook::on(ToolCall/ToolResult, async handler)` 已可拦截/改参/改写结果；其余事件仍为通知面 | 其余事件与脚本 host function                  | `plugin_sdk::hook::on(Event, handler)`    | ◐（v0 只做工具前后，见 §3.1）    |
+| `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ Rust 与 codemode 脚本均支持 `tool_call` / `tool_result` hook；其余事件仍为通知面 | 其余事件                                      | `plugin_sdk::hook::on(Event, handler)`    | ✅ v0 工具前后事件               |
 | `registerCommand` / `registerShortcut` / `registerFlag`                        | ❌ 斜杠命令是硬编码表                                                                                                | 命令/快捷键/flag 注册表 + 前端接线            | `plugin_sdk::command::*`                  | ❌                               |
 | `registerProvider` / `registerVirtualModel`                                    | ❌ provider 由 CLI 直接编排                                                                                          | 把 provider 组装变成注册项                    | `plugin_sdk::provider::register(...)`     | ❌                               |
 | `registerMcpServer`                                                            | ❌ MCP 未移植                                                                                                        | MCP 客户端                                    | `plugin_sdk::provider::register_mcp(...)` | ❌                               |
@@ -211,6 +211,13 @@ JSON 回传脚本（未授权 / 未知能力 / 引擎错误 / 超时 / 取消 / 
 挂载表决定，权限开关只负责能力级准入。
 
 与 `docs/plugins.md` 第 12 节的运行时提示机制打通：首次调用需要权限的扩展点时询问用户（`AllowOnce` / `AllowSession` / `Deny`），无人值守默认拒绝。
+
+脚本 hook 由 `tower-agent-codemode-core::ScriptHookRegistry` 统一注册和调用：
+
+- `on("tool_call", handler)` / `on("tool_result", handler)` 在脚本安装时注册；同一 owner 的同一事件重复注册会替换。
+- registry 按 owner 稳定顺序调用 handler，默认每个 hook 5 秒超时，并接受 `CancellationToken`。
+- monty 通过 `call_function`、JS 通过脚本函数调用适配为统一的 `ScriptHookHandler`。
+- 脚本卸载或 JS host drop 时按 owner 注销；权限由 `ScriptPermissions.hooks` 强制。
 
 ## 7. 里程碑（提案）
 

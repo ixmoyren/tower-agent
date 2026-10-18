@@ -18,10 +18,10 @@ use std::{
 use bindings::{
     exports::tower_agent::codemode::sandbox::{CommandLog, Guest, RunOpts, RunResult},
     tower_agent::codemode::host::{
-        ExecOpts, ToolRegistration, exec, log as host_log, state_get as host_state_get,
-        state_set as host_state_set, tool_call, tool_list, tool_register, tool_unregister,
-        ui_clear as host_ui_clear, ui_panel as host_ui_panel, ui_status as host_ui_status,
-        ui_tool_render as host_ui_tool_render,
+        ExecOpts, HookRegistration, ToolRegistration, exec, log as host_log, register_hook,
+        state_get as host_state_get, state_set as host_state_set, tool_call, tool_list,
+        tool_register, tool_unregister, ui_clear as host_ui_clear, ui_panel as host_ui_panel,
+        ui_status as host_ui_status, ui_tool_render as host_ui_tool_render,
     },
 };
 use rquickjs::{Context, Ctx, Function, Promise, Runtime, Value, promise::PromiseState};
@@ -81,6 +81,8 @@ globalThis.tool_register = (name, handler, description = "", parameters = {}, ou
     outputSchema === null || outputSchema === undefined ? null : JSON.stringify(outputSchema),
   ));
 globalThis.tool_unregister = (name) => __call(__toolUnregister(String(name)));
+globalThis.on = (event, handler) =>
+  __call(__registerHook(String(event), String(handler)));
 globalThis.state_get = (key) => {
   const value = __call(__stateGet(String(key)));
   return value === null ? null : JSON.parse(value);
@@ -323,6 +325,14 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>, fs_allowed: bool) -> Result<(), St
     ctx.globals()
         .set("__toolUnregister", unregister_tool)
         .map_err(|e| format!("__toolUnregister: {e}"))?;
+
+    let register_script_hook = Function::new(ctx.clone(), |event: String, handler: String| -> String {
+        capability_payload(register_hook(&HookRegistration { event, handler }))
+    })
+    .map_err(|e| format!("__registerHook: {e}"))?;
+    ctx.globals()
+        .set("__registerHook", register_script_hook)
+        .map_err(|e| format!("__registerHook: {e}"))?;
 
     let state_get = Function::new(ctx.clone(), |key: String| -> String {
         capability_payload(host_state_get(&key))

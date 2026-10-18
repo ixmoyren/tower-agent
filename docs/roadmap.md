@@ -21,7 +21,7 @@
 - ◐ **合并 feature / CLI**：feature 已收敛为 `codemode` + `codemode-python` + `codemode-js`；待 CLI 开关与作者工具词汇收敛。 **P0**
 - ✅ **脚本仓库**（Q6 = c）：`ScriptStore`、Turso `script` 表、作者工具 storage 真源与显式导出/导入已落地。 **P0**
 - ◐ **统一会话与存储**：脚本存储、作用域、权限、语言元数据已统一；旧 scripts 文件写入已移除，JS 持久记录的启动执行待统一 host 分发。 **P1**
-- ◐ **扩展点 v0**（落 `tower-agent-plugin-sdk`）：Rust 工具元数据与 async `tool_call` / `tool_result` hooks 已落地；待脚本 host function。 **P0**
+- ◐ **扩展点 v0**（落 `tower-agent-plugin-sdk`）：Rust 工具元数据、async hooks 与 monty / JS 脚本 `on(...)` 已落地；待端到端接入 agent 决策路径。 **P0**
 - ✅ 脚本权限已扩展为 `ScriptPermissions`；storage 预授权与 `plugins.md` §12 的 `PermissionPolicy` 已在 monty / JS 两引擎打通，无人值守默认拒绝。 **P1**
 
 ## 2. 上下文管理（compaction 剩余项）

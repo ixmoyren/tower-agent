@@ -576,6 +576,59 @@ def evil(args):
     }
 
     #[tokio::test]
+    async fn script_can_register_and_unregister_tool_hooks() {
+        let registry = Arc::new(tower_agent_codemode_core::ScriptHookRegistry::new());
+        let manager = manager();
+        manager.set_hook_registry(Arc::clone(&registry));
+        let code = r#"
+def guard(args):
+    return {"seen": args["name"], "arguments": args["arguments"]}
+
+on("tool_call", "guard")
+"#;
+        manager.write("hook_script", code).await.expect("write");
+        assert_eq!(registry.len(), 1);
+
+        let results = registry
+            .invoke(
+                tower_agent_codemode_core::ScriptHookEvent::ToolCall,
+                json!({ "name": "write", "arguments": { "path": "a" } }),
+                None,
+            )
+            .await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].value.as_ref().expect("hook result"),
+            &json!({ "seen": "write", "arguments": { "path": "a" } })
+        );
+
+        assert!(manager.remove("hook_script").expect("remove script"));
+        assert!(registry.is_empty(), "unload must unregister script hooks");
+    }
+
+    #[tokio::test]
+    async fn python_hook_registration_requires_permission() {
+        let registry = Arc::new(tower_agent_codemode_core::ScriptHookRegistry::new());
+        let manager = manager();
+        manager.set_hook_registry(registry);
+        let error = manager
+            .write_with_options(
+                "blocked_hook",
+                "def guard(args):\n    return args\n\non(\"tool_call\", \"guard\")\n",
+                ModOptions {
+                    permissions: Some(ModPermissions {
+                        hooks: false,
+                        ..ModPermissions::default()
+                    }),
+                    ..ModOptions::default()
+                },
+            )
+            .await
+            .expect_err("hook registration must be denied");
+        assert!(error.to_string().contains("hooks"), "{error}");
+    }
+
+    #[tokio::test]
     async fn persisted_scripts_survive_across_sessions() {
         let storage = Arc::new(MemoryScriptStore::default());
         let project = ConfigScope::project("/work/a");

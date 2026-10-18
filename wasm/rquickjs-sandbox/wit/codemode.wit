@@ -29,6 +29,10 @@ interface host {
     parameters: string,
     output-schema: option<string>,
   }
+  record hook-registration {
+    event: string,
+    handler: string,
+  }
 
   /// 跑一个命令。`name` 是裸命令名（`cat`），宿主据此设 `argv[0]`。
   exec: func(name: string, args: list<string>, opts: exec-opts)
@@ -41,6 +45,8 @@ interface host {
   tool-register: func(registration: tool-registration) -> result<bool, string>;
   /// 注销一个由脚本注册的工具。
   tool-unregister: func(name: string) -> result<bool, string>;
+  /// 注册或替换一个由当前脚本 handler 实现的工具 hook。
+  register-hook: func(registration: hook-registration) -> result<bool, string>;
   /// 读取脚本私有状态；值为 JSON 字符串。
   state-get: func(key: string) -> result<option<string>, string>;
   /// 写入脚本私有状态；value-json 必须是合法 JSON。

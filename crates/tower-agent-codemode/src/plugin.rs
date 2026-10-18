@@ -4,10 +4,13 @@
 //! 纳入统一解析」——名字与能力都标成 **protected**，于是动态（dylib）与 JIT（monty mods）
 //! 插件拿同名来顶替能力时会被拒绝（JIT 与动态两条路都已按名字响亮报错）。
 
-use std::{path::PathBuf, sync::Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use semver::Version;
-use tower_agent_codemode_core::ScriptPermissions;
+use tower_agent_codemode_core::{ScriptHookRegistry, ScriptPermissions};
 use tower_agent_core::AgentTool;
 use tower_agent_plugins::{
     CapabilityId, HostApi, PermissionPolicy, PluginContext, PluginError, PluginKind,
@@ -26,6 +29,7 @@ pub struct CodemodePlugin {
     mounts: Vec<Mount>,
     permissions: ScriptPermissions,
     permission_policy: PermissionPolicy,
+    hook_registry: Option<Arc<ScriptHookRegistry>>,
     /// 编译好的工具（`CodemodeTool::new` 会同步编译两个 wasm 组件，很贵）。
     ///
     /// 注册表每次 `resolve` 都会调用 `install`，所以这里只编译一次、之后 clone；
@@ -43,6 +47,7 @@ impl CodemodePlugin {
             mounts: Vec::new(),
             permissions: ScriptPermissions::default(),
             permission_policy: PermissionPolicy::unattended(),
+            hook_registry: None,
             tool: Mutex::new(None),
         }
     }
@@ -67,6 +72,13 @@ impl CodemodePlugin {
         self.permission_policy = permission_policy;
         self
     }
+
+    /// 设置会话级脚本 hook 注册表。
+    #[must_use]
+    pub fn with_hook_registry(mut self, hook_registry: Arc<ScriptHookRegistry>) -> Self {
+        self.hook_registry = Some(hook_registry);
+        self
+    }
 }
 
 impl StaticPlugin for CodemodePlugin {
@@ -84,13 +96,14 @@ impl StaticPlugin for CodemodePlugin {
         })?;
         if cached.is_none() {
             let host = HostApi::from_tools(context.tools().iter().cloned());
-            let tool = CodemodeTool::for_workspace_with_host_and_policy(
+            let tool = CodemodeTool::for_workspace_with_host_policy_and_hooks(
                 &self.cwd,
                 self.session.clone(),
                 &self.mounts,
                 host,
                 self.permissions,
                 self.permission_policy.clone(),
+                self.hook_registry.clone(),
             )
             .map_err(|error: CodemodeError| PluginError::Install {
                 plugin: PLUGIN_NAME.to_owned(),

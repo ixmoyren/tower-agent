@@ -10,8 +10,8 @@
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
 | 当前阶段   | **Phase 5（扩展点 v0）**                       |
-| 下一个任务 | **T5.3**                                       |
-| 代码状态   | **T1–T4、T5.1–T5.2 已完成**：SDK 工具元数据与 Rust async hooks 已落地 |
+| 下一个任务 | **T5.4**                                       |
+| 代码状态   | **T1–T4、T5.1–T5.3 已完成**：Rust 与脚本 hook 能力已落地 |
 
 ---
 
@@ -233,7 +233,7 @@
     3. 错误语义：hook 失败 → 工具失败（fail-safe），不让错误被静默吞掉。
 - **验收**：Rust 侧测试：拦截一个工具调用、改写一次结果；原有 runtime 测试不回归。
 
-### [ ] T5.3 codemode host function：hooks
+### [x] T5.3 codemode host function：hooks
 
 - **依赖**：T5.2、T1.1
 - **做什么**：
@@ -282,3 +282,4 @@
 | 2026-10-18 | T4.4 | `ScriptPermissions` 作为持久预授权集合接入统一 `PermissionPolicy`；monty / JS 均在无人值守下拒绝，prompter 允许后首次调用成功；Session 默认拒绝并支持前端注入共享策略 |
 | 2026-10-18 | T5.1 | `AgentTool` 增加 exposure / namespace / annotations；plugin-sdk 新增 `tool::ToolMetadata`、typed 注册与元数据扩展 trait；Rust 插件完整元数据注册测试通过 |
 | 2026-10-18 | T5.2 | plugin-sdk 新增 `hook::on(ToolCall/ToolResult, async handler)`；runtime 工具前后层支持 async，拦截调用、改写入参、改写结果与 hook 失败降级测试通过 |
+| 2026-10-18 | T5.3 | 新增共享 `ScriptHookRegistry`；monty 与 JS 暴露 `on(event, handler)`，支持权限、超时、取消、替换注册与卸载注销；两引擎 hook 测试通过 |
