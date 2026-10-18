@@ -5334,7 +5334,10 @@ name = "tower-agent-plugin-sdk"
 version = "0.1.0"
 dependencies = [
  "rkyv",
+ "schemars",
  "semver",
+ "serde",
+ "serde_json",
  "stabby",
  "tower-agent-plugins",
  "tower-agent-runtime",

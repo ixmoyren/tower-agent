@@ -9,9 +9,9 @@
 | 项目       | 值                                             |
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
-| 当前阶段   | **Phase 4（脚本仓库）**                        |
-| 下一个任务 | **T5.1**                                       |
-| 代码状态   | **T1–T4 已完成**：统一能力、storage 真源与脚本权限闭环已落地 |
+| 当前阶段   | **Phase 5（扩展点 v0）**                       |
+| 下一个任务 | **T5.2**                                       |
+| 代码状态   | **T1–T4、T5.1 已完成**：统一能力、storage 与 SDK 工具元数据已落地 |
 
 ---
 
@@ -215,7 +215,7 @@
 
 ## 5. Phase 5 — 扩展点 v0（P5 / sdk S1–S2）
 
-### [ ] T5.1 `tower-agent-plugin-sdk`：tool 模块
+### [x] T5.1 `tower-agent-plugin-sdk`：tool 模块
 
 - **依赖**：T1.1
 - **做什么**：
@@ -280,3 +280,4 @@
 | 2026-10-18 | T4.2 | 作者工具改为直接读写 `ScriptStore`，默认项目作用域；语言、权限、启用状态与依赖随记录持久化，启动按 project 覆盖 user 加载；CLI 真实 Turso 重启运行与作用域覆盖测试通过 |
 | 2026-10-18 | T4.3 | 新增 `--codemode-export` / `--codemode-import`；每脚本一个 `.codemode` 文件（JSON 元数据头 + 源码），默认项目目录 `.tower-agent/codemode/`；同名覆盖；write → export → 删库 → import → run 全链路测试通过 |
 | 2026-10-18 | T4.4 | `ScriptPermissions` 作为持久预授权集合接入统一 `PermissionPolicy`；monty / JS 均在无人值守下拒绝，prompter 允许后首次调用成功；Session 默认拒绝并支持前端注入共享策略 |
+| 2026-10-18 | T5.1 | `AgentTool` 增加 exposure / namespace / annotations；plugin-sdk 新增 `tool::ToolMetadata`、typed 注册与元数据扩展 trait；Rust 插件完整元数据注册测试通过 |

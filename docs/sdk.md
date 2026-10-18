@@ -41,7 +41,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 | crate                    | 现在负责                                                                                   | 问题                                       |
 |--------------------------|--------------------------------------------------------------------------------------------|--------------------------------------------|
 | `tower-agent-plugins`    | 插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                         | 面向"插件系统"，不是"扩展点"               |
-| `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / `ToolRegistration` / 动态入口 | 偏**打包与 ABI**（manifest、stabby）       |
+| `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / `tool::ToolMetadata` / `ToolRegistration` / 动态入口 | 工具注册 + 打包/ABI                        |
 | `tower-agent-runtime`    | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`              | 有钩子，但很薄、且不统一                   |
 | `tower-agent-monty` / `tower-agent-codemode` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
 
@@ -66,7 +66,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 
 | pi 扩展点                                                                      | 现在                                                                                                                 | 缺口                                          | 目标 API                                  | 脚本可用                         |
 |--------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|-------------------------------------------|----------------------------------|
-| `registerTool`（含 `exposure` / `namespace` / `annotations` / `outputSchema`） | ◐ 工具能注册（`AgentTool` / `ToolRegistration`），但 **没有 exposure / namespace / annotations / structuredContent** | 工具元数据模型                                | `plugin_sdk::tool::register(...)`         | ✅（monty 已有 `tool_register`） |
+| `registerTool`（含 `exposure` / `namespace` / `annotations` / `outputSchema`） | ✅ `AgentTool` 已带 exposure / namespace / annotations；SDK 提供 typed 注册与完整元数据 | provider 可逐步消费新字段                     | `plugin_sdk::tool::ToolMetadata::…`       | ✅（monty 已有 `tool_register`） |
 | `ctx.executeTool(name, args)`（嵌套调用、`parentToolCallId`、记账）            | ❌                                                                                                                   | 需要 runtime 支持"工具内再调工具"的记录与事件 | `plugin_sdk::tool::call(...)`             | ✅（monty 已有 `tool_call`）     |
 | `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ 10 个 `AgentEvent`，**纯通知**；工具前后有 Layer、压缩有 Hook                                                      | **事件面是最大缺口**                          | `plugin_sdk::hook::on(Event, handler)`    | ◐（v0 只做工具前后，见 §3.1）    |
 | `registerCommand` / `registerShortcut` / `registerFlag`                        | ❌ 斜杠命令是硬编码表                                                                                                | 命令/快捷键/flag 注册表 + 前端接线            | `plugin_sdk::command::*`                  | ❌                               |
@@ -89,6 +89,25 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 2. `tool_result`：可改写结果（已有 `AfterToolResultLayer`）。
 
 加上已有的 **工具注册**（`tool_register` / `tool_call`），这三条合起来就等价于"现在 monty 能做的一切 + 能改变工具行为"。
+
+Rust 工具注册现可直接写：
+
+```rust
+use tower_agent_plugin_sdk::{
+    ToolAnnotations, ToolExposure, ToolNamespace,
+    tool::{self, ToolMetadata},
+};
+
+let metadata = ToolMetadata::new("demo.echo", "Echo text")
+    .exposure(ToolExposure::Codemode)
+    .namespace(ToolNamespace::new("demo"))
+    .annotations(ToolAnnotations { read_only_hint: Some(true), ..Default::default() })
+    .output_schema(serde_json::json!({ "type": "object" }));
+let tool = tool::typed::<Params, _, _>(metadata, handler);
+context.register_tool(tool);
+```
+
+现有 `ToolRegistration` 仍从 SDK 根与 `tool` 模块再导出；已构造的 `AgentTool` 也可用 `AgentToolMetadataExt::with_metadata` 补齐元数据。
 
 **后续（S4，按价值排序）**：
 

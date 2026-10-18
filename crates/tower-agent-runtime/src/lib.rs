@@ -38,7 +38,7 @@ pub use tower_agent_core::{
     AfterToolResultLayer, AfterToolResultService, AgentError, AgentEvent, AgentEventStream,
     AgentMessage, AgentRequest, AgentResponse, AgentServiceExt, AgentTool, AgentToolResult,
     AgentToolService, AgentToolServiceExt, BeforeToolCallLayer, BeforeToolCallService,
-    BoxAgentService, BoxError, BoxToolService, PrepareArguments, Replay, ToolCallDecision,
-    ToolCallRequest, ToolExecutionMode, ToolNotFound, ToolRegistration, ToolResultStream,
-    ToolRoute, layer,
+    BoxAgentService, BoxError, BoxToolService, PrepareArguments, Replay, ToolAnnotations,
+    ToolCallDecision, ToolCallRequest, ToolExecutionMode, ToolExposure, ToolMetadata,
+    ToolNamespace, ToolNotFound, ToolRegistration, ToolResultStream, ToolRoute, layer,
 };

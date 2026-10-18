@@ -26,7 +26,8 @@ pub use service::{
 };
 pub use tool::{
     AgentTool, AgentToolResult, AgentToolService, AgentToolServiceExt, BoxToolService,
-    PrepareArguments, Replay, ToolCallRequest, ToolExecutionMode, ToolResultStream,
+    PrepareArguments, Replay, ToolAnnotations, ToolCallRequest, ToolExecutionMode, ToolExposure,
+    ToolMetadata, ToolNamespace, ToolResultStream,
 };
 pub use ui::{
     Panel, PanelAnchor, StatusSegment, ToolRenderer, UiContribution, UiState, render_template,

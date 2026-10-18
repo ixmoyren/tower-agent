@@ -14,6 +14,9 @@ tower-agent-plugins = { workspace = true }
 semver = { workspace = true }
 stabby = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
 
 [features]
 default = []

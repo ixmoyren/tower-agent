@@ -9,6 +9,9 @@
 //! 动态插件的 stabby 入口（`declare_plugin!` 的动态形态）随 `plugins` 的 `dynamic`
 //! feature 一起落地；当前提供的是静态插件路径与共用的宿主句柄类型。
 
+pub mod tool;
+
+pub use tool::{AgentToolMetadataExt, ToolMetadata};
 pub use tower_agent_plugins::{
     AgentLayer, CapabilityId, EventHandler, HostApi, InflightGuard, Lifecycle, Permission,
     PermissionDecision, PermissionPolicy, PermissionPrompter, PluginAccess, PluginContext,
@@ -16,7 +19,7 @@ pub use tower_agent_plugins::{
     StaticPlugin, ToolLayer, agent_layer, event_handler, tool_layer, tower_agent_layer,
     tower_tool_layer,
 };
-pub use tower_agent_runtime::ToolRegistration;
+pub use tower_agent_runtime::{ToolAnnotations, ToolExposure, ToolNamespace, ToolRegistration};
 
 /// 插件作者需要与宿主同一版本的 `rkyv`（归档格式与之绑定）。
 #[cfg(feature = "dynamic")]

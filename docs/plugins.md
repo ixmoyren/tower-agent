@@ -260,7 +260,7 @@ stabby::export! {
 
 - **跨形态调用不直连**：无论动态还是 JIT，都通过 `HostApi` 调 `host.call(capability, args)`；宿主完成实现查找、 **调用发起时的版本绑定**与 in-flight 记账。这既统一了两者的互调，也让卸载/热更可以安全等待。
 
-> 实现状态：`plugins-sdk` crate 已落地，提供 `DeclaredPlugin` / `declare_plugin!`（静态插件路径）、`HostApi` / `ToolRegistration` 再导出与共享类型。stabby 的 `__tpa_plugin_entry` 动态入口随 `plugins` 的 `dynamic` feature 落地。
+> 实现状态：`plugins-sdk` crate 已落地，提供 `DeclaredPlugin` / `declare_plugin!`（静态插件路径）、`HostApi` / `ToolRegistration` 再导出、`tool::ToolMetadata` 与 typed 注册，以及共享类型。工具元数据现可声明 exposure、namespace、annotations、参数/输出 schema；stabby 的 `__tpa_plugin_entry` 动态入口随 `plugins` 的 `dynamic` feature 落地。
 
 ## 9. 内置工具迁移到静态插件
 

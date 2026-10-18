@@ -9,6 +9,7 @@ use std::{
 
 use futures_core::Stream;
 use futures_util::future::BoxFuture;
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use tower::{Service, ServiceExt, util::BoxCloneService};
 use tower_agent_provider::{
@@ -161,6 +162,97 @@ pub trait AgentToolServiceExt: AgentToolService + Clone + Sized {
 
 impl<T> AgentToolServiceExt for T where T: AgentToolService + Clone + Sized {}
 
+/// How the model and other tools can reach a registered tool.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolExposure {
+    /// Declared to the model while active and callable while active.
+    #[default]
+    Direct,
+    /// Declared to the model while active, but not callable from other tools.
+    ModelOnly,
+    /// Callable from codemode whenever registered; not declared by default.
+    Codemode,
+    /// Callable but omitted from codemode listings; tool search can discover it.
+    Deferred,
+    /// Registered but unreachable.
+    Hidden,
+}
+
+impl ToolExposure {
+    /// Stable wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::ModelOnly => "model-only",
+            Self::Codemode => "codemode",
+            Self::Deferred => "deferred",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+/// Author-provided hints with MCP tool-annotation semantics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAnnotations {
+    /// The tool does not modify its environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+    /// The tool may delete or overwrite data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+    /// Repeating the same call has no additional effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotent_hint: Option<bool>,
+    /// The tool reaches an open-ended external domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<bool>,
+}
+
+/// Namespace/group metadata for a tool.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolNamespace {
+    /// Canonical namespace name.
+    pub name: String,
+    /// Alternative names used for lookup.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    /// Short group summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Longer usage guidance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
+impl ToolNamespace {
+    /// Construct a namespace with no aliases or guidance.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..Self::default()
+        }
+    }
+}
+
+/// Runtime metadata attached to an [`AgentTool`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolMetadata {
+    /// How the model and other tools can reach the tool.
+    pub exposure: ToolExposure,
+    /// Namespace/group metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<ToolNamespace>,
+    /// MCP-style behavior hints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotations>,
+}
+
 /// 单条 assistant 消息里多个工具调用的执行方式（pi `ToolExecutionMode`）。
 ///
 /// design.md Q2 决策：默认与 pi 一致为 [`Parallel`](Self::Parallel)，并发上限由可配置的
@@ -221,6 +313,7 @@ pub struct AgentTool {
     description: String,
     parameters: JsonValue,
     output_schema: Option<JsonValue>,
+    metadata: Option<Box<ToolMetadata>>,
     execution_mode: Option<ToolExecutionMode>,
     replay: Option<Replay>,
     prepare_arguments: Option<PrepareArguments>,
@@ -246,6 +339,7 @@ impl AgentTool {
             description: String::new(),
             parameters: JsonValue::Object(JsonObject::default()),
             output_schema: None,
+            metadata: None,
             execution_mode: None,
             replay: None,
             prepare_arguments: None,
@@ -257,6 +351,17 @@ impl AgentTool {
     #[must_use]
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = label.into();
+        self
+    }
+
+    /// Rename the tool while preserving its service and metadata.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        if self.label == self.name {
+            self.label.clone_from(&name);
+        }
+        self.name = name;
         self
     }
 
@@ -278,6 +383,29 @@ impl AgentTool {
     #[must_use]
     pub fn output_schema(mut self, schema: JsonValue) -> Self {
         self.output_schema = Some(schema);
+        self
+    }
+
+    /// Set how the model and other tools can reach this tool.
+    #[must_use]
+    pub fn exposure(mut self, exposure: ToolExposure) -> Self {
+        self.metadata.get_or_insert_with(Default::default).exposure = exposure;
+        self
+    }
+
+    /// Set the tool's namespace/group metadata.
+    #[must_use]
+    pub fn namespace(mut self, namespace: ToolNamespace) -> Self {
+        self.metadata.get_or_insert_with(Default::default).namespace = Some(namespace);
+        self
+    }
+
+    /// Set MCP-style tool behavior hints.
+    #[must_use]
+    pub fn annotations(mut self, annotations: ToolAnnotations) -> Self {
+        self.metadata
+            .get_or_insert_with(Default::default)
+            .annotations = Some(annotations);
         self
     }
 
@@ -325,6 +453,28 @@ impl AgentTool {
     /// `structured_content` 的 JSON Schema。
     pub fn declared_output_schema(&self) -> Option<&JsonValue> {
         self.output_schema.as_ref()
+    }
+
+    /// Declared tool exposure.
+    pub fn declared_exposure(&self) -> ToolExposure {
+        self.metadata
+            .as_deref()
+            .map(|metadata| metadata.exposure)
+            .unwrap_or_default()
+    }
+
+    /// Declared namespace/group metadata.
+    pub fn tool_namespace(&self) -> Option<&ToolNamespace> {
+        self.metadata
+            .as_deref()
+            .and_then(|metadata| metadata.namespace.as_ref())
+    }
+
+    /// Declared MCP-style behavior hints.
+    pub fn tool_annotations(&self) -> Option<&ToolAnnotations> {
+        self.metadata
+            .as_deref()
+            .and_then(|metadata| metadata.annotations.as_ref())
     }
 
     /// 此工具声明的执行方式。
