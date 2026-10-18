@@ -101,6 +101,11 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 - 引擎差异只影响"语法示例"段落（Python / JS 各一段）。
 - 与 pi 的做法一致：工具描述 + instructions 由宿主生成，模型据此写脚本。
 
+**已落地**：`tower-agent-codemode-core::PromptBuilder` 接收 `ScriptLanguage`、能力集合、
+`PromptMount` 挂载表和 `PromptLimits`，生成 `PromptDocument { tool_description, instructions }`。
+快照位于 `crates/tower-agent-codemode-core/tests/snapshots/`，JavaScript / Python 共用一个能力
+模型，仅语法示例分支不同。
+
 ### 0.6 扩展点注入（落在 `tower-agent-plugin-sdk`）
 
 脚本能"改 agent 行为"，靠的是宿主把扩展点暴露成 host function。扩展点清单、与 pi extensions 的逐条对照、以及"哪些点现在还没有"都在 [`sdk.md`](./sdk.md)。这里只给结论：

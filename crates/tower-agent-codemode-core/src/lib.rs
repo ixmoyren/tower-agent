@@ -10,6 +10,10 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod prompt;
+
+pub use prompt::{PromptBuilder, PromptDocument, PromptLimits, PromptMount, PromptMountMode};
+
 /// A boxed capability operation.
 pub type CapabilityFuture<'a, T> = BoxFuture<'a, Result<T, CapabilityError>>;
 

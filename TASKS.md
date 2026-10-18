@@ -9,9 +9,9 @@
 | 项目       | 值                                             |
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
-| 当前阶段   | **Phase 1（统一能力层）**                      |
-| 下一个任务 | **T2.1**                                       |
-| 代码状态   | **T1.1–T1.4 已完成**：统一能力层与双引擎能力矩阵已落地 |
+| 当前阶段   | **Phase 2（统一提示词 + 引擎选择）**           |
+| 下一个任务 | **T2.2**                                       |
+| 代码状态   | **T1.1–T1.4、T2.1 已完成**：统一能力层、能力矩阵与提示词生成已落地 |
 
 ---
 
@@ -119,7 +119,7 @@
 
 ## 2. Phase 2 — 统一提示词 + 引擎选择（P2）
 
-### [ ] T2.1 `PromptBuilder`：由能力集生成提示词
+### [x] T2.1 `PromptBuilder`：由能力集生成提示词
 
 - **依赖**：T1.1（类型）、T1.2/T1.3（能力真实存在）
 - **做什么**：
@@ -270,3 +270,4 @@
 | 2026-10-18 | T1.2 | monty 通过注入的 `CapabilitySurface` 接入 coreutils：UTF-8 JSON `exec`、预载包装、`exec` 权限拒绝；monty 22 测试及真实 `cat`/`wc` 端到端通过 |
 | 2026-10-18 | T1.3 | JS WIT/门面/宿主接入 `tool_call`、`tool_list`、`tool_register`、`tool_unregister`；宿主工具注入、权限门禁、注册工具后续调用测试通过；组件已重新生成 |
 | 2026-10-18 | T1.4 | 新增 `capability_parity` 双引擎矩阵：exec / fs / tool_call / tool_register / state / log / ui 全部通过；补齐 JS state/log/ui 与 fs 权限 |
+| 2026-10-18 | T2.1 | `codemode-core` 新增 `PromptBuilder`：由能力集、挂载、限额与语言生成 description / instructions；Python / JS / 能力关闭快照通过 |
