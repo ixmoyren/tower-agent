@@ -5323,6 +5323,7 @@ dependencies = [
  "tower-agent-plugins",
  "tower-agent-provider",
  "tower-agent-runtime",
+ "tower-agent-storage",
  "tower-agent-wasmtime",
  "wasmtime",
 ]

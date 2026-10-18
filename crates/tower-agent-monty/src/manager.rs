@@ -1,4 +1,4 @@
-//! mods 宿主：把 monty mod 作为 `PluginKind::Jit` 载荷送进 [`PluginRegistry`]，
+//! codemode Python 宿主：把 monty 脚本作为 `PluginKind::Jit` 载荷送进 [`PluginRegistry`]，
 //! 让静态 / 动态 / JIT 三种形态共用同一套**解析规则**（覆盖 / 依赖 / 版本 / 遮蔽）。
 //!
 //! 关键点：`ModManager` 持有注册表，工具目录的唯一来源是「解析 + 安装」的结果——
@@ -17,7 +17,7 @@ use monty_types::OsFunctionCall;
 use semver::{Version, VersionReq};
 use serde_json::{Value, json};
 use tower_agent_codemode_core::{
-    Capability, CapabilityError, CapabilitySurface, ExecOptions, ScriptPermissions,
+    Capability, CapabilityError, CapabilitySurface, ExecOptions, ScriptLanguage, ScriptPermissions,
 };
 use tower_agent_core::{
     AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer, UiState,
@@ -27,12 +27,12 @@ use tower_agent_plugins::{
     PluginRegistry, ShadowedPlugin, StaticPlugin,
 };
 use tower_agent_provider::{Arguments, ToolCall};
+use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore};
 
 use crate::{
     host::{HostCall, MontyHost},
     plugin::MontyPlugin,
     sandbox::SandboxPool,
-    store::{ModMeta, ModStore},
     tool::{ModTool, ToolSpec},
     wire,
 };
@@ -92,6 +92,21 @@ pub struct ModOptions {
     pub requires: Vec<String>,
 }
 
+/// Options for writing a codemode script to the persistent store.
+#[derive(Debug, Clone, Default)]
+pub struct ScriptWriteOptions {
+    /// Permissions to persist with the script.
+    pub permissions: Option<ScriptPermissions>,
+    /// Host capabilities required by the script.
+    pub requires: Vec<String>,
+    /// Script language. The Python manager currently accepts only [`ScriptLanguage::Monty`].
+    pub language: Option<ScriptLanguage>,
+    /// Whether the script should be loaded on startup.
+    pub enabled: Option<bool>,
+    /// Explicit storage scope. Defaults to the manager's project scope.
+    pub scope: Option<ConfigScope>,
+}
+
 /// 一个已加载 codemode Python 脚本的摘要（用于 `codemode_list` / UI 展示）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModSummary {
@@ -101,6 +116,31 @@ pub struct ModSummary {
     pub tools: Vec<String>,
     /// 源码字节数。
     pub code_len: usize,
+}
+
+/// One effective persisted script, including whether it is currently loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptSummary {
+    /// Script name.
+    pub name: String,
+    /// Interpreter declared by the script.
+    pub language: ScriptLanguage,
+    /// User or project storage scope.
+    pub scope: ConfigScope,
+    /// Whether the script is loaded on startup.
+    pub enabled: bool,
+    /// Source size in bytes.
+    pub code_len: usize,
+    /// Whether this process currently has the script loaded.
+    pub loaded: bool,
+    /// Tools currently provided by the loaded script.
+    pub tools: Vec<String>,
+}
+
+#[derive(Clone)]
+struct ScriptStorage {
+    store: Arc<dyn ScriptStore>,
+    project: ConfigScope,
 }
 
 /// mods 宿主。
@@ -123,8 +163,8 @@ pub struct ModManager {
     specs: Mutex<BTreeMap<String, Vec<ToolSpec>>>,
     requires: Mutex<BTreeMap<String, Vec<String>>>,
     kv: Mutex<BTreeMap<String, Value>>,
-    /// 落盘位置（持久化 = dirs config，临时 = dirs cache）。
-    store: Mutex<ModStore>,
+    /// Persistent codemode script store and the current project scope.
+    script_storage: Mutex<Option<ScriptStorage>>,
 }
 
 impl std::fmt::Debug for ModManager {
@@ -158,7 +198,7 @@ impl ModManager {
             specs: Mutex::new(BTreeMap::new()),
             requires: Mutex::new(BTreeMap::new()),
             kv: Mutex::new(BTreeMap::new()),
-            store: Mutex::new(ModStore::from_dirs()),
+            script_storage: Mutex::new(None),
         });
         // JIT 运行时以 protected 载荷注册，并在 install 时把作者工具装进工具目录。
         // 工具句柄用 Weak 指回本管理器，避免强引用环。
@@ -334,45 +374,91 @@ impl ModManager {
         self.pool.idle_count()
     }
 
-    /// 替换落盘位置（测试用；默认是 `dirs` 的 config/cache）。
-    pub fn set_store(&self, store: ModStore) {
-        *self.store.lock().expect("mod store poisoned") = store;
+    /// Attach the persistent script store and the current project scope.
+    pub fn set_script_store(&self, store: Arc<dyn ScriptStore>, project: ConfigScope) {
+        *self.script_storage.lock().expect("script storage poisoned") =
+            Some(ScriptStorage { store, project });
     }
 
-    /// 当前落盘位置。
-    #[must_use]
-    pub fn store(&self) -> ModStore {
-        self.store.lock().expect("mod store poisoned").clone()
+    /// Detach persistent script storage; scripts then live only in this process.
+    pub fn clear_script_store(&self) {
+        *self.script_storage.lock().expect("script storage poisoned") = None;
     }
 
-    /// 把某个 mod 的源码 + 元数据写到**临时**（cache）目录。
-    fn save_ephemeral(&self, name: &str) {
-        let Some(plugin) = self.mods.lock().expect("mods poisoned").get(name).cloned() else {
-            return;
-        };
-        let meta = self.meta(name);
-        self.store
+    fn script_storage(&self) -> Option<ScriptStorage> {
+        self.script_storage
             .lock()
-            .expect("mod store poisoned")
-            .save_ephemeral(name, &plugin.code(), &meta);
+            .expect("script storage poisoned")
+            .clone()
     }
 
-    /// 某个 mod 的落盘元数据。
-    fn meta(&self, name: &str) -> ModMeta {
-        ModMeta {
-            permissions: self.permissions(name),
-            requires: self
-                .requires
-                .lock()
-                .expect("mod requires poisoned")
-                .get(name)
-                .cloned()
-                .unwrap_or_default(),
+    /// Current project scope used by authoring tools, when storage is attached.
+    #[must_use]
+    pub fn script_project_scope(&self) -> Option<ConfigScope> {
+        self.script_storage().map(|storage| storage.project)
+    }
+
+    /// List effective stored scripts plus process-only scripts.
+    pub async fn list_scripts(&self) -> Result<Vec<ScriptSummary>, PluginError> {
+        let loaded = self.list();
+        let Some(storage) = self.script_storage() else {
+            return Ok(loaded
+                .into_iter()
+                .map(|summary| ScriptSummary {
+                    name: summary.name,
+                    language: ScriptLanguage::Monty,
+                    scope: ConfigScope::User,
+                    enabled: true,
+                    code_len: summary.code_len,
+                    loaded: true,
+                    tools: summary.tools,
+                })
+                .collect());
+        };
+        let records = effective_script_records(&storage).await?;
+        let mut summaries = BTreeMap::new();
+        for record in records {
+            let summary = loaded.iter().find(|summary| summary.name == record.name);
+            summaries.insert(
+                record.name.clone(),
+                ScriptSummary {
+                    name: record.name,
+                    language: record.language,
+                    scope: record.scope,
+                    enabled: record.enabled,
+                    code_len: record.source.len(),
+                    loaded: summary.is_some(),
+                    tools: summary
+                        .map(|summary| summary.tools.clone())
+                        .unwrap_or_default(),
+                },
+            );
         }
+        for summary in loaded {
+            summaries
+                .entry(summary.name.clone())
+                .or_insert(ScriptSummary {
+                    name: summary.name,
+                    language: ScriptLanguage::Monty,
+                    scope: storage.project.clone(),
+                    enabled: true,
+                    code_len: summary.code_len,
+                    loaded: true,
+                    tools: summary.tools,
+                });
+        }
+        Ok(summaries.into_values().collect())
     }
 
-    /// 持久化某个 mod（写到 `dirs` 的 config 目录）；mod 不存在时报错。
-    pub fn persist(&self, name: &str) -> Result<(), PluginError> {
+    /// Mark an already loaded script as enabled in persistent storage.
+    pub async fn persist_script(
+        &self,
+        name: &str,
+        scope: Option<ConfigScope>,
+    ) -> Result<(), PluginError> {
+        let Some(storage) = self.script_storage() else {
+            return Err(mod_error(name, "script storage is not configured"));
+        };
         let plugin = self
             .mods
             .lock()
@@ -380,43 +466,158 @@ impl ModManager {
             .get(name)
             .cloned()
             .ok_or_else(|| mod_error(name, "unknown mod"))?;
-        let meta = self.meta(name);
-        self.store
+        let requires = self
+            .requires
             .lock()
-            .expect("mod store poisoned")
-            .persist(name, &plugin.code(), &meta)
-            .map_err(|message| mod_error(name, message))
+            .expect("mod requires poisoned")
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        let scope = scope.unwrap_or(storage.project.clone());
+        self.persist_script_record(
+            &storage,
+            scope,
+            name,
+            &plugin.code(),
+            self.permissions(name),
+            requires,
+            ScriptLanguage::Monty,
+            true,
+        )
+        .await
     }
 
-    /// 丢弃某个 mod：卸载实例并从 config/cache 两个目录删除。
-    pub fn discard(&self, name: &str) -> Result<bool, PluginError> {
+    /// Remove a script from the selected scope and unload it.
+    pub async fn remove_script(
+        &self,
+        name: &str,
+        scope: Option<ConfigScope>,
+    ) -> Result<bool, PluginError> {
         let removed = self.remove(name)?;
-        self.store.lock().expect("mod store poisoned").discard(name);
-        Ok(removed)
+        let Some(storage) = self.script_storage() else {
+            return Ok(removed);
+        };
+        let scope = scope.unwrap_or(storage.project);
+        let existed = storage
+            .store
+            .get_script(&scope, name)
+            .await
+            .map_err(|error| mod_error(name, error.to_string()))?
+            .is_some();
+        if existed {
+            storage
+                .store
+                .delete_script(&scope, name)
+                .await
+                .map_err(|error| mod_error(name, error.to_string()))?;
+        }
+        Ok(removed || existed)
     }
 
-    /// 启动时加载持久化的 mod（`dirs` 的 config 目录），按名字顺序写入。
+    /// Discard a script from the current project and unload it.
+    pub async fn discard_script(&self, name: &str) -> Result<bool, PluginError> {
+        self.remove_script(name, None).await
+    }
+
+    /// Load enabled scripts from storage, with project records overriding user records.
     pub async fn load_persisted(self: &Arc<Self>) -> usize {
-        let stored = self
-            .store
-            .lock()
-            .expect("mod store poisoned")
-            .load_persisted();
+        let Some(storage) = self.script_storage() else {
+            return 0;
+        };
+        let records = match effective_script_records(&storage).await {
+            Ok(records) => records,
+            Err(error) => {
+                eprintln!("加载 codemode 脚本失败：{error}");
+                return 0;
+            }
+        };
         let mut loaded = 0;
-        for stored in stored {
+        for record in records {
+            if !record.enabled {
+                continue;
+            }
+            if record.language != ScriptLanguage::Monty {
+                eprintln!(
+                    "跳过 codemode 脚本 `{}`：Python 宿主不支持 {}",
+                    record.name, record.language
+                );
+                continue;
+            }
+            if self
+                .mods
+                .lock()
+                .expect("mods poisoned")
+                .contains_key(&record.name)
+            {
+                continue;
+            }
+            self.set_permissions(&record.name, record.permissions);
+            let requires = requires_from_record(&record);
             let options = ModOptions {
-                permissions: Some(stored.meta.permissions),
-                requires: stored.meta.requires,
+                permissions: Some(record.permissions),
+                requires,
             };
             match self
-                .write_with_options(&stored.name, &stored.code, options)
+                .write_with_options(&record.name, &record.source, options)
                 .await
             {
                 Ok(_) => loaded += 1,
-                Err(error) => eprintln!("加载持久化 mod `{}` 失败：{error}", stored.name),
+                Err(error) => eprintln!("加载 codemode 脚本 `{}` 失败：{error}", record.name),
             }
         }
         loaded
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn persist_script_record(
+        &self,
+        storage: &ScriptStorage,
+        scope: ConfigScope,
+        name: &str,
+        source: &str,
+        permissions: ScriptPermissions,
+        requires: Vec<String>,
+        language: ScriptLanguage,
+        enabled: bool,
+    ) -> Result<(), PluginError> {
+        let existing = storage
+            .store
+            .get_script(&scope, name)
+            .await
+            .map_err(|error| mod_error(name, error.to_string()))?;
+        let now = tower_agent_runtime::agent_loop::now_ms();
+        let mut metadata = existing
+            .as_ref()
+            .map(|record| record.metadata.clone())
+            .unwrap_or_else(|| json!({}));
+        if !metadata.is_object() {
+            metadata = json!({});
+        }
+        metadata["requires"] = json!(requires);
+        let record = ScriptRecord {
+            id: existing
+                .as_ref()
+                .map(|record| record.id.clone())
+                .unwrap_or_else(|| new_script_id(name, now)),
+            name: name.to_owned(),
+            language,
+            scope,
+            source: source.to_owned(),
+            enabled,
+            permissions,
+            metadata,
+            created_at: existing
+                .as_ref()
+                .map(|record| record.created_at)
+                .unwrap_or(now),
+            updated_at: now,
+            source_hash: source_hash(source),
+        };
+        storage
+            .store
+            .upsert_script(record)
+            .await
+            .map_err(|error| mod_error(name, error.to_string()))
     }
 
     /// 从目录加载动态插件（`.so` / `.dll` / `.dylib`）并注册进同一张注册表。
@@ -501,8 +702,81 @@ impl ModManager {
         name: &str,
         code: &str,
     ) -> Result<ModSummary, PluginError> {
-        self.write_with_options(name, code, ModOptions::default())
+        self.write_script(name, code, ScriptWriteOptions::default())
             .await
+    }
+
+    /// Write a script through the persistent store and install it when enabled.
+    pub async fn write_script(
+        self: &Arc<Self>,
+        name: &str,
+        code: &str,
+        options: ScriptWriteOptions,
+    ) -> Result<ModSummary, PluginError> {
+        let ScriptWriteOptions {
+            permissions,
+            requires,
+            language,
+            enabled,
+            scope,
+        } = options;
+        let language = language.unwrap_or(ScriptLanguage::Monty);
+        if language != ScriptLanguage::Monty {
+            return Err(mod_error(
+                name,
+                format!("the Python codemode host cannot load a {language} script"),
+            ));
+        }
+        let enabled = enabled.unwrap_or(true);
+        let storage = self.script_storage();
+        let scope = scope
+            .or_else(|| storage.as_ref().map(|storage| storage.project.clone()))
+            .unwrap_or(ConfigScope::User);
+        let existing = match &storage {
+            Some(storage) => storage
+                .store
+                .get_script(&scope, name)
+                .await
+                .map_err(|error| mod_error(name, error.to_string()))?,
+            None => None,
+        };
+        let permissions = permissions
+            .or_else(|| existing.as_ref().map(|record| record.permissions))
+            .unwrap_or_else(|| self.permissions(name));
+        let summary = if enabled {
+            self.write_with_options(
+                name,
+                code,
+                ModOptions {
+                    permissions: Some(permissions),
+                    requires: requires.clone(),
+                },
+            )
+            .await?
+        } else {
+            if self.mods.lock().expect("mods poisoned").contains_key(name) {
+                self.remove(name)?;
+            }
+            ModSummary {
+                name: name.to_owned(),
+                tools: Vec::new(),
+                code_len: code.len(),
+            }
+        };
+        if let Some(storage) = storage {
+            self.persist_script_record(
+                &storage,
+                scope,
+                name,
+                code,
+                permissions,
+                requires,
+                language,
+                enabled,
+            )
+            .await?;
+        }
+        Ok(summary)
     }
 
     /// 写一个 mod，并指定权限与依赖。
@@ -529,7 +803,8 @@ impl ModManager {
         name: &str,
         code: &str,
     ) -> Result<ModSummary, PluginError> {
-        self.reload_with_requires(name, code, Vec::new()).await
+        self.write_script(name, code, ScriptWriteOptions::default())
+            .await
     }
 
     async fn reload_with_requires(
@@ -568,10 +843,7 @@ impl ModManager {
         }
         self.set_requires(name, requires);
         match self.register_and_apply(name, &plugin) {
-            Ok(()) => {
-                self.save_ephemeral(name);
-                Ok(self.summary(name))
-            }
+            Ok(()) => Ok(self.summary(name)),
             Err(error) => {
                 self.registry
                     .lock()
@@ -650,7 +922,6 @@ impl ModManager {
             .lock()
             .expect("mods poisoned")
             .insert(name.to_string(), plugin);
-        self.save_ephemeral(name);
         Ok(self.summary(name))
     }
 
@@ -1252,6 +1523,61 @@ fn dedupe_tools(
         }
     }
     (winners, shadowed)
+}
+
+async fn effective_script_records(
+    storage: &ScriptStorage,
+) -> Result<Vec<ScriptRecord>, PluginError> {
+    let mut records = BTreeMap::new();
+    for record in storage
+        .store
+        .list_scripts(&ConfigScope::User)
+        .await
+        .map_err(|error| mod_error("<script-store>", error.to_string()))?
+    {
+        records.insert(record.name.clone(), record);
+    }
+    for record in storage
+        .store
+        .list_scripts(&storage.project)
+        .await
+        .map_err(|error| mod_error("<script-store>", error.to_string()))?
+    {
+        records.insert(record.name.clone(), record);
+    }
+    Ok(records.into_values().collect())
+}
+
+fn requires_from_record(record: &ScriptRecord) -> Vec<String> {
+    record
+        .metadata
+        .get("requires")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn source_hash(source: &str) -> String {
+    format!("{:016x}", fnv1a(source.as_bytes()))
+}
+
+fn new_script_id(name: &str, now: i64) -> String {
+    format!("{now:x}-{:016x}", fnv1a(name.as_bytes()))
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// 位置参数或关键字参数里的字符串。

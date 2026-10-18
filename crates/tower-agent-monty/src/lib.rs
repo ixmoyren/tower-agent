@@ -1,5 +1,5 @@
 //! `tower-agent-monty` — 内嵌 [monty](https://crates.io/crates/monty) wasm 沙箱的
-//! mods 宿主（`docs/plugins.md` §4.3；cc `mods` 模式）。
+//! codemode Python 宿主（`docs/plugins.md` §4.3）。
 //!
 //! AI/用户生成的 monty 代码**必须跑在沙箱里**：`tower-agent-monty` 内嵌一个把 monty
 //! 解释器编译成 wasm 的组件（`wasm/monty-sandbox`，经 `wasm-opt -Oz --strip-debug`
@@ -18,7 +18,8 @@
 //!   [`tower_agent_core::UiState`]，由 TUI / web / GUI 各自渲染。
 //!
 //! 对 LLM 暴露的作者工具（[`authoring_tools`]）：`codemode_write` / `codemode_reload` /
-//! `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard`。
+//! `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard`；
+//! 脚本源码与元数据以 [`ScriptStore`] 为真源。
 //!
 //! 重新生成内嵌组件：`./wasm/monty-sandbox/generate.sh`。
 
@@ -30,30 +31,33 @@ mod manager;
 mod plugin;
 mod python;
 mod sandbox;
-mod store;
 mod tool;
 mod wire;
 
 pub use host::{HostCall, MontyHost};
 pub use manager::{
     JIT_RUNTIME_PLUGIN, ModManager, ModOptions, ModPermissions, ModSummary, RESERVED_NAMES,
-    ShadowedTool, is_reserved_name, jit_runtime_manifest,
+    ScriptSummary, ScriptWriteOptions, ShadowedTool, is_reserved_name, jit_runtime_manifest,
 };
 pub use plugin::MontyPlugin;
-pub use store::{ModMeta, ModStore, StoredMod};
 pub use tool::{ModTool, ToolSpec};
 pub use tower_agent_codemode_core::{
-    Capability, CapabilityError, CapabilitySurface, ScriptPermissions,
+    Capability, CapabilityError, CapabilitySurface, ScriptLanguage, ScriptPermissions,
 };
+pub use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore};
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, OnceLock};
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, Mutex, OnceLock},
+    };
 
     use futures_util::future::BoxFuture;
     use serde_json::{Value, json};
     use tower_agent_core::UiState;
     use tower_agent_plugins::PluginRegistry;
+    use tower_agent_storage::{ScriptRecord, ScriptStore, StorageFuture};
 
     use super::*;
     use crate::sandbox::SandboxPool;
@@ -66,10 +70,80 @@ mod tests {
 
     /// 空注册表的 mods 宿主。
     fn manager() -> Arc<ModManager> {
-        let manager = ModManager::new(UiState::new(), PluginRegistry::new()).expect("mod manager");
-        // 测试默认不落盘。
-        manager.set_store(ModStore::with_dirs(None, None));
-        manager
+        ModManager::new(UiState::new(), PluginRegistry::new()).expect("mod manager")
+    }
+
+    #[derive(Default)]
+    struct MemoryScriptStore {
+        records: Mutex<BTreeMap<(String, String, String), ScriptRecord>>,
+    }
+
+    impl MemoryScriptStore {
+        fn key(scope: &ConfigScope, name: &str) -> (String, String, String) {
+            let (kind, id) = scope.storage_parts();
+            (kind.to_owned(), id.to_owned(), name.to_owned())
+        }
+    }
+
+    impl ScriptStore for MemoryScriptStore {
+        fn upsert_script(&self, script: ScriptRecord) -> StorageFuture<'_, ()> {
+            let key = Self::key(&script.scope, &script.name);
+            Box::pin(async move {
+                self.records
+                    .lock()
+                    .expect("script records poisoned")
+                    .insert(key, script);
+                Ok(())
+            })
+        }
+
+        fn get_script(
+            &self,
+            scope: &ConfigScope,
+            name: &str,
+        ) -> StorageFuture<'_, Option<ScriptRecord>> {
+            let key = Self::key(scope, name);
+            Box::pin(async move {
+                Ok(self
+                    .records
+                    .lock()
+                    .expect("script records poisoned")
+                    .get(&key)
+                    .cloned())
+            })
+        }
+
+        fn list_scripts(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<ScriptRecord>> {
+            let scope = scope.clone();
+            Box::pin(async move {
+                let mut records = self
+                    .records
+                    .lock()
+                    .expect("script records poisoned")
+                    .values()
+                    .filter(|record| record.scope == scope)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                records.sort_by(|left, right| {
+                    right
+                        .updated_at
+                        .cmp(&left.updated_at)
+                        .then_with(|| left.name.cmp(&right.name))
+                });
+                Ok(records)
+            })
+        }
+
+        fn delete_script(&self, scope: &ConfigScope, name: &str) -> StorageFuture<'_, ()> {
+            let key = Self::key(scope, name);
+            Box::pin(async move {
+                self.records
+                    .lock()
+                    .expect("script records poisoned")
+                    .remove(&key);
+                Ok(())
+            })
+        }
     }
 
     /// 通过 ToolRouter 调用一个 mod 工具，返回模型可见文本。
@@ -484,33 +558,44 @@ def evil(args):
     }
 
     #[tokio::test]
-    async fn persisted_mods_survive_across_sessions() {
-        let config = tempfile::tempdir().expect("config dir");
-        let cache = tempfile::tempdir().expect("cache dir");
-
-        // 会话 1：写一个 mod 并持久化。
+    async fn persisted_scripts_survive_across_sessions() {
+        let storage = Arc::new(MemoryScriptStore::default());
+        let project = ConfigScope::project("/work/a");
         let first = ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
-        first.set_store(ModStore::with_dirs(
-            Some(config.path().to_path_buf()),
-            Some(cache.path().to_path_buf()),
-        ));
+        first.set_script_store(storage.clone(), project.clone());
         let code = "\
 tool_register(\"shout\", \"shout\", \"\", {\"type\": \"object\"})
 
 def shout(args):
     return args[\"text\"].upper()
 ";
-        first.write("demo", code).await.expect("write");
-        first.persist("demo").expect("persist");
+        let permissions = ScriptPermissions {
+            exec: false,
+            fs: false,
+            ..ScriptPermissions::default()
+        };
+        first
+            .write_script(
+                "demo",
+                code,
+                ScriptWriteOptions {
+                    permissions: Some(permissions),
+                    ..ScriptWriteOptions::default()
+                },
+            )
+            .await
+            .expect("write");
+        let records = storage.list_scripts(&project).await.expect("list scripts");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].permissions, permissions);
+        assert_eq!(records[0].language, ScriptLanguage::Monty);
+        assert!(records[0].enabled);
         drop(first);
 
-        // 会话 2：只从 config 目录恢复。
+        // A fresh process/manager restores the enabled script from storage.
         let second = ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
-        second.set_store(ModStore::with_dirs(
-            Some(config.path().to_path_buf()),
-            Some(cache.path().to_path_buf()),
-        ));
-        assert_eq!(second.load_persisted().await, 1, "应加载一个持久化 mod");
+        second.set_script_store(storage.clone(), project);
+        assert_eq!(second.load_persisted().await, 1, "应加载一个持久化脚本");
         let shout = second
             .tools()
             .into_iter()
@@ -518,11 +603,108 @@ def shout(args):
             .expect("restored tool");
         assert_eq!(call_mod_tool(&shout, json!({ "text": "hi" })).await, "HI");
 
-        // 丢弃后 config 目录里不再有它。
-        assert!(second.discard("demo").expect("discard"));
+        assert!(second.discard_script("demo").await.expect("discard"));
         let third = ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
-        third.set_store(ModStore::with_dirs(Some(config.path().to_path_buf()), None));
+        third.set_script_store(storage.clone(), ConfigScope::project("/work/a"));
         assert_eq!(third.load_persisted().await, 0, "丢弃后不应再加载");
+    }
+
+    #[tokio::test]
+    async fn project_script_overrides_user_on_startup() {
+        let storage = Arc::new(MemoryScriptStore::default());
+        let project = ConfigScope::project("/work/a");
+        let first = ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
+        first.set_script_store(storage.clone(), project.clone());
+        let script = |value: &str| {
+            format!(
+                "tool_register(\"origin\", \"origin\", \"\", {{\"type\": \"object\"}})\n\
+                 def origin(args):\n    return \"{value}\"\n"
+            )
+        };
+        first
+            .write_script(
+                "origin",
+                &script("user"),
+                ScriptWriteOptions {
+                    scope: Some(ConfigScope::User),
+                    ..ScriptWriteOptions::default()
+                },
+            )
+            .await
+            .expect("write user script");
+        first
+            .write_script("origin", &script("project"), ScriptWriteOptions::default())
+            .await
+            .expect("write project script");
+        assert_eq!(
+            storage
+                .list_scripts(&ConfigScope::User)
+                .await
+                .expect("user scripts")
+                .len(),
+            1
+        );
+        assert_eq!(
+            storage
+                .list_scripts(&project)
+                .await
+                .expect("project scripts")
+                .len(),
+            1
+        );
+        drop(first);
+
+        let project_manager =
+            ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
+        project_manager.set_script_store(storage.clone(), project.clone());
+        assert_eq!(project_manager.load_persisted().await, 1);
+        let origin = project_manager
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "origin")
+            .expect("project origin");
+        assert_eq!(
+            call_mod_tool(&origin, json!({})).await,
+            "project",
+            "项目级同名脚本必须覆盖用户级脚本"
+        );
+
+        let other_project =
+            ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
+        other_project.set_script_store(storage.clone(), ConfigScope::project("/work/b"));
+        assert_eq!(other_project.load_persisted().await, 1);
+        let user_origin = other_project
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "origin")
+            .expect("user origin");
+        assert_eq!(call_mod_tool(&user_origin, json!({})).await, "user");
+
+        let disabled = ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
+        disabled.set_script_store(storage.clone(), project.clone());
+        disabled
+            .write_script(
+                "origin",
+                &script("disabled"),
+                ScriptWriteOptions {
+                    enabled: Some(false),
+                    ..ScriptWriteOptions::default()
+                },
+            )
+            .await
+            .expect("disable project override");
+        let after_disable =
+            ModManager::new(UiState::new(), PluginRegistry::new()).expect("manager");
+        after_disable.set_script_store(storage.clone(), project.clone());
+        assert_eq!(
+            after_disable.load_persisted().await,
+            0,
+            "项目级禁用记录也必须覆盖用户级启用记录"
+        );
+        let summaries = after_disable.list_scripts().await.expect("list scripts");
+        assert_eq!(summaries.len(), 1);
+        assert!(!summaries[0].enabled);
+        assert!(!summaries[0].loaded);
     }
 
     #[test]

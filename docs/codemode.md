@@ -23,7 +23,7 @@
 |----------------|---------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
 | 沙箱基础设施   | `tower-agent-wasmtime`：`SandboxEngine` / `HostState` / `Sandbox` / `SandboxPool`                                   | wasm 组件编译 + WASI + 内存/栈上限 + JIT 缓存 + 实例池；`wasmtime` 静态插件占位（`protected`）                                                                                                                                                                                                                                                                                                                                                               | ——                                                                             |
 | guest 命令集   | `wasm/coreutils-wasm`（uutils multicall，**60 个命令**，argv[0] 分发；权威列表见 `tower_agent_codemode::COMMANDS`） | `exec(name, args, opts)`                                                                                                                                                                                                                                                                                                                                                                                                                                     | 两个引擎均已接入；monty 通过注入的 `CapabilitySurface` 转发                    |
-| Python codemode | `tower-agent-monty` + `wasm/monty-sandbox`                                                                          | monty 子集、宿主导发的 REPL 状态机；共享能力表；`ScriptPermissions`；热重载；持久化（`dirs::config_dir()/tower-agent/codemode/scripts`）；作者工具 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` | 存储仍以文件为真源，待 T4 接 storage                               |
+| Python codemode | `tower-agent-monty` + `wasm/monty-sandbox`                                                                          | monty 子集、宿主导发的 REPL 状态机；共享能力表；`ScriptPermissions`；热重载；`ScriptStore` 持久化；作者工具 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` | JS 记录的启动执行仍待统一 host 分发；Python 宿主当前只加载 `monty` 记录 |
 | codemode（JS） | `tower-agent-codemode` + `wasm/rquickjs-sandbox`                                                                    | rquickjs（guest）、`exec` + 60 个命令函数 + pipeline + `fs`；工具调用 / 注册、state、log、UI；会话根（`<config>/tower-agent/codemode/sessions/<name>`）；命名会话列表 / 清理 | 没有工具钩子；脚本注册工具尚未自动同步到 CLI 的 agent 工具目录 |
 | 插件体系       | `tower-agent-plugins` / `tower-agent-plugin-sdk`                                                                    | 静态（Layer）/ 动态（stabby cdylib）/ JIT（monty）三形态；能力注册表、依赖与版本、`protected`、权限提示；`HostApi` 中介调用                                                                                                                                                                                                                                                                                                                                  | 脚本扩展点仍少（见 [`sdk.md`](./sdk.md)）                                      |
 
@@ -127,7 +127,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 | P1   | **统一能力层**：抽出 `CapabilitySurface`（exec / fs / tool_call / tool_register / state / log / ui）到新的内部 crate `tower-agent-codemode-core`（引擎无关，避免 monty ↔ codemode 依赖成环）；monty 接上 `exec`（coreutils-wasm）；JS 引擎接上 `tool_call` / `tool_register` | 两个引擎各有一组同样的能力测试                                                                       |
 | P2   | **统一提示词 + 引擎选择**：`PromptBuilder` 由 `CapabilitySurface` 生成；引擎**全局默认 + 脚本可覆盖**（Q1）：`--codemode-engine monty\|js` 定进程默认，脚本头声明语言时覆盖它                                                                                                | 同一任务在两种引擎下都能跑通；提示词随能力/引擎变化                                                  |
 | P3   | **合并 feature / CLI**：feature 已收敛为 `codemode`（共享层）+ `codemode-python` / `codemode-js`（Q2）；CLI 开关与 `mod_*` 作者工具改名仍待后续任务                                                               | 无默认只留内置工具；Python / JS 可分别启用，也可同时启用                                               |
-| P4   | **统一会话与存储**：`ScriptStore` 已落 storage/Turso（作用域、语言、权限、源码、启用状态、哈希、时间戳）；codemode 作者工具接入仍待 T4.2                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
+| P4   | **统一会话与存储**：`ScriptStore` 已落 storage/Turso；作者工具读写 storage，启动按 project 覆盖 user 加载启用脚本，旧 scripts 文件路径已移除                                                                        | 会话可列出 / 复用 / 清理；换引擎不换心智模型                                                         |
 | P5   | **接扩展点 v0**：`tower-agent-plugin-sdk` 的扩展点 = **工具注册 + `tool_call` / `tool_result` 钩子**（Q4）；codemode 把 host function 映射过去                                                                                                                               | 一个脚本能注册工具并在下一轮生效（与现在 monty 等价）+ 能在工具执行前改写/拦截、执行后改写结果       |
 
 兼容性：
@@ -176,7 +176,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 与既有决策的张力：
 
 - 前面已经定过"**配置一律走 `tower-agent-storage`，不能走别的路子**"（CLI/axum/webui 共用同一套存储抽象）。脚本更接近"用户资产"而不是"运行时产物"，按同一条原则应该进 storage。
-- Python codemode 脚本目前仍是 **文件**（`dirs::cache_dir()/tower-agent/codemode/scripts` 临时、`dirs::config_dir()/tower-agent/codemode/scripts` 持久），T4 再迁到 storage。
+- Python codemode 脚本已迁到 `ScriptStore`：`codemode_write` 默认写当前项目作用域，`scope=user` 可写用户级；启动时项目同名记录覆盖用户记录。
 - 无论哪条， **脚本元数据（语言、权限、启用状态、源码哈希、最近运行）都应该进 storage**——它是权限矩阵与热重载校验的依据，JSON 侧车文件只会制造两处真相。
 
 **结论 (c)**：storage 是真源（与"配置走 storage"一致、多前端零成本、LLM 写入路径天然），文件用于 **显式导出 / 导入**（满足"人类要读、要 git、要 review"）。`ScriptStore` 已实现 `(scope_kind, scope_id, name)` 主键与 project/user 隔离；确实需要进仓库时，导出到 `.tower-agent/codemode/` 再纳入 git。
@@ -184,7 +184,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 落地形状：
 
 1. `tower-agent-storage` 增加 `ScriptStore` 子接口（与 `ConfigStore` / `HistoryStore` 并列）：脚本 id、名字、语言（`monty` / `js`）、作用域（user / project）、源码、启用状态、权限、元数据、时间戳。
-2. `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` 直接读写 `ScriptStore`。
+2. `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` 直接读写 `ScriptStore`；`codemode_persist` / `codemode_discard` 作为启用保存与删除的兼容入口。
 3. `codemode export <dir>` / `codemode import <dir>`：每个脚本一个文件（源码 + 元数据头）；项目级默认导出到 `.tower-agent/codemode/`。
 4. 脚本的 **元数据永远在 storage**（权限、源码哈希、最近运行），文件只是投影——避免两处真相。
 

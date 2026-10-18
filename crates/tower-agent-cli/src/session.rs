@@ -282,6 +282,13 @@ impl Session {
     /// （对齐 pi 的 `auth.json` / `settings.json`）。
     #[must_use]
     pub fn with_store(mut self, store: Arc<CliStore>) -> Self {
+        #[cfg(feature = "codemode-python")]
+        if let Some(mods) = &self.mods {
+            mods.set_script_store(
+                store.script_store(),
+                ConfigScope::from_working_dir(&self.cwd),
+            );
+        }
         self.store = Some(store);
         self
     }
@@ -983,10 +990,41 @@ mod tests {
     };
     use tower_agent_tui::CommandHost as _;
 
-    use super::{Session, parse_thinking_level, run_print, thinking_level_name};
+    use super::{
+        ConfigScope, ScriptLanguage, Session, parse_thinking_level, run_print, thinking_level_name,
+    };
 
     fn session(cwd: &std::path::Path) -> Session {
         Session::with_model(cwd, FauxProvider::new().boxed(), model())
+    }
+
+    async fn call_codemode_tool(
+        tool: &tower_agent_core::AgentTool,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> String {
+        use futures_util::StreamExt as _;
+        use tower::ServiceExt as _;
+
+        let mut router = tower_agent_runtime::ToolRouter::new();
+        router.insert_boxed(tool.name(), tool.service().clone());
+        let request = tower_agent_core::ToolCallRequest::new(tower_agent_provider::ToolCall {
+            id: format!("codemode:{name}"),
+            name: name.to_owned(),
+            arguments: arguments.as_object().cloned().unwrap_or_default().into(),
+            thought_signature: None,
+            namespace: None,
+        });
+        let stream = router.oneshot(request).await.expect("route codemode tool");
+        let results: Vec<_> = stream.collect().await;
+        results[0]
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text(text) => Some(text.text.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -1445,6 +1483,76 @@ mod tests {
         );
         assert_eq!(snapshot.default_provider.as_deref(), Some("deepseek"));
         assert_eq!(snapshot.default_model.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[cfg(feature = "codemode-python")]
+    #[tokio::test]
+    async fn codemode_scripts_survive_restart_from_turso() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let storage = tower_agent_turso::TursoStorage::in_memory()
+            .await
+            .expect("open in-memory");
+        let store = Arc::new(crate::store::CliStore::from_storage(
+            storage,
+            tokio::runtime::Handle::current(),
+        ));
+        let first = session(dir.path()).with_store(Arc::clone(&store));
+        let manager = first.mods.as_ref().expect("Python codemode host");
+        let code = "\
+tool_register(\"persisted_echo\", \"persisted_echo\", \"\", {\"type\": \"object\"})
+
+def persisted_echo(args):
+    return \"restored:\" + args[\"text\"]
+";
+        let write_tool = manager
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "codemode_write")
+            .expect("codemode_write tool");
+        let written = call_codemode_tool(
+            &write_tool,
+            "codemode_write",
+            serde_json::json!({ "name": "restart", "code": code }),
+        )
+        .await;
+        assert!(written.contains("restart"), "write result: {written}");
+        let list_tool = manager
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "codemode_list")
+            .expect("codemode_list tool");
+        let listed = call_codemode_tool(&list_tool, "codemode_list", serde_json::json!({})).await;
+        assert!(
+            listed.contains("restart") && listed.contains("loaded"),
+            "write must be visible to list immediately: {listed}"
+        );
+        drop(first);
+
+        let second = session(dir.path()).with_store(Arc::clone(&store));
+        assert_eq!(second.load_persisted_mods().await, 1);
+        let tool = second
+            .mods
+            .as_ref()
+            .expect("Python codemode host")
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name() == "persisted_echo")
+            .expect("restored script tool");
+        assert_eq!(
+            call_codemode_tool(&tool, "persisted_echo", serde_json::json!({ "text": "ok" })).await,
+            "restored:ok"
+        );
+
+        let project = ConfigScope::from_working_dir(dir.path());
+        let record = store
+            .script_store()
+            .get_script(&project, "restart")
+            .await
+            .expect("read ScriptStore")
+            .expect("stored script");
+        assert_eq!(record.language, ScriptLanguage::Monty);
+        assert!(record.enabled);
+        assert_eq!(record.source, code);
     }
 
     #[tokio::test]

@@ -14,8 +14,8 @@ tower-agent-core = { workspace = true }
 tower-agent-plugins = { workspace = true, features = ["dynamic"] }
 tower-agent-provider = { workspace = true }
 tower-agent-runtime = { workspace = true }
+tower-agent-storage.workspace = true
 tower-agent-wasmtime = { workspace = true }
-dirs = { workspace = true }
 futures-util = { workspace = true }
 rkyv = { workspace = true }
 schemars = { workspace = true }
@@ -28,6 +28,7 @@ wasmtime = { workspace = true }
 monty-fs = "1.1.0"
 monty-types = "1.1.0"
 tower-agent-codemode-core.workspace = true
+dirs.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

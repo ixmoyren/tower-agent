@@ -27,8 +27,8 @@ use tokio::task::JoinHandle;
 use tower_agent_core::AgentMessage;
 use tower_agent_provider::{Message, UserContent};
 use tower_agent_storage::{
-    ConfigScope, ConfigStore, HistoryStore, ProviderCredential, ProviderStore, SessionRecord,
-    SessionStore, StorageError,
+    ConfigScope, ConfigStore, HistoryStore, ProviderCredential, ProviderStore, ScriptRecord,
+    ScriptStore, SessionRecord, SessionStore, StorageError, StorageFuture,
 };
 use tower_agent_turso::TursoStorage;
 
@@ -190,6 +190,14 @@ impl CliStore {
             .unwrap_or_default()
     }
 
+    /// 暴露脚本仓库接口给 codemode 宿主；写入完成后等待 Turso 队列排空。
+    #[must_use]
+    pub fn script_store(self: &Arc<Self>) -> Arc<dyn ScriptStore> {
+        Arc::new(CliScriptStore {
+            store: Arc::clone(self),
+        })
+    }
+
     /// 写 / 覆盖一个会话的元数据。
     pub async fn upsert_session(&self, record: SessionRecord) -> Result<(), StorageError> {
         self.storage.upsert_session(record).await
@@ -302,6 +310,47 @@ impl CliStore {
         // 顺手清掉已完成的任务，避免长会话里无限增长。
         inflight.retain(|task| !task.is_finished());
         inflight.push(self.handle.spawn(future));
+    }
+}
+
+/// `ScriptStore` 适配器：把 CLI 的写队列语义暴露给 codemode。
+///
+/// Turso 的普通写入是 fire-and-forget；作者工具必须在返回前让 upsert/delete 可见，
+/// 否则紧接着的 `codemode_list` 会读到旧状态，后台错误也会被吞掉。
+struct CliScriptStore {
+    store: Arc<CliStore>,
+}
+
+impl ScriptStore for CliScriptStore {
+    fn upsert_script(&self, script: ScriptRecord) -> StorageFuture<'_, ()> {
+        Box::pin(async move {
+            self.store.storage.upsert_script(script).await?;
+            self.store.storage.flush().await
+        })
+    }
+
+    fn get_script(
+        &self,
+        scope: &ConfigScope,
+        name: &str,
+    ) -> StorageFuture<'_, Option<ScriptRecord>> {
+        let scope = scope.clone();
+        let name = name.to_owned();
+        Box::pin(async move { self.store.storage.get_script(&scope, &name).await })
+    }
+
+    fn list_scripts(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<ScriptRecord>> {
+        let scope = scope.clone();
+        Box::pin(async move { self.store.storage.list_scripts(&scope).await })
+    }
+
+    fn delete_script(&self, scope: &ConfigScope, name: &str) -> StorageFuture<'_, ()> {
+        let scope = scope.clone();
+        let name = name.to_owned();
+        Box::pin(async move {
+            self.store.storage.delete_script(&scope, &name).await?;
+            self.store.storage.flush().await
+        })
     }
 }
 

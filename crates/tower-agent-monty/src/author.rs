@@ -11,9 +11,11 @@ use std::sync::Weak;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower_agent_codemode_core::ScriptLanguage;
 use tower_agent_core::{AgentTool, AgentToolResult, ToolRegistration};
+use tower_agent_storage::ConfigScope;
 
-use crate::manager::{ModManager, ModOptions, ModPermissions, ModSummary};
+use crate::manager::{ModManager, ModPermissions, ModSummary, ScriptSummary, ScriptWriteOptions};
 
 /// `codemode_write`：创建/热重载 codemode Python 脚本。
 pub const CODEMODE_WRITE: &str = "codemode_write";
@@ -23,9 +25,9 @@ pub const CODEMODE_RELOAD: &str = "codemode_reload";
 pub const CODEMODE_LIST: &str = "codemode_list";
 /// `codemode_remove`：卸载 codemode Python 脚本。
 pub const CODEMODE_REMOVE: &str = "codemode_remove";
-/// `codemode_persist`：把脚本持久化到 `dirs` 的 config 目录。
+/// `codemode_persist`：确保脚本以启用状态保存到 `ScriptStore`。
 pub const CODEMODE_PERSIST: &str = "codemode_persist";
-/// `codemode_discard`：丢弃脚本（卸载 + 删除持久化/临时副本）。
+/// `codemode_discard`：从当前项目卸载并删除脚本记录。
 pub const CODEMODE_DISCARD: &str = "codemode_discard";
 
 /// JIT 运行时自带的作者工具名（保留，不允许被 JIT 插件遮蔽）。
@@ -45,6 +47,15 @@ struct WriteParams {
     name: String,
     /// monty Python 源码。
     code: String,
+    /// 可选脚本语言；当前 Python 宿主只接受 `monty`。
+    #[serde(default)]
+    language: Option<String>,
+    /// 是否在启动时加载，缺省为 `true`。
+    #[serde(default)]
+    enabled: Option<bool>,
+    /// 存储作用域：`project`（缺省）或 `user`。
+    #[serde(default)]
+    scope: Option<String>,
     /// 可选权限；缺省 = 默认权限（命令/工具/UI/状态/FS 全开，FS 可写范围由挂载模式决定）。
     #[serde(default)]
     permissions: Option<ModPermissions>,
@@ -58,6 +69,9 @@ struct WriteParams {
 struct NameParams {
     /// 脚本名。
     name: String,
+    /// 删除作用域：`project`（缺省）或 `user`。
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 /// 无参数。
@@ -72,23 +86,42 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<WriteParams, _, _>(
             CODEMODE_WRITE,
-            "创建或热重载一个 codemode Python 脚本：模型生成 Python 代码，代码可调用宿主函数 \
+            "创建或热重载一个 codemode Python 脚本，并写入当前项目的 ScriptStore：模型生成 Python 代码，代码可调用宿主函数 \
              （exec/tool_call/log/state_*）、注册工具（tool_register）、贡献 UI（ui_status/ui_panel/ui_tool_render）。\
-             可用 `requires` 声明依赖的宿主能力（如 `tool.read`），`permissions` 收窄权限。",
+             可用 `requires` 声明依赖的宿主能力（如 `tool.read`），`permissions` 收窄权限；\
+             `enabled=false` 只保存不加载，`scope=user` 可写用户级脚本。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
                     let Some(manager) = manager.upgrade() else {
                         return Ok(host_gone());
                     };
+                    let language = match params.language.as_deref() {
+                        Some(language) => match ScriptLanguage::parse(language) {
+                            Some(language) => Some(language),
+                            None => {
+                                return Ok(AgentToolResult::error(format!(
+                                    "unknown codemode language `{language}`"
+                                )));
+                            }
+                        },
+                        None => None,
+                    };
+                    let scope = match parse_scope(params.scope.as_deref()) {
+                        Ok(scope) => scope,
+                        Err(error) => return Ok(AgentToolResult::error(error)),
+                    };
                     Ok(render(
                         manager
-                            .write_with_options(
+                            .write_script(
                                 &params.name,
                                 &params.code,
-                                ModOptions {
+                                ScriptWriteOptions {
                                     permissions: params.permissions,
                                     requires: params.requires,
+                                    language,
+                                    enabled: params.enabled,
+                                    scope,
                                 },
                             )
                             .await,
@@ -101,14 +134,43 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<WriteParams, _, _>(
             CODEMODE_RELOAD,
-            "热重载一个已存在的 codemode Python 脚本；新代码校验通过才替换，失败保留旧版本。",
+            "热重载一个已存在的 codemode Python 脚本并更新 ScriptStore；新代码校验通过才替换，失败保留旧版本。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
                     let Some(manager) = manager.upgrade() else {
                         return Ok(host_gone());
                     };
-                    Ok(render(manager.reload(&params.name, &params.code).await))
+                    let language = match params.language.as_deref() {
+                        Some(language) => match ScriptLanguage::parse(language) {
+                            Some(language) => Some(language),
+                            None => {
+                                return Ok(AgentToolResult::error(format!(
+                                    "unknown codemode language `{language}`"
+                                )));
+                            }
+                        },
+                        None => None,
+                    };
+                    let scope = match parse_scope(params.scope.as_deref()) {
+                        Ok(scope) => scope,
+                        Err(error) => return Ok(AgentToolResult::error(error)),
+                    };
+                    Ok(render(
+                        manager
+                            .write_script(
+                                &params.name,
+                                &params.code,
+                                ScriptWriteOptions {
+                                    permissions: params.permissions,
+                                    requires: params.requires,
+                                    language,
+                                    enabled: Some(true),
+                                    scope,
+                                },
+                            )
+                            .await,
+                    ))
                 }
             },
         )
@@ -117,14 +179,17 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<ListParams, _, _>(
             CODEMODE_LIST,
-            "列出当前已加载的 codemode Python 脚本及其提供的工具。",
+            "列出当前项目有效的 codemode 脚本；项目脚本覆盖用户同名脚本，并显示启用与加载状态。",
             move |_params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
                     let Some(manager) = manager.upgrade() else {
                         return Ok(host_gone());
                     };
-                    Ok(AgentToolResult::text(render_list(&manager.list())))
+                    match manager.list_scripts().await {
+                        Ok(summaries) => Ok(AgentToolResult::text(render_list(&summaries))),
+                        Err(error) => Ok(AgentToolResult::error(error.to_string())),
+                    }
                 }
             },
         )
@@ -133,14 +198,18 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
             CODEMODE_REMOVE,
-            "卸载一个 codemode Python 脚本，并注销它注册的工具。",
+            "从指定作用域（缺省为当前项目）删除 codemode 脚本、卸载它并注销其工具。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
                     let Some(manager) = manager.upgrade() else {
                         return Ok(host_gone());
                     };
-                    match manager.remove(&params.name) {
+                    let scope = match parse_scope(params.scope.as_deref()) {
+                        Ok(scope) => scope,
+                        Err(error) => return Ok(AgentToolResult::error(error)),
+                    };
+                    match manager.remove_script(&params.name, scope).await {
                         Ok(true) => Ok(AgentToolResult::text(format!(
                             "removed codemode script `{}`",
                             params.name
@@ -159,14 +228,18 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
             CODEMODE_PERSIST,
-            "把一个 codemode Python 脚本持久化到用户配置目录（跨会话保留）。",
+            "确保一个已加载的 codemode Python 脚本以启用状态写入当前项目的 ScriptStore。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
                     let Some(manager) = manager.upgrade() else {
                         return Ok(host_gone());
                     };
-                    match manager.persist(&params.name) {
+                    let scope = match parse_scope(params.scope.as_deref()) {
+                        Ok(scope) => scope,
+                        Err(error) => return Ok(AgentToolResult::error(error)),
+                    };
+                    match manager.persist_script(&params.name, scope).await {
                         Ok(()) => Ok(AgentToolResult::text(format!(
                             "persisted codemode script `{}`",
                             params.name
@@ -181,14 +254,14 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
         let manager = Weak::clone(&manager);
         ToolRegistration::new::<NameParams, _, _>(
             CODEMODE_DISCARD,
-            "丢弃一个 codemode Python 脚本：卸载它并删除持久化/临时副本。",
+            "从当前项目丢弃一个 codemode Python 脚本：删除 ScriptStore 记录并卸载它。",
             move |params, _request| {
                 let manager = Weak::clone(&manager);
                 async move {
                     let Some(manager) = manager.upgrade() else {
                         return Ok(host_gone());
                     };
-                    match manager.discard(&params.name) {
+                    match manager.discard_script(&params.name).await {
                         Ok(true) => Ok(AgentToolResult::text(format!(
                             "discarded codemode script `{}`",
                             params.name
@@ -208,6 +281,16 @@ pub(crate) fn authoring_tools(manager: Weak<ModManager>) -> Vec<AgentTool> {
 
 fn host_gone() -> AgentToolResult {
     AgentToolResult::error("codemode Python host is gone")
+}
+
+fn parse_scope(scope: Option<&str>) -> Result<Option<ConfigScope>, String> {
+    match scope {
+        None | Some("project") => Ok(None),
+        Some("user") => Ok(Some(ConfigScope::User)),
+        Some(other) => Err(format!(
+            "unknown codemode scope `{other}` (expected `project` or `user`)"
+        )),
+    }
 }
 
 /// 把写/重载结果渲染成模型可见文本。
@@ -233,23 +316,31 @@ fn render_summary(summary: &ModSummary) -> String {
     }
 }
 
-fn render_list(summaries: &[ModSummary]) -> String {
+fn render_list(summaries: &[ScriptSummary]) -> String {
     if summaries.is_empty() {
-        return "no codemode Python scripts loaded".to_string();
+        return "no codemode scripts".to_string();
     }
     summaries
         .iter()
         .map(|summary| {
-            if summary.tools.is_empty() {
-                format!("- {} ({} bytes)", summary.name, summary.code_len)
+            let scope = match &summary.scope {
+                ConfigScope::User => "user".to_string(),
+                ConfigScope::Project(project) => format!("project:{project}"),
+            };
+            let state = match (summary.enabled, summary.loaded) {
+                (true, true) => "enabled, loaded",
+                (true, false) => "enabled, not loaded",
+                (false, _) => "disabled",
+            };
+            let tools = if summary.tools.is_empty() {
+                String::new()
             } else {
-                format!(
-                    "- {} ({} bytes) → {}",
-                    summary.name,
-                    summary.code_len,
-                    summary.tools.join(", ")
-                )
-            }
+                format!(" → {}", summary.tools.join(", "))
+            };
+            format!(
+                "- {} ({}, {}, {} bytes, {state}){tools}",
+                summary.name, summary.language, scope, summary.code_len
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")

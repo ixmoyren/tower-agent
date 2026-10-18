@@ -10,8 +10,8 @@
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
 | 当前阶段   | **Phase 4（脚本仓库）**                        |
-| 下一个任务 | **T4.2**                                       |
-| 代码状态   | **T1–T3、T4.1 已完成**：统一能力层与脚本存储基础已落地 |
+| 下一个任务 | **T4.3**                                       |
+| 代码状态   | **T1–T3、T4.1–T4.2 已完成**：统一能力层与 storage 真源已落地 |
 
 ---
 
@@ -186,7 +186,7 @@
     4. 测试：往返、项目隔离、按 updated_at 排序、删除。
 - **验收**：`cargo test -p tower-agent-storage -p tower-agent-turso`。
 
-### [ ] T4.2 codemode 用 `ScriptStore` 作为真源
+### [x] T4.2 codemode 用 `ScriptStore` 作为真源
 
 - **依赖**：T4.1、T3.3
 - **做什么**：
@@ -277,3 +277,4 @@
 | 2026-10-18 | T3.3 | 六个作者工具统一为 `codemode_*`；保留名、描述、测试、README 与设计文档同步；源码/用户文档旧 tool 名清零 |
 | 2026-10-18 | T3.4 | 持久脚本迁至 `codemode/scripts`、命名会话迁至 `codemode/sessions`；旧路径引用清零，ModStore 与 CLI 列出/清理测试通过 |
 | 2026-10-18 | T4.1 | storage 新增 `ScriptRecord` / `ScriptStore`；Turso `script` 表按 `(scope,name)` upsert，走写队列；往返、项目隔离、更新时间排序和删除测试通过 |
+| 2026-10-18 | T4.2 | 作者工具改为直接读写 `ScriptStore`，默认项目作用域；语言、权限、启用状态与依赖随记录持久化，启动按 project 覆盖 user 加载；CLI 真实 Turso 重启运行与作用域覆盖测试通过 |
