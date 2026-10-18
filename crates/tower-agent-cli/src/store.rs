@@ -38,6 +38,8 @@ pub const DEFAULT_PROVIDER: &str = "defaultProvider";
 pub const DEFAULT_MODEL: &str = "defaultModel";
 /// pi `settings.json` 的 `defaultThinkingLevel`。
 pub const DEFAULT_THINKING_LEVEL: &str = "defaultThinkingLevel";
+/// codemode 的进程级默认引擎（`monty` / `js`）。
+pub const CODEMODE_ENGINE: &str = "codemode.engine";
 
 /// 压缩开关（pi `settings.json` 的 `compaction.enabled`）。
 pub const COMPACTION_ENABLED: &str = "compaction.enabled";
@@ -58,6 +60,8 @@ pub struct StoreSnapshot {
     pub default_model: Option<String>,
     /// `settings.json` 的 `defaultThinkingLevel`。
     pub default_thinking_level: Option<String>,
+    /// 有效配置里的默认 codemode 引擎。
+    pub codemode_engine: Option<String>,
     /// `auth.json` 里的全部 provider 凭据。
     pub credentials: Vec<ProviderCredential>,
 }
@@ -122,6 +126,7 @@ impl CliStore {
             default_provider: self.effective_string(project, DEFAULT_PROVIDER).await,
             default_model: self.effective_string(project, DEFAULT_MODEL).await,
             default_thinking_level: self.effective_string(project, DEFAULT_THINKING_LEVEL).await,
+            codemode_engine: self.effective_string(project, CODEMODE_ENGINE).await,
             credentials: self.storage.list_providers().await.unwrap_or_default(),
         }
     }
@@ -486,6 +491,10 @@ mod tests {
             .set_config(&user, DEFAULT_THINKING_LEVEL, serde_json::json!("high"))
             .await
             .expect("set thinking");
+        store
+            .set_config(&user, CODEMODE_ENGINE, serde_json::json!("monty"))
+            .await
+            .expect("set codemode engine");
         store.queue_put_credential(ProviderCredential {
             provider: "deepseek".to_owned(),
             api_key: "sk-secret".to_owned(),
@@ -501,6 +510,7 @@ mod tests {
         assert_eq!(snapshot.default_provider.as_deref(), Some("deepseek"));
         assert_eq!(snapshot.default_model.as_deref(), Some("deepseek-chat"));
         assert_eq!(snapshot.default_thinking_level.as_deref(), Some("high"));
+        assert_eq!(snapshot.codemode_engine.as_deref(), Some("monty"));
         assert_eq!(
             snapshot.credential("deepseek").map(|c| c.api_key.as_str()),
             Some("sk-secret")
@@ -516,6 +526,10 @@ mod tests {
             )
             .await
             .expect("set project model");
+        store
+            .set_config(&project, CODEMODE_ENGINE, serde_json::json!("js"))
+            .await
+            .expect("set project codemode engine");
         store.flush().await.expect("flush");
 
         assert_eq!(
@@ -532,6 +546,14 @@ mod tests {
                 .as_deref(),
             Some("deepseek-reasoner")
         );
+        assert_eq!(
+            store
+                .snapshot(Some("/work/demo"))
+                .await
+                .codemode_engine
+                .as_deref(),
+            Some("js")
+        );
         // 另一个项目看不到这份覆盖，退回用户级。
         assert_eq!(
             store
@@ -540,6 +562,14 @@ mod tests {
                 .default_model
                 .as_deref(),
             Some("deepseek-chat")
+        );
+        assert_eq!(
+            store
+                .snapshot(Some("/work/other"))
+                .await
+                .codemode_engine
+                .as_deref(),
+            Some("monty")
         );
     }
 

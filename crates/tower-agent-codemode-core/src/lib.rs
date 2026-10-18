@@ -10,8 +10,10 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod engine;
 mod prompt;
 
+pub use engine::{EngineSelection, ScriptMetadata};
 pub use prompt::{PromptBuilder, PromptDocument, PromptLimits, PromptMount, PromptMountMode};
 
 /// A boxed capability operation.

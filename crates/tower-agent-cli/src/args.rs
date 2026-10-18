@@ -7,6 +7,7 @@
 use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser, builder::NonEmptyStringValueParser};
+use tower_agent_codemode_core::ScriptLanguage;
 
 /// 配置作用域（对应 storage 的 `ConfigScope`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -15,6 +16,24 @@ pub enum ConfigScopeArg {
     User,
     /// 项目级：当前工作目录（`-C/--cwd`）。
     Project,
+}
+
+/// 进程级默认 codemode 引擎。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum CodemodeEngineArg {
+    /// monty Python-subset engine.
+    Monty,
+    /// rquickjs JavaScript engine.
+    Js,
+}
+
+impl From<CodemodeEngineArg> for ScriptLanguage {
+    fn from(value: CodemodeEngineArg) -> Self {
+        match value {
+            CodemodeEngineArg::Monty => Self::Monty,
+            CodemodeEngineArg::Js => Self::JavaScript,
+        }
+    }
 }
 
 /// 解析后的命令行参数。
@@ -62,6 +81,15 @@ pub struct CliArgs {
         help = "Enable the codemode tool (JavaScript + coreutils inside a wasm sandbox)."
     )]
     pub codemode: bool,
+
+    /// codemode 的进程级默认引擎；脚本元数据中的 language 仍可覆盖它。
+    #[arg(
+        long = "codemode-engine",
+        value_name = "monty|js",
+        value_enum,
+        help = "Default codemode engine: monty or js (script metadata can override it)."
+    )]
+    pub codemode_engine: Option<CodemodeEngineArg>,
 
     /// codemode 的命名会话：目录固定在 `<config>/tower-agent/codemode/<name>`，跨进程复用。
     #[arg(
@@ -438,6 +466,58 @@ mod tests {
 
         // 作用域只认 user / project。
         assert!(parse(["--config-scope", "nope"]).is_err());
+    }
+
+    #[test]
+    fn codemode_engine_cli_flag_overrides_config() {
+        use tower_agent_codemode_core::EngineSelection;
+
+        let args = parse_ok(&["--codemode-engine", "monty"]);
+        let selection = EngineSelection {
+            cli: args.codemode_engine.map(Into::into),
+            config: Some(ScriptLanguage::JavaScript),
+        };
+        assert_eq!(selection.process_default(), ScriptLanguage::Monty);
+        assert_eq!(
+            ScriptLanguage::from(
+                parse_ok(&["--codemode-engine", "js"])
+                    .codemode_engine
+                    .expect("engine"),
+            ),
+            ScriptLanguage::JavaScript
+        );
+        assert!(parse(["--codemode-engine", "python"]).is_err());
+    }
+
+    #[test]
+    fn codemode_config_engine_is_used_without_cli_override() {
+        use tower_agent_codemode_core::EngineSelection;
+
+        let selection = EngineSelection {
+            cli: None,
+            config: ScriptLanguage::parse("monty"),
+        };
+        assert_eq!(selection.process_default(), ScriptLanguage::Monty);
+        assert_eq!(
+            EngineSelection::default().process_default(),
+            ScriptLanguage::JavaScript
+        );
+    }
+
+    #[test]
+    fn codemode_script_metadata_overrides_process_default() {
+        use tower_agent_codemode_core::{EngineSelection, ScriptMetadata};
+
+        let selection = EngineSelection {
+            cli: Some(ScriptLanguage::Monty),
+            config: Some(ScriptLanguage::JavaScript),
+        };
+        assert_eq!(
+            selection.resolve(Some(ScriptMetadata::with_language(
+                ScriptLanguage::JavaScript
+            ))),
+            ScriptLanguage::JavaScript
+        );
     }
 
     #[test]

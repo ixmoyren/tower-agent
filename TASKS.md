@@ -9,9 +9,9 @@
 | 项目       | 值                                             |
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
-| 当前阶段   | **Phase 2（统一提示词 + 引擎选择）**           |
-| 下一个任务 | **T2.2**                                       |
-| 代码状态   | **T1.1–T1.4、T2.1 已完成**：统一能力层、能力矩阵与提示词生成已落地 |
+| 当前阶段   | **Phase 3（合并 feature / CLI / 词汇）**       |
+| 下一个任务 | **T3.1**                                       |
+| 代码状态   | **T1–T2 已完成**：统一能力层、提示词与引擎优先级已落地 |
 
 ---
 
@@ -128,7 +128,7 @@
     3. 快照测试：同一能力集下 Python / JS 两份提示词；关掉某能力后提示词同步变化。
 - **验收**：`cargo test -p tower-agent-codemode-core`；快照可审阅。
 
-### [ ] T2.2 引擎选择（全局默认 + 脚本覆盖）
+### [x] T2.2 引擎选择（全局默认 + 脚本覆盖）
 
 - **依赖**：T2.1
 - **做什么**：
@@ -271,3 +271,4 @@
 | 2026-10-18 | T1.3 | JS WIT/门面/宿主接入 `tool_call`、`tool_list`、`tool_register`、`tool_unregister`；宿主工具注入、权限门禁、注册工具后续调用测试通过；组件已重新生成 |
 | 2026-10-18 | T1.4 | 新增 `capability_parity` 双引擎矩阵：exec / fs / tool_call / tool_register / state / log / ui 全部通过；补齐 JS state/log/ui 与 fs 权限 |
 | 2026-10-18 | T2.1 | `codemode-core` 新增 `PromptBuilder`：由能力集、挂载、限额与语言生成 description / instructions；Python / JS / 能力关闭快照通过 |
+| 2026-10-18 | T2.2 | 新增 `--codemode-engine monty\|js`、`codemode.engine` 有效配置与 `ScriptMetadata.language`；脚本 > CLI > 配置 > 默认 JS，CLI 50 测试通过 |

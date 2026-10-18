@@ -35,6 +35,7 @@ use std::{
     process::ExitCode,
     sync::Arc,
 };
+use tower_agent_codemode_core::{EngineSelection, ScriptLanguage};
 use tower_agent_storage::ConfigScope;
 
 fn main() -> ExitCode {
@@ -120,6 +121,21 @@ fn main() -> ExitCode {
         Some(store) => runtime.block_on(store.snapshot(Some(&project))),
         None => store::StoreSnapshot::default(),
     };
+    let configured_engine = snapshot
+        .codemode_engine
+        .as_deref()
+        .and_then(ScriptLanguage::parse);
+    if snapshot.codemode_engine.is_some() && configured_engine.is_none() {
+        eprintln!(
+            "忽略未知 codemode.engine 配置：{}（可用：monty / js）",
+            snapshot.codemode_engine.as_deref().unwrap_or_default()
+        );
+    }
+    let codemode_engine = EngineSelection {
+        cli: args.codemode_engine.map(Into::into),
+        config: configured_engine,
+    }
+    .process_default();
 
     // provider 选择：`--provider` 优先；没给就用存储里的 `defaultProvider`（必须确实
     // 有凭据），其次按 pi 的默认顺序挑第一个在环境里有凭据的，再次挑第一个有存储凭据的。
@@ -243,6 +259,7 @@ fn main() -> ExitCode {
         Some(store) => session.with_store(Arc::clone(store)),
         None => session,
     });
+    session.set_codemode_engine(codemode_engine);
     if args.codemode {
         #[cfg(feature = "codemode")]
         if let Err(error) = session.enable_codemode(

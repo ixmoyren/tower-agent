@@ -5241,6 +5241,7 @@ dependencies = [
  "tower",
  "tower-agent",
  "tower-agent-codemode",
+ "tower-agent-codemode-core",
  "tower-agent-core",
  "tower-agent-monty",
  "tower-agent-plugins",

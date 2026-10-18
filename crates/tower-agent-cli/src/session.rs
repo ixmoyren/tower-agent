@@ -18,6 +18,7 @@ use std::{
 
 use tokio::sync::mpsc;
 use tower::ServiceExt as _;
+use tower_agent_codemode_core::{ScriptLanguage, ScriptMetadata};
 use tower_agent_core::UiState;
 #[cfg(feature = "mods")]
 use tower_agent_monty::ModManager;
@@ -51,6 +52,8 @@ pub struct Session {
     mods: Option<Arc<ModManager>>,
     /// 工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
     tool_filter: Mutex<ToolFilter>,
+    /// codemode 的进程级默认引擎（脚本元数据可覆盖）。
+    codemode_engine: Mutex<ScriptLanguage>,
     /// 配置存储：`/login` `/model` `/thinking` 会把结果写回（对齐 pi 的 `auth.json` /
     /// `settings.json`）；未接入存储时为 `None`。
     store: Option<Arc<CliStore>>,
@@ -239,6 +242,7 @@ impl Session {
             #[cfg(feature = "mods")]
             mods,
             tool_filter: Mutex::new(ToolFilter::default()),
+            codemode_engine: Mutex::new(ScriptLanguage::JavaScript),
             store: None,
             transcript: None,
             compactor,
@@ -312,6 +316,31 @@ impl Session {
     /// 替换思考级别（`--thinking` 与 `/thinking`）。
     pub fn set_thinking_level(&self, level: ModelThinkingLevel) {
         self.control.set_thinking_level(level);
+    }
+
+    /// 设置 codemode 的进程级默认引擎。
+    pub fn set_codemode_engine(&self, language: ScriptLanguage) {
+        *self
+            .codemode_engine
+            .lock()
+            .expect("codemode engine poisoned") = language;
+    }
+
+    /// 当前 codemode 的进程级默认引擎。
+    #[must_use]
+    pub fn codemode_engine(&self) -> ScriptLanguage {
+        *self
+            .codemode_engine
+            .lock()
+            .expect("codemode engine poisoned")
+    }
+
+    /// 解析某个脚本实际使用的引擎；脚本声明覆盖进程级默认值。
+    #[must_use]
+    pub fn resolve_codemode_engine(&self, metadata: Option<ScriptMetadata>) -> ScriptLanguage {
+        metadata
+            .and_then(|metadata| metadata.language)
+            .unwrap_or_else(|| self.codemode_engine())
     }
 
     /// 写回一项配置（未接入存储时是空操作）。
@@ -936,6 +965,24 @@ mod tests {
 
     fn session(cwd: &std::path::Path) -> Session {
         Session::with_model(cwd, FauxProvider::new().boxed(), model())
+    }
+
+    #[test]
+    fn codemode_engine_defaults_to_js_and_script_overrides_it() {
+        use super::{ScriptLanguage, ScriptMetadata};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = session(dir.path());
+        assert_eq!(session.codemode_engine(), ScriptLanguage::JavaScript);
+
+        session.set_codemode_engine(ScriptLanguage::Monty);
+        assert_eq!(session.resolve_codemode_engine(None), ScriptLanguage::Monty);
+        assert_eq!(
+            session.resolve_codemode_engine(Some(ScriptMetadata::with_language(
+                ScriptLanguage::JavaScript
+            ))),
+            ScriptLanguage::JavaScript
+        );
     }
 
     /// 第一次调用会卡在闸门上的 provider；之后的调用立刻返回，用来观察 steer 行为。
