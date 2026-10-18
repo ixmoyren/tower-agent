@@ -71,6 +71,8 @@ pub fn tool_description() -> String {
         "- `fs.readFile(path)` / `fs.writeFile(path, text)` / `fs.readdir(path)` / `fs.exists(path)` / `fs.mkdir(path)` / `fs.rm(path)`：`/` 是会话根（越界路径会抛错）。",
         "- `await tool_call(name, args)` 调用宿主工具，返回文本结果；`tool_list()` 返回可用工具元数据。",
         "- `tool_register(name, handler, description, parameters[, outputSchema])` 注册一个脚本函数作为新工具；`tool_unregister(name)` 只注销脚本自己注册的工具。",
+        "- `state_get(key)` / `state_set(key, value)` 读写脚本私有状态；`log(level, message)` 写日志。",
+        "- `ui_status(id, text, color, priority)` / `ui_panel(id, title, lines)` / `ui_clear(id?)` / `ui_tool_render(tool, lines)` 贡献前端无关的 UI。",
         "- 命令有**硬超时**（默认 10 s，`exec(..., { timeoutMs })` 可覆盖；脚本整体默认 30 s）：超时会被取消，不会挂住。",
         "- `console.log(...)` 的输出会作为 stdout 带回；`return <值>` 会以 JSON 带回。",
         "",

@@ -10,8 +10,8 @@
 |------------|------------------------------------------------|
 | 创建       | 2026-10-17                                     |
 | 当前阶段   | **Phase 1（统一能力层）**                      |
-| 下一个任务 | **T1.4**                                       |
-| 代码状态   | **T1.1–T1.3 已完成**：共享能力层、monty exec、JS 工具能力已落地 |
+| 下一个任务 | **T2.1**                                       |
+| 代码状态   | **T1.1–T1.4 已完成**：统一能力层与双引擎能力矩阵已落地 |
 
 ---
 
@@ -109,7 +109,7 @@
     5. 重新生成内嵌组件（`wasm/rquickjs-sandbox/generate.sh`）。
 - **验收**：JS 脚本能 `tool_call("read", …)`；`tool_register` 后工具在下一轮出现；权限拒绝有测试。
 
-### [ ] T1.4 能力一致性测试
+### [x] T1.4 能力一致性测试
 
 - **依赖**：T1.2、T1.3
 - **做什么**：同一份"能力矩阵"测试表，两个引擎各跑一遍（exec / fs / tool_call / tool_register / state / log / ui）；把差异（语言语法）隔离在测试脚本里。
@@ -269,3 +269,4 @@
 | 2026-10-18 | T1.1 | 新增引擎无关的 `tower-agent-codemode-core`：语言/权限/对象安全能力面/结构化错误；6 个单测通过；全 workspace fmt + clippy + test 全绿 |
 | 2026-10-18 | T1.2 | monty 通过注入的 `CapabilitySurface` 接入 coreutils：UTF-8 JSON `exec`、预载包装、`exec` 权限拒绝；monty 22 测试及真实 `cat`/`wc` 端到端通过 |
 | 2026-10-18 | T1.3 | JS WIT/门面/宿主接入 `tool_call`、`tool_list`、`tool_register`、`tool_unregister`；宿主工具注入、权限门禁、注册工具后续调用测试通过；组件已重新生成 |
+| 2026-10-18 | T1.4 | 新增 `capability_parity` 双引擎矩阵：exec / fs / tool_call / tool_register / state / log / ui 全部通过；补齐 JS state/log/ui 与 fs 权限 |

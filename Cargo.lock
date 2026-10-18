@@ -5210,10 +5210,12 @@ name = "tower-agent"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "serde_json",
  "tempfile",
  "tokio",
  "tower",
  "tower-agent-codemode",
+ "tower-agent-codemode-core",
  "tower-agent-core",
  "tower-agent-monty",
  "tower-agent-plugin-sdk",

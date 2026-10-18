@@ -43,7 +43,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 | `tower-agent-plugins`    | 插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                         | 面向"插件系统"，不是"扩展点"               |
 | `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / `ToolRegistration` / 动态入口 | 偏**打包与 ABI**（manifest、stabby）       |
 | `tower-agent-runtime`    | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`              | 有钩子，但很薄、且不统一                   |
-| `tower-agent-monty`      | mods 的宿主能力（`tool_register` / `ui_*` / `state_*` …）                                  | 这些其实就是扩展点的雏形，但只存在于 monty |
+| `tower-agent-monty` / `tower-agent-codemode` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
 
 结论（`codemode.md` Q7 已定）： **扩展点作者 API 直接加在 `tower-agent-plugin-sdk` 上**，按模块分层；`tower-agent-plugins` 仍是背后的注册表与生命周期机制。
 

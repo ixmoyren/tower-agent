@@ -38,6 +38,8 @@ tower-agent-turso = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures-util.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tower.workspace = true
+tower-agent-codemode-core.workspace = true

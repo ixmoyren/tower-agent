@@ -17,7 +17,7 @@ mod tool;
 
 use std::{
     borrow::Cow,
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
     task::{Context, Poll},
@@ -27,7 +27,10 @@ use futures_util::{StreamExt as _, future::BoxFuture};
 use serde_json::Value;
 use tower::Service;
 use tower_agent_codemode_core::{Capability, CapabilityError, ScriptPermissions};
-use tower_agent_core::{AgentError, AgentTool, AgentToolResult, ToolCallRequest, ToolResultStream};
+use tower_agent_core::{
+    AgentError, AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolCallRequest,
+    ToolRenderer, ToolResultStream, UiState,
+};
 use tower_agent_plugins::HostApi;
 use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
 use tower_agent_wasmtime::{HostState, SandboxEngine, SandboxError, SandboxOptions};
@@ -384,6 +387,8 @@ struct HostBackend {
     permissions: ScriptPermissions,
     current_source: Mutex<Option<String>>,
     script_tools: Mutex<BTreeSet<String>>,
+    state: Mutex<BTreeMap<String, Value>>,
+    ui: UiState,
     this: Mutex<Weak<CodemodeHost>>,
 }
 
@@ -413,6 +418,16 @@ impl CodemodeHost {
         host: HostApi,
         permissions: ScriptPermissions,
     ) -> Result<Arc<Self>, CodemodeError> {
+        Self::new_with_host_and_ui(options, host, permissions, UiState::new())
+    }
+
+    /// 构造 codemode 宿主，并注入共享 UI 状态。
+    pub fn new_with_host_and_ui(
+        options: CodemodeOptions,
+        host: HostApi,
+        permissions: ScriptPermissions,
+        ui: UiState,
+    ) -> Result<Arc<Self>, CodemodeError> {
         let exec = Arc::new(ExecService::new(
             &options.coreutils_wasm,
             &options.session_root,
@@ -426,6 +441,8 @@ impl CodemodeHost {
             permissions,
             current_source: Mutex::new(None),
             script_tools: Mutex::new(BTreeSet::new()),
+            state: Mutex::new(BTreeMap::new()),
+            ui,
             this: Mutex::new(Weak::new()),
         });
 
@@ -515,6 +532,118 @@ impl CodemodeHost {
             )
             .map_err(|e| CodemodeError::Link(e.to_string()))?;
 
+        let backend_for_state_get = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "state-get",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (key,): (String,)|
+                      -> HostFuture<'_, Result<Option<String>, String>> {
+                    let backend = Arc::clone(&backend_for_state_get);
+                    Box::new(async move { Ok((backend.state_get(&key),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_state_set = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "state-set",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (key, value_json): (String, String)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_state_set);
+                    Box::new(async move { Ok((backend.state_set(&key, &value_json),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_log = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "log",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (level, message): (String, String)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_log);
+                    Box::new(async move { Ok((backend.log(&level, &message),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_ui_status = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "ui-status",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (segment_json,): (String,)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_ui_status);
+                    Box::new(async move { Ok((backend.ui_status(&segment_json),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_ui_panel = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "ui-panel",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (panel_json,): (String,)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_ui_panel);
+                    Box::new(async move { Ok((backend.ui_panel(&panel_json),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_ui_clear = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "ui-clear",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (id,): (Option<String>,)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_ui_clear);
+                    Box::new(async move { Ok((backend.ui_clear(id.as_deref()),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
+        let backend_for_ui_tool_render = Arc::clone(&backend);
+        engine
+            .linker_mut()
+            .instance("tower-agent:codemode/host@0.1.0")
+            .map_err(|e| CodemodeError::Link(e.to_string()))?
+            .func_wrap_async(
+                "ui-tool-render",
+                move |_store: wasmtime::StoreContextMut<'_, HostState>,
+                      (tool, lines_json): (String, String)|
+                      -> HostFuture<'_, Result<bool, String>> {
+                    let backend = Arc::clone(&backend_for_ui_tool_render);
+                    Box::new(async move { Ok((backend.ui_tool_render(&tool, &lines_json),)) })
+                },
+            )
+            .map_err(|e| CodemodeError::Link(e.to_string()))?;
+
         let host = Arc::new(Self {
             engine: Arc::new(engine),
             backend: Arc::clone(&backend),
@@ -541,6 +670,12 @@ impl CodemodeHost {
     #[must_use]
     pub fn host_api(&self) -> &HostApi {
         &self.backend.host
+    }
+
+    /// 共享 UI 状态（脚本 UI 贡献写在这里）。
+    #[must_use]
+    pub fn ui_state(&self) -> UiState {
+        self.backend.ui.clone()
     }
 
     /// 跑一段 JS，返回脚本的 `return` 值（JSON）、`console.log` 收集与命令流水。
@@ -570,6 +705,7 @@ impl CodemodeHost {
             let opts = RunOpts {
                 cwd: None,
                 timeout_ms: Some(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
+                fs: self.backend.permissions.fs,
                 utils: COMMANDS.iter().map(|name| (*name).to_owned()).collect(),
             };
             // 三层：超时 → wasm 级失败（trap 之类）→ 脚本自己返回的 `Err(message)`。
@@ -774,6 +910,128 @@ impl HostBackend {
         self.host.remove_tool(name);
         Ok(true)
     }
+
+    fn state_get(&self, key: &str) -> Result<Option<String>, String> {
+        self.permissions
+            .authorize(Capability::State)
+            .map_err(|error| capability_error_text(&error))?;
+        self.state
+            .lock()
+            .expect("codemode state poisoned")
+            .get(key)
+            .map(|value| serde_json::to_string(value).map_err(|error| error.to_string()))
+            .transpose()
+    }
+
+    fn state_set(&self, key: &str, value_json: &str) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::State)
+            .map_err(|error| capability_error_text(&error))?;
+        let value = serde_json::from_str(value_json)
+            .map_err(|error| format!("invalid state value: {error}"))?;
+        self.state
+            .lock()
+            .expect("codemode state poisoned")
+            .insert(key.to_owned(), value);
+        Ok(true)
+    }
+
+    fn log(&self, level: &str, message: &str) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::State)
+            .map_err(|error| capability_error_text(&error))?;
+        eprintln!("[codemode {level}] {message}");
+        Ok(true)
+    }
+
+    fn ui_status(&self, segment_json: &str) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::Ui)
+            .map_err(|error| capability_error_text(&error))?;
+        let value: Value = serde_json::from_str(segment_json)
+            .map_err(|error| format!("invalid UI status: {error}"))?;
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("ui_status requires id")?;
+        let text = value
+            .get("text")
+            .and_then(Value::as_str)
+            .ok_or("ui_status requires text")?;
+        self.ui.set_status(StatusSegment {
+            id: id.to_owned(),
+            text: text.to_owned(),
+            color: value
+                .get("color")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            priority: value
+                .get("priority")
+                .and_then(Value::as_i64)
+                .unwrap_or_default(),
+        });
+        Ok(true)
+    }
+
+    fn ui_panel(&self, panel_json: &str) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::Ui)
+            .map_err(|error| capability_error_text(&error))?;
+        let value: Value = serde_json::from_str(panel_json)
+            .map_err(|error| format!("invalid UI panel: {error}"))?;
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("ui_panel requires id")?;
+        let title = value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let lines = value
+            .get("lines")
+            .map(json_string_lines)
+            .transpose()?
+            .unwrap_or_default();
+        let mut panel = Panel::new(id, title, lines);
+        if let Some(anchor) = value.get("anchor").and_then(Value::as_str) {
+            panel.anchor = PanelAnchor::parse(anchor);
+        }
+        panel.width = value
+            .get("width")
+            .and_then(Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok());
+        panel.height = value
+            .get("height")
+            .and_then(Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok());
+        self.ui.set_panel(panel);
+        Ok(true)
+    }
+
+    fn ui_clear(&self, id: Option<&str>) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::Ui)
+            .map_err(|error| capability_error_text(&error))?;
+        match id {
+            Some(id) => {
+                self.ui.remove_panel(id);
+                self.ui.remove_status(id);
+            }
+            None => self.ui.clear(),
+        }
+        Ok(true)
+    }
+
+    fn ui_tool_render(&self, tool: &str, lines_json: &str) -> Result<bool, String> {
+        self.permissions
+            .authorize(Capability::Ui)
+            .map_err(|error| capability_error_text(&error))?;
+        let value: Value = serde_json::from_str(lines_json)
+            .map_err(|error| format!("invalid UI renderer: {error}"))?;
+        self.ui
+            .set_tool_renderer(tool, ToolRenderer::new(json_string_lines(&value)?));
+        Ok(true)
+    }
 }
 
 #[derive(Clone)]
@@ -841,6 +1099,20 @@ fn is_js_identifier(value: &str) -> bool {
     };
     (first.is_ascii_alphabetic() || matches!(first, '_' | '$'))
         && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$'))
+}
+
+fn json_string_lines(value: &Value) -> Result<Vec<String>, String> {
+    let lines = value
+        .as_array()
+        .ok_or_else(|| "UI lines must be an array".to_owned())?;
+    lines
+        .iter()
+        .map(|line| {
+            line.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "UI lines must be strings".to_owned())
+        })
+        .collect()
 }
 
 fn result_text(result: &AgentToolResult) -> String {

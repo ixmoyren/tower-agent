@@ -18,7 +18,10 @@ use std::{
 use bindings::{
     exports::tower_agent::codemode::sandbox::{CommandLog, Guest, RunOpts, RunResult},
     tower_agent::codemode::host::{
-        ExecOpts, ToolRegistration, exec, tool_call, tool_list, tool_register, tool_unregister,
+        ExecOpts, ToolRegistration, exec, log as host_log, state_get as host_state_get,
+        state_set as host_state_set, tool_call, tool_list, tool_register, tool_unregister,
+        ui_clear as host_ui_clear, ui_panel as host_ui_panel, ui_status as host_ui_status,
+        ui_tool_render as host_ui_tool_render,
     },
 };
 use rquickjs::{Context, Ctx, Function, Promise, Runtime, Value, promise::PromiseState};
@@ -78,6 +81,31 @@ globalThis.tool_register = (name, handler, description = "", parameters = {}, ou
     outputSchema === null || outputSchema === undefined ? null : JSON.stringify(outputSchema),
   ));
 globalThis.tool_unregister = (name) => __call(__toolUnregister(String(name)));
+globalThis.state_get = (key) => {
+  const value = __call(__stateGet(String(key)));
+  return value === null ? null : JSON.parse(value);
+};
+globalThis.state_set = (key, value) => __call(__stateSet(String(key), JSON.stringify(value)));
+globalThis.log = (level, message) => __call(__log(String(level), String(message)));
+globalThis.ui_status = (id, text, color = null, priority = 0) => __call(__uiStatus(JSON.stringify({
+  id: String(id),
+  text: String(text),
+  color: color === null || color === undefined ? null : String(color),
+  priority,
+})));
+globalThis.ui_panel = (id, title, lines = [], anchor = "top_right", width = null, height = null) =>
+  __call(__uiPanel(JSON.stringify({
+    id: String(id),
+    title: String(title),
+    lines,
+    anchor: String(anchor),
+    width,
+    height,
+  })));
+globalThis.ui_clear = (id = null) =>
+  __call(__uiClear(id === null || id === undefined ? null : String(id)));
+globalThis.ui_tool_render = (tool, lines) =>
+  __call(__uiToolRender(String(tool), JSON.stringify(lines)));
 globalThis.fs = {
   readFile: (path) => __call(__readFile(String(path))),
   writeFile: (path, data) => __call(__writeFile(String(path), String(data))),
@@ -141,7 +169,7 @@ impl Guest for Component {
         let utils = serde_json::to_string(&opts.utils).map_err(|e| format!("utils: {e}"))?;
 
         let (value, stdout) = ctx.with(|ctx| -> Result<(Option<String>, String), String> {
-            install(ctx.clone(), cwd)?;
+            install(ctx.clone(), cwd, opts.fs)?;
             ctx.eval::<(), _>(PRELUDE)
                 .map_err(|e| js_error(&ctx, "prelude", e))?;
             // 命令名由宿主提供（两边不各维护一份），在这里生成 `cat()` 与 `Cmd.prototype.cat`。
@@ -192,7 +220,7 @@ impl Guest for Component {
 }
 
 /// 注册原生能力。`__exec` 之外的文件能力直接走 guest 的 `std::fs`（受 preopen 限制）。
-fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
+fn install(ctx: Ctx<'_>, cwd: Option<String>, fs_allowed: bool) -> Result<(), String> {
     let exec_fn = Function::new(
         ctx.clone(),
         move |name: String, args_json: String, stdin: String, timeout_ms: Option<u32>| -> String {
@@ -296,7 +324,72 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .set("__toolUnregister", unregister_tool)
         .map_err(|e| format!("__toolUnregister: {e}"))?;
 
-    let read = Function::new(ctx.clone(), |path: String| -> String {
+    let state_get = Function::new(ctx.clone(), |key: String| -> String {
+        capability_payload(host_state_get(&key))
+    })
+    .map_err(|e| format!("__stateGet: {e}"))?;
+    ctx.globals()
+        .set("__stateGet", state_get)
+        .map_err(|e| format!("__stateGet: {e}"))?;
+
+    let state_set = Function::new(
+        ctx.clone(),
+        |key: String, value_json: String| -> String {
+            capability_payload(host_state_set(&key, &value_json))
+        },
+    )
+    .map_err(|e| format!("__stateSet: {e}"))?;
+    ctx.globals()
+        .set("__stateSet", state_set)
+        .map_err(|e| format!("__stateSet: {e}"))?;
+
+    let log = Function::new(ctx.clone(), |level: String, message: String| -> String {
+        capability_payload(host_log(&level, &message))
+    })
+    .map_err(|e| format!("__log: {e}"))?;
+    ctx.globals()
+        .set("__log", log)
+        .map_err(|e| format!("__log: {e}"))?;
+
+    let ui_status = Function::new(ctx.clone(), |segment_json: String| -> String {
+        capability_payload(host_ui_status(&segment_json))
+    })
+    .map_err(|e| format!("__uiStatus: {e}"))?;
+    ctx.globals()
+        .set("__uiStatus", ui_status)
+        .map_err(|e| format!("__uiStatus: {e}"))?;
+
+    let ui_panel = Function::new(ctx.clone(), |panel_json: String| -> String {
+        capability_payload(host_ui_panel(&panel_json))
+    })
+    .map_err(|e| format!("__uiPanel: {e}"))?;
+    ctx.globals()
+        .set("__uiPanel", ui_panel)
+        .map_err(|e| format!("__uiPanel: {e}"))?;
+
+    let ui_clear = Function::new(ctx.clone(), |id: Option<String>| -> String {
+        capability_payload(host_ui_clear(id.as_deref()))
+    })
+    .map_err(|e| format!("__uiClear: {e}"))?;
+    ctx.globals()
+        .set("__uiClear", ui_clear)
+        .map_err(|e| format!("__uiClear: {e}"))?;
+
+    let ui_tool_render = Function::new(
+        ctx.clone(),
+        |tool: String, lines_json: String| -> String {
+            capability_payload(host_ui_tool_render(&tool, &lines_json))
+        },
+    )
+    .map_err(|e| format!("__uiToolRender: {e}"))?;
+    ctx.globals()
+        .set("__uiToolRender", ui_tool_render)
+        .map_err(|e| format!("__uiToolRender: {e}"))?;
+
+    let read = Function::new(ctx.clone(), move |path: String| -> String {
+        if !fs_allowed {
+            return fs_permission_error();
+        }
         match std::fs::read_to_string(&path) {
             Ok(data) => serde_json::json!({ "ok": true, "data": data }).to_string(),
             Err(e) => {
@@ -309,7 +402,10 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .set("__readFile", read)
         .map_err(|e| format!("__readFile: {e}"))?;
 
-    let write = Function::new(ctx.clone(), |path: String, data: String| -> String {
+    let write = Function::new(ctx.clone(), move |path: String, data: String| -> String {
+        if !fs_allowed {
+            return fs_permission_error();
+        }
         match std::fs::write(&path, data) {
             Ok(()) => serde_json::json!({ "ok": true, "data": null }).to_string(),
             Err(e) => {
@@ -322,7 +418,10 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .set("__writeFile", write)
         .map_err(|e| format!("__writeFile: {e}"))?;
 
-    let readdir = Function::new(ctx.clone(), |path: String| -> String {
+    let readdir = Function::new(ctx.clone(), move |path: String| -> String {
+        if !fs_allowed {
+            return fs_permission_error();
+        }
         let listing = (|| -> std::io::Result<Vec<String>> {
             let mut names = Vec::new();
             for entry in std::fs::read_dir(&path)? {
@@ -342,7 +441,10 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .set("__readdir", readdir)
         .map_err(|e| format!("__readdir: {e}"))?;
 
-    let exists = Function::new(ctx.clone(), |path: String| -> String {
+    let exists = Function::new(ctx.clone(), move |path: String| -> String {
+        if !fs_allowed {
+            return fs_permission_error();
+        }
         serde_json::json!({ "ok": true, "data": std::path::Path::new(&path).exists() }).to_string()
     })
     .map_err(|e| format!("__exists: {e}"))?;
@@ -350,7 +452,10 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .set("__exists", exists)
         .map_err(|e| format!("__exists: {e}"))?;
 
-    let mkdir = Function::new(ctx.clone(), |path: String| -> String {
+    let mkdir = Function::new(ctx.clone(), move |path: String| -> String {
+        if !fs_allowed {
+            return fs_permission_error();
+        }
         match std::fs::create_dir_all(&path) {
             Ok(()) => serde_json::json!({ "ok": true, "data": null }).to_string(),
             Err(e) => {
@@ -363,7 +468,10 @@ fn install(ctx: Ctx<'_>, cwd: Option<String>) -> Result<(), String> {
         .set("__mkdir", mkdir)
         .map_err(|e| format!("__mkdir: {e}"))?;
 
-    let rm = Function::new(ctx.clone(), |path: String| -> String {
+    let rm = Function::new(ctx.clone(), move |path: String| -> String {
+        if !fs_allowed {
+            return fs_permission_error();
+        }
         let outcome = if std::path::Path::new(&path).is_dir() {
             std::fs::remove_dir_all(&path)
         } else {
@@ -389,6 +497,14 @@ fn capability_payload<T: serde::Serialize>(result: Result<T, String>) -> String 
         Ok(data) => serde_json::json!({ "ok": true, "data": data }).to_string(),
         Err(error) => serde_json::json!({ "ok": false, "error": error }).to_string(),
     }
+}
+
+fn fs_permission_error() -> String {
+    serde_json::json!({
+        "ok": false,
+        "error": "{\"kind\":\"unauthorized\",\"capability\":\"fs\"}",
+    })
+    .to_string()
 }
 
 /// 把 JS 异常整理成一句给宿主看的话。
