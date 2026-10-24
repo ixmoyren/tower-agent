@@ -85,7 +85,7 @@
 - 原子换绑实现 **热加载**：试跑新版本 → 成功才替换源码槽位 → 旧版本等待 in-flight 完成后释放；失败保留旧版本并回报错误。
 - 目标场景：codemode Python 脚本（用户/LLM 可写、可热更的轻量逻辑）。
 
-> 实现状态（M3 已落地，codemode Python 作者闭环见下）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload`。 **执行在 wasm 沙箱里**：`wasm/monty-sandbox` 把 monty 解释器（及其 ruff 解析器依赖）编译成 `wasm32-wasip2` 组件，经 `wasm-opt -Oz --strip-debug` 优化后内嵌进 `tower-agent-monty`（`assets/monty-sandbox.wasm`，约 6.5 MB），宿主用 wasmtime 的 **组件绑定**驱动，开启 JIT + JIT 缓存（缓存键含 wasmtime 版本，升级后自动失效）。没有外部 `monty`
+> 实现状态（M3 已落地，codemode Python 作者闭环见下）：独立 crate `tower-agent-monty` 提供 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload`。 **执行在 wasm 沙箱里**：`wasm/monty-sandbox` 把 monty 解释器（及其 ruff 解析器依赖）编译成 `wasm32-wasip2` 组件，由 release profile 优化后内嵌进 `tower-agent-monty`（`assets/monty-sandbox.wasm`，约 5.5 MB），宿主用 wasmtime 的 **组件绑定**驱动，开启 JIT + JIT 缓存（缓存键含 wasmtime 版本，升级后自动失效）。没有外部 `monty`
 > CLI、没有子进程、不需要 `TPA_MONTY_BIN`；脚本代码的越界/栈溢出/内存超限被 wasmtime 转成 trap 错误，不会带走宿主进程。WIT 接口是宿主驱动的 REPL 状态机（`start` + `resume-*`），参数/返回值都是 JSON；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主，热加载用 `reload_checked` 试跑成功后原子替换源码。重新生成组件：`./wasm/monty-sandbox/generate.sh`。
 >
 > **codemode Python 脚本**：`ModManager` 管理一组 monty 脚本，对 LLM 暴露 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` 作者工具。脚本可：

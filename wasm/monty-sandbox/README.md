@@ -31,13 +31,7 @@
 产物写到 `crates/tower-agent-monty/assets/monty-sandbox.wasm`。管线：
 
 1. `cargo component bindings` 生成 WIT 绑定；
-2. `cargo build --release --target wasm32-wasip1` 得到核心模块；
-3. `wasm-opt -Oz --strip-debug` 优化（Binaryen 目前不支持 component，所以必须在
-   组件化之前对核心模块做优化）；
-4. `wasm-tools component embed` + `component new --adapt ...` 组件化。
+2. `cargo build --release --target wasm32-wasip2` 由 rustc 直出 component。
 
-依赖：`cargo-component`、`wasm-opt`（binaryen）、`wasm-tools`、`wasm32-wasip1` target。
-
-`adapters/wasi_snapshot_preview1.reactor.wasm` 是 WASI preview1 → preview2 的官方
-reactor adapter（Apache-2.0 WITH LLVM-exception），由各组件工具链（cargo-component、
-wasm-tools、spin 等）内置分发；这里 vendored 一份以保证离线、可复现的构建。
+依赖：`cargo-component`、`wasm32-wasip2` target。组件体积由 release profile 的
+`opt-level = "z"`、LTO 和 strip 控制；`wasm-opt` 不支持 component，因此不参与构建。

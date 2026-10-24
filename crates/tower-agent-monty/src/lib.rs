@@ -2,8 +2,8 @@
 //! codemode Python 宿主（`docs/plugins.md` §4.3）。
 //!
 //! AI/用户生成的 monty 代码**必须跑在沙箱里**：`tower-agent-monty` 内嵌一个把 monty
-//! 解释器编译成 wasm 的组件（`wasm/monty-sandbox`，经 `wasm-opt -Oz --strip-debug`
-//! 优化），用 [wasmtime](https://wasmtime.dev) 在**组件沙箱**里执行。没有外部
+//! 解释器编译成 wasm 的组件（`wasm/monty-sandbox`，由 `wasm32-wasip2` 直出并经
+//! release profile 优化），用 [wasmtime](https://wasmtime.dev) 在**组件沙箱**里执行。没有外部
 //! `monty` CLI、没有子进程；mods 代码的越界/栈溢出/内存超限会被 wasmtime 转成 trap
 //! 错误，不会带走宿主进程。wasmtime 开启 JIT + JIT 缓存并自行做版本校验。
 //!

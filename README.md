@@ -177,7 +177,7 @@ cargo check --offline --all-targets      # 全量类型检查
 cargo test  --offline --all --workspace  # 全量测试
 cargo clippy --all-features --all-targets
 
-# 重新生成内嵌的 monty wasm 组件（需要 cargo-component / wasm-opt / wasm-tools）
+# 重新生成内嵌的 monty wasm 组件（需要 cargo-component / wasm32-wasip2）
 ./wasm/monty-sandbox/generate.sh
 ```
 
@@ -185,7 +185,7 @@ cargo clippy --all-features --all-targets
 
 内嵌进二进制的 wasm 组件 **不进 git**（见 `.gitignore` 的 `# wasm` 段），所以 **全新克隆后第一次
 `cargo build` / `cargo test` 之前，必须先把产物编出来**（否则 `include_bytes!` 报
-`couldn't read …/assets/*.wasm`）。三个产物、两条链路：
+`couldn't read …/assets/*.wasm`）。三个产物、三条生成脚本：
 
 | 产物                                                 | 谁内嵌                 | 怎么编                                               |
 |------------------------------------------------------|------------------------|------------------------------------------------------|
@@ -197,14 +197,12 @@ cargo clippy --all-features --all-targets
 
 ```sh
 rustup target add wasm32-wasip2          # 三个产物都要
-rustup target add wasm32-wasip1          # monty-sandbox 走 p1 + wasm-opt + 组件化
 cargo install cargo-component --locked   # monty-sandbox 与 rquickjs-sandbox
-cargo install wasm-tools --locked        # monty-sandbox（embed/new）
-# wasm-opt（binaryen）                    # monty-sandbox 的体积优化
 # WASI_SDK（wasi-sdk 24+ 的根目录）       # rquickjs-sandbox：rquickjs 要编 quickjs 的 C 源码
 ```
 
-- **coreutils-wasm** 最简单：只要 `wasm32-wasip2`，rustc 直出组件（不需要 wasi-sdk / wasm-opt / wasm-tools）。
+- **monty-sandbox** 与 **coreutils-wasm** 都使用 `wasm32-wasip2`，由 rustc 直出组件；
+  monty-sandbox 额外需要 `cargo-component` 生成 WIT 绑定，并依靠 release profile 压缩体积。
 - **rquickjs-sandbox** 需要 `WASI_SDK`（本机可在 `~/.cache/wasi-sdk-*`）；crates.io 上的 `rquickjs-sys`
   自带 quickjs 的 C 源码，所以 **不需要子模块或 vendor**。
 - 首次构建某条链路要从 crates.io 拉依赖；之后各 workspace 里的 `Cargo.lock` 已固定版本，可加 `--offline`。
