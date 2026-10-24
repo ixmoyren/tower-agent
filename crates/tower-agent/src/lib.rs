@@ -15,8 +15,8 @@
 
 pub use tower_agent_core as core;
 pub use tower_agent_plugin as plugin;
+pub use tower_agent_plugin_providers as providers;
 pub use tower_agent_provider as provider;
-pub use tower_agent_provider_builtin as provider_builtin;
 pub use tower_agent_runtime as runtime;
 pub use tower_agent_tools as tools;
 

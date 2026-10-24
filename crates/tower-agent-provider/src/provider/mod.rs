@@ -1,6 +1,6 @@
 //! Provider protocol layer: define the request/service boundary and reusable
 //! transport middleware. Concrete vendor implementations live in
-//! `tower-agent-provider-builtin`.
+//! `tower-agent-plugin-providers`.
 //!
 //! 分层（design.md 4.3）：`Models 路由 → timeout → retry → auth(header 注入) → provider`。
 //! provider 只依赖 [`crate::http::HttpTransport`]，所以整条链路在测试里可以用脚本化

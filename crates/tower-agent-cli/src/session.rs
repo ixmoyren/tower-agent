@@ -8,7 +8,7 @@
 //! - 事件通过 [`Session::subscribe`] 拿到的 `tower_agent_runtime::Subscription` 流出，
 //!   既可以交给 [`tower_agent_tui::run_agent_tui`] 渲染，也可以用 [`run_print`] 打成纯文本（便于脚本与测试）；
 //! - provider 由调用方注入（[`Session::new`] 的 `stream` 参数）；测试用确定性的离线
-//!   provider [`tower_agent_provider_builtin::provider::faux::FauxProvider`]，二进制则接真实 provider。
+//!   provider [`tower_agent_plugin_providers::provider::faux::FauxProvider`]，二进制则接真实 provider。
 
 use std::{
     collections::BTreeMap,
@@ -1307,11 +1307,11 @@ mod tests {
     use futures_util::{future::BoxFuture, stream};
     use tokio::sync::Semaphore;
     use tower::Service;
+    use tower_agent_plugin_providers::provider::faux::{FauxProvider, model};
     use tower_agent_provider::{
         AssistantEventStream, AssistantMessage, AssistantMessageEvent, BoxStreamService,
         ContentBlock, DoneReason, PiError, StopReason, StreamRequest, TextContent, Usage,
     };
-    use tower_agent_provider_builtin::provider::faux::{FauxProvider, model};
     use tower_agent_ui::CommandHost as _;
 
     use super::{
@@ -1957,7 +1957,7 @@ on("tool_call", "block");
         let mut registry = crate::provider::builtin_provider_registry(dir.path());
         registry
             .register(Arc::new(
-                tower_agent::provider_builtin::OpenAiCompatibleProviderPlugin::new(
+                tower_agent::providers::OpenAiCompatibleProviderPlugin::new(
                     "local",
                     "Local",
                     "local-model",

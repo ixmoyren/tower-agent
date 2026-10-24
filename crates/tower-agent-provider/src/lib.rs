@@ -1,6 +1,6 @@
 //! Provider protocol and runtime contracts.
 //!
-//! Concrete vendor implementations live in `tower-agent-provider-builtin`.
+//! Concrete vendor implementations live in `tower-agent-plugin-providers`.
 //!
 //! 关键契约：
 //! - 一次 provider 流式调用 = 一次 [`tower::Service::call`]。

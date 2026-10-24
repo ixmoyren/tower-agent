@@ -7,11 +7,11 @@ use serde_json::json;
 use support::{
     ScriptedResponse, ScriptedTransport, collect, kinds, request, system, test_model, user,
 };
+use tower_agent_plugin_providers::{AnthropicProvider, provider::anthropic::API};
 use tower_agent_provider::{
     AssistantMessageEvent, ContentBlock, PiError, StopReason, StreamRequest, ThinkingLevel, Tool,
     ToolResultMessage,
 };
-use tower_agent_provider_builtin::{AnthropicProvider, provider::anthropic::API};
 
 /// 一段完整的 Anthropic 文本流（含 message_start / text / message_delta / message_stop）。
 fn text_sse() -> String {

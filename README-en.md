@@ -70,7 +70,7 @@ dependencies are declared once through workspace dependencies.
 | `tower-agent-core`       | **Contracts**: `AgentRequest`/`AgentResponse`/`AgentEventStream`, messages & events, tool boundary, layer extension points, errors |
 | `tower-agent-runtime`    | **Runtime**: the `Agent` loop, queues, event bus; stateless / pooled `Service` adapters                                            |
 | `tower-agent-provider`   | **Provider protocol**: messages/models/request schemas, stream services, `Models`, HTTP/SSE, plugin contracts                      |
-| `tower-agent-provider-builtin` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, and sidecars, registered through the SDK  |
+| `tower-agent-plugin-providers` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, and sidecars, registered through the SDK  |
 | `tower-agent-tools`      | **Built-in tools**: read / shell / edit / write / grep / find / ls, each as an independent static plugin                          |
 | `tower-agent-plugin`    | **General plugin host**: registry, resolution, lifecycle, HostApi, permissions, and extension slots; Provider-agnostic              |
 | `tower-agent-plugin-sdk` | **Plugin capability SDK**: static / dynamic ABI, host capabilities, Provider registration and wire, dynamic Provider adaptation     |

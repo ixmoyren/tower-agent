@@ -1,5 +1,5 @@
 [package]
-name = "tower-agent-provider-builtin"
+name = "tower-agent-plugin-providers"
 description = "Concrete provider plugins: built-in HTTP integrations, OpenAI-compatible config, and JSONL sidecars."
 version.workspace = true
 edition.workspace = true

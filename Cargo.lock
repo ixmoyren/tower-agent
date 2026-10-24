@@ -5242,11 +5242,11 @@ dependencies = [
  "tower-agent-core",
  "tower-agent-monty",
  "tower-agent-plugin",
+ "tower-agent-plugin-providers",
  "tower-agent-plugin-sdk",
  "tower-agent-plugin-turso",
  "tower-agent-protocol",
  "tower-agent-provider",
- "tower-agent-provider-builtin",
  "tower-agent-runtime",
  "tower-agent-tools",
  "tower-agent-ui",
@@ -5273,10 +5273,10 @@ dependencies = [
  "tower-agent-core",
  "tower-agent-monty",
  "tower-agent-plugin",
+ "tower-agent-plugin-providers",
  "tower-agent-plugin-sdk",
  "tower-agent-plugin-turso",
  "tower-agent-provider",
- "tower-agent-provider-builtin",
  "tower-agent-runtime",
  "tower-agent-tui",
  "tower-agent-ui",
@@ -5377,6 +5377,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tower-agent-plugin-providers"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "semver",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tower-agent-plugin",
+ "tower-agent-plugin-sdk",
+ "tower-agent-provider",
+]
+
+[[package]]
 name = "tower-agent-plugin-sdk"
 version = "0.1.0"
 dependencies = [
@@ -5460,23 +5477,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower",
-]
-
-[[package]]
-name = "tower-agent-provider-builtin"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures-util",
- "semver",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tower",
- "tower-agent-plugin",
- "tower-agent-plugin-sdk",
- "tower-agent-provider",
 ]
 
 [[package]]

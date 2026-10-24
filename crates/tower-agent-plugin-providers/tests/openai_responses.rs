@@ -7,10 +7,10 @@ use serde_json::json;
 use support::{
     ScriptedResponse, ScriptedTransport, collect, kinds, request, system, test_model, user,
 };
+use tower_agent_plugin_providers::OpenAiResponsesProvider;
 use tower_agent_provider::{
     AssistantMessageEvent, ContentBlock, PiError, StopReason, Tool, ToolResultMessage,
 };
-use tower_agent_provider_builtin::OpenAiResponsesProvider;
 
 fn responses_model() -> tower_agent_provider::Model {
     tower_agent_provider::Model {

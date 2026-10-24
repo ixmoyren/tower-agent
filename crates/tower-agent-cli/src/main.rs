@@ -11,7 +11,7 @@
 //!   （TUI 或纯文本）拼起来。
 //! - [`args`]：命令行参数解析（`clap` derive，帮助/版本/错误由 clap 生成）；[`provider`] 把
 //!   `--provider` / `--model` 映射到 `ai` crate 的真实 provider 栈
-//!   （anthropic / openai / deepseek / google）。测试用的离线 provider 在 `tower_agent_provider_builtin::provider::faux`
+//!   （anthropic / openai / deepseek / google）。测试用的离线 provider 在 `tower_agent_plugin_providers::provider::faux`
 //!   （`test-util` feature）里，不进这个二进制。
 //!
 //! 六个内置工具（`read` / `edit` / `write` / `grep` / `find` / `ls`）在独立的

@@ -6,14 +6,14 @@ Provider 插件把宿主配置转换成 LLM 流式 Service 和模型目录。Age
 依赖边界：
 
 - `tower-agent-provider`：消息、模型、请求/事件 schema、Stream Service、Models、HTTP/SSE、ProviderPlugin 契约。
-- `tower-agent-provider-builtin`：Anthropic/OpenAI/Google 等具体协议实现、faux 测试实现，以及 OpenAI-compatible / Sidecar 等具体 Provider 插件。
+- `tower-agent-plugin-providers`：Anthropic/OpenAI/Google 等具体协议实现、faux 测试实现，以及 OpenAI-compatible / Sidecar 等具体 Provider 插件。
 - `tower-agent-plugin`：与 Provider 无关的通用插件宿主；负责 Static / Dynamic / JIT 的注册、解析、覆盖和生命周期。
 - `tower-agent-plugin-sdk/provider`：SDK 提供的 Provider 能力，包括 `ProviderPlugin` 注册适配、Sidecar / 动态 Provider 的 JSONL wire，以及 `DynamicProviderPlugin` 桥接。
 - Provider 本身不是特殊插件类型：具体实现就是一个 Static、Dynamic 或 JIT 插件，在其安装过程中通过 SDK 注册 `Arc<dyn ProviderPlugin>` extension。
 
 ## 内置 provider
 
-`tower-agent-provider-builtin` 注册五个独立静态插件：
+`tower-agent-plugin-providers` 注册五个独立静态插件：
 
 | 插件 | API | 凭据 |
 |---|---|---|

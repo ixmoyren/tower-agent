@@ -130,7 +130,7 @@ fn configured_provider_plugin(
             let default_model = config.default_model.ok_or_else(|| {
                 format!("provider `{id}` requires `default_model` for openai-compatible")
             })?;
-            let mut plugin = tower_agent::provider_builtin::OpenAiCompatibleProviderPlugin::new(
+            let mut plugin = tower_agent::providers::OpenAiCompatibleProviderPlugin::new(
                 id,
                 config.name.unwrap_or_else(|| id.to_owned()),
                 default_model,
@@ -152,7 +152,7 @@ fn configured_provider_plugin(
             let default_model = config
                 .default_model
                 .ok_or_else(|| format!("provider `{id}` requires `default_model` for sidecar"))?;
-            let mut plugin = tower_agent::provider_builtin::CommandProviderPlugin::new(
+            let mut plugin = tower_agent::providers::CommandProviderPlugin::new(
                 id,
                 config.name.unwrap_or_else(|| id.to_owned()),
                 default_model,

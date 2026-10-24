@@ -28,7 +28,7 @@ wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
 tower-agent-core = { path = "crates/tower-agent-core" }
 tower-agent-runtime = { path = "crates/tower-agent-runtime" }
 tower-agent-provider = { path = "crates/tower-agent-provider" }
-tower-agent-provider-builtin = { path = "crates/tower-agent-provider-builtin" }
+tower-agent-plugin-providers = { path = "crates/tower-agent-plugin-providers" }
 tower-agent-tools = { path = "crates/tower-agent-tools" }
 tower-agent-plugin = { path = "crates/tower-agent-plugin" }
 tower-agent-plugin-sdk = { path = "crates/tower-agent-plugin-sdk" }

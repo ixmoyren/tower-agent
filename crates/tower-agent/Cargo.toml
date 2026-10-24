@@ -44,7 +44,7 @@ tower-agent-protocol = { workspace = true, optional = true }
 tower-agent-plugin-sdk = { workspace = true, features = ["provider"] }
 tower-agent-plugin-turso = { workspace = true, optional = true }
 tower-agent-ui = { workspace = true, optional = true }
-tower-agent-provider-builtin.workspace = true
+tower-agent-plugin-providers.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

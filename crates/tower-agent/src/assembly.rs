@@ -115,7 +115,7 @@ impl HostPlugins {
                 .register_plugin(plugin)
                 .expect("内置工具插件清单固定且自洽");
         }
-        for plugin in tower_agent_provider_builtin::plugins() {
+        for plugin in tower_agent_plugin_providers::plugins() {
             if self.excluded_plugins.contains(&plugin.manifest().name) {
                 continue;
             }
