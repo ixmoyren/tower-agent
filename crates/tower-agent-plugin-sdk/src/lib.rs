@@ -13,7 +13,11 @@
 //! 动态插件的 stabby 入口（`declare_plugin!` 的动态形态）随 `plugin` 的 `dynamic`
 //! feature 一起落地；当前提供的是静态插件路径与共用的宿主句柄类型。
 
+#[cfg(feature = "codemode")]
+pub mod codemode;
 pub mod hook;
+#[cfg(feature = "jit")]
+pub mod jit;
 #[cfg(feature = "provider")]
 pub mod provider;
 #[cfg(feature = "storage")]

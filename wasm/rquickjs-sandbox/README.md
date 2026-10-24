@@ -62,5 +62,5 @@ C 文件（`quickjs.c` / `libregexp.c` / `libunicode.c` / `dtoa.c`），实测�
 
 ## 下一步
 
-宿主侧 `crates/tower-agent-codemode`：`bindgen!` 绑定 + 实现 `exec`（起 coreutils 组件、内存 stdio、
+宿主侧 `crates/tower-agent-plugin-rquickjs`：`bindgen!` 绑定 + 实现 `exec`（起 coreutils 组件、内存 stdio、
 设 `argv[0]`）+ 会话 preopen + 冒烟测试。trap 要当成「脚本失败」并 **丢弃实例**（trap 后不可复用）。

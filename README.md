@@ -29,8 +29,8 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
   `Layer` 组合；同时提供 **有状态会话**、**无状态 Service** 和 **池化 Service**。
 - **丰富的插件开发手段**：静态插件、动态 `cdylib` 插件和热重载插件共享统一注册、解析、
   覆盖与生命周期模型；可扩展工具、Provider、中间件、事件 Hook、UI、存储和沙箱能力。
-- **Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存和实例池独立成层，为 codemode
-  与其他不可信代码提供一致的隔离边界。
+- **Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存和实例池由 SDK 的
+  `wasmtime` feature 提供，为 codemode 与其他不可信代码提供一致的隔离边界。
 - **codemode：让 agent 可变**：LLM 可以编写 JavaScript 或 monty/Python 脚本，在沙箱中执行、
   注册或替换工具、挂接 Hook、贡献 UI，并通过热重载动态调整 agent 的能力与行为。
 - **多 Provider**：Anthropic Messages、OpenAI Chat Completions（含兼容端点）、OpenAI
@@ -59,10 +59,11 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | `tower-agent-plugin-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
 | `tower-agent-plugin-shell` | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                    |
 | `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；不依赖 Provider 领域 |
-| `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider、可选 `storage` 契约与 `wasmtime` 沙箱基础设施 |
+| `tower-agent-plugin-sdk` | **插件能力 SDK**：Host/ABI、Provider、storage，以及可选 `codemode`、`jit`、`wasmtime` 能力 |
 | `tower-agent-plugin-turso` | **默认存储插件**：实现 SDK storage 契约的嵌入式 Turso 后端 |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
-| `tower-agent-monty`      | **codemode Python 宿主**：内嵌 monty（Python 子集）沙箱插件 + 热重载脚本管理器                       |
+| `tower-agent-plugin-rquickjs` | **rquickjs 解释器插件**：JavaScript 的 codemode 与 JIT 实现 |
+| `tower-agent-plugin-monty`      | **monty 解释器插件**：Python 子集的 codemode 与 JIT 实现                       |
 | `tower-agent-protocol`   | **协议**：帧、严格 CBOR 子集、RPC 信封                                                                |
 | `tower-agent-tui`        | **终端渲染前端**：消费 `tower-agent-ui`，负责 ratatui 页面、编辑器与终端事件循环                       |
 | `tower-agent-cli`        | **CLI 宿主**：二进制名 `tower-agent`，以 `Service` / `Layer` 组合装配会话                             |
@@ -81,7 +82,7 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | 加载     | 编译期                      | `libloading` 运行时加载     | 运行时编译 + 原子换绑           |
 | 卸载     | 不卸载（随进程）            | 支持卸载                    | 支持热替换                      |
 | 调用开销 | 零（直接函数调用）          | 一次间接调用 + ABI 编解码   | 编译后接近原生                  |
-| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemode | codemode Python 脚本、轻量扩展  |
+| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemode | JIT 插件、轻量扩展 |
 
 静态插件实现 `StaticPlugin`，可贡献 **能力**、 **工具** 以及三层中间件
 （`agent_layers()` / `tool_layers()` / `event_handlers()`）。动态插件用
@@ -208,9 +209,9 @@ cargo clippy --all-features --all-targets
 
 | 产物                                                 | 谁内嵌                 | 怎么编                                               |
 |------------------------------------------------------|------------------------|------------------------------------------------------|
-| `crates/tower-agent-monty/assets/monty-sandbox.wasm` | `tower-agent-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
-| `crates/tower-agent-codemode/assets/coreutils.wasm`  | `tower-agent-codemode` | `./wasm/coreutils-wasm/generate.sh`                  |
-| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/rquickjs-sandbox/generate.sh` |
+| `crates/tower-agent-plugin-monty/assets/monty-sandbox.wasm` | `tower-agent-plugin-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
+| `crates/tower-agent-plugin-rquickjs/assets/coreutils.wasm`  | `tower-agent-plugin-rquickjs` | `./wasm/coreutils-wasm/generate.sh`                  |
+| `crates/tower-agent-plugin-rquickjs/assets/codemode.wasm`   | `tower-agent-plugin-rquickjs` | `WASI_SDK=<sdk> ./wasm/rquickjs-sandbox/generate.sh` |
 
 工具链（只在编 wasm 时要用，日常 `cargo build` 不需要）：
 

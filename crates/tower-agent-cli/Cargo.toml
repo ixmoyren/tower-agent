@@ -13,17 +13,20 @@ path = "src/main.rs"
 workspace = true
 
 [features]
-default = ["codemode", "codemode-python", "codemode-js"]
+default = ["codemode", "jit", "monty", "rquickjs"]
 codemode = ["tower-agent/codemode"]
-codemode-python = [
+jit = ["tower-agent/jit"]
+monty = [
     "codemode",
-    "tower-agent/codemode-python",
-    "dep:tower-agent-monty",
+    "jit",
+    "tower-agent/monty",
+    "dep:tower-agent-plugin-monty",
 ]
-codemode-js = [
+rquickjs = [
     "codemode",
-    "tower-agent/codemode-js",
-    "dep:tower-agent-codemode",
+    "jit",
+    "tower-agent/rquickjs",
+    "dep:tower-agent-plugin-rquickjs",
 ]
 
 [dependencies]
@@ -31,10 +34,10 @@ tower-agent-core = { workspace = true }
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-plugin = { workspace = true }
-tower-agent-plugin-sdk = { workspace = true, features = ["dynamic", "provider", "storage"] }
+tower-agent-plugin-sdk = { workspace = true, features = ["codemode", "dynamic", "jit", "provider", "storage"] }
 tower-agent-tui = { workspace = true }
-tower-agent-monty = { workspace = true, optional = true }
-tower-agent-codemode = { workspace = true, optional = true }
+tower-agent-plugin-monty = { workspace = true, optional = true }
+tower-agent-plugin-rquickjs = { workspace = true, optional = true }
 clap = { version = "4.6", features = ["derive"] }
 futures-util = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -42,7 +45,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tower = { workspace = true }
 tower-agent-plugin-turso.workspace = true
-tower-agent-codemode-core.workspace = true
 tower-agent-ui.workspace = true
 tower-agent = { workspace = true, default-features = false }
 dirs.workspace = true

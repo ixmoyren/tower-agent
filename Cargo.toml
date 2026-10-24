@@ -35,9 +35,8 @@ tower-agent-plugin-sdk = { path = "crates/tower-agent-plugin-sdk" }
 tower-agent-ui = { path = "crates/tower-agent-ui" }
 tower-agent-tui = { path = "crates/tower-agent-tui" }
 tower-agent-protocol = { path = "crates/tower-agent-protocol" }
-tower-agent-monty = { path = "crates/tower-agent-monty" }
-tower-agent-codemode-core = { path = "crates/tower-agent-codemode-core" }
-tower-agent-codemode = { path = "crates/tower-agent-codemode" }
+tower-agent-plugin-monty = { path = "crates/tower-agent-plugin-monty" }
+tower-agent-plugin-rquickjs = { path = "crates/tower-agent-plugin-rquickjs" }
 tower-agent-plugin-turso = { path = "crates/tower-agent-plugin-turso" }
 tower-agent = { path = "crates/tower-agent" }
 

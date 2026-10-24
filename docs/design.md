@@ -11,7 +11,7 @@
 
 pi-agent 是 agent 能力设计的重要参考，但不是 `tower-agent` 的兼容性目标。文中的“pi 概念映射”用于对照能力边界与交互语义，具体 API、模块结构和实现以 Rust / tower 架构为准。文档后部保留的实现进度记录可能使用早期“移植”措辞，不代表当前项目定位。
 
-> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、JIT 脚本插件）、[`codemode.md`](./codemode.md)（**agent 可以编程**：§0 是"mods/codemode 统一 + 解释器可选"的 v2 提案，§1–§11 是 JS 引擎细节）、[`sdk.md`](./sdk.md)（扩展点设计，落在 `tower-agent-plugin-sdk`）、[`roadmap.md`](./roadmap.md)（未完成事项的单一入口）。
+> 子设计文档：[`plugins.md`](./plugins.md)（插件 / 扩展体系：静态 tower Layer、stabby 动态插件、JIT 脚本插件）、[`codemode.md`](./codemode.md)（codemode 一次性程序与 JIT 插件的模式差异、解释器路由）、[`sdk.md`](./sdk.md)（扩展点设计，落在 `tower-agent-plugin-sdk`）、[`roadmap.md`](./roadmap.md)（未完成事项的单一入口）。
 
 ---
 

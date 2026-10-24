@@ -1,6 +1,6 @@
 //! Shared codemode authoring tools exposed to both script engines.
 
-#![cfg(all(feature = "codemode-python", feature = "codemode-js"))]
+#![cfg(all(feature = "monty", feature = "rquickjs"))]
 
 use std::sync::Arc;
 
@@ -10,7 +10,8 @@ use tower_agent::assembly::HostPlugins;
 use tower_agent::core::{AgentTool, ToolCallRequest, ToolResultStream, UiState};
 use tower_agent::monty::ModManager;
 use tower_agent::provider::{Arguments, ContentBlock, ToolCall};
-use tower_agent_codemode::{CodemodePlugin, SessionRoot};
+use tower_agent_plugin_rquickjs::CodemodePlugin;
+use tower_agent_plugin_sdk::codemode::SessionRoot;
 
 fn request(name: &str, arguments: Value) -> ToolCallRequest {
     ToolCallRequest::new(ToolCall {
@@ -67,7 +68,7 @@ async fn python_and_javascript_can_call_the_same_authoring_tool() {
 tool_register(\"python_author\", \"python_author\", \"\", {\"type\": \"object\"})
 
 def python_author(args):
-    return tool_call(\"codemode_list\", {})
+    return tool_call(\"jit_list\", {})
 ";
     manager
         .write("python_author", python)
@@ -81,7 +82,7 @@ def python_author(args):
     );
 
     let javascript = r#"
-return await tool_call("codemode_list", {});
+return await tool_call("jit_list", {});
 "#;
     let javascript_result = call_text(
         &tool(&manager, "codemode"),

@@ -1,6 +1,6 @@
 //! Capability matrix shared by the Python/monty and JavaScript/rquickjs engines.
 
-#![cfg(all(feature = "codemode-python", feature = "codemode-js"))]
+#![cfg(all(feature = "monty", feature = "rquickjs"))]
 
 use futures_util::StreamExt as _;
 use serde_json::Value;
@@ -8,9 +8,9 @@ use tower_agent::assembly::{HostPlugins, Mount, SessionRoot};
 use tower_agent::core::{AgentTool, ToolCallRequest, ToolResultStream, UiState};
 use tower_agent::monty::{ModOptions, ModPermissions};
 use tower_agent::provider::{Arguments, ContentBlock, ToolCall};
-use tower_agent_codemode::{CodemodeHost, CodemodeOptions};
-use tower_agent_codemode_core::ScriptPermissions;
 use tower_agent_plugin::HostApi;
+use tower_agent_plugin_rquickjs::{CodemodeHost, CodemodeOptions};
+use tower_agent_plugin_sdk::codemode::ScriptPermissions;
 
 const CAPABILITY_MATRIX: [&str; 7] = [
     "exec",

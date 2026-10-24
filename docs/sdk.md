@@ -39,9 +39,9 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 | crate                    | 现在负责                                                                                   | 问题                                       |
 |--------------------------|--------------------------------------------------------------------------------------------|--------------------------------------------|
 | `tower-agent-plugin`    | 通用插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                     | 面向"插件系统"，不是"扩展点"               |
-| `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / tool 注册 / Provider 能力 / 动态入口 / 可选 storage 与 wasmtime | 扩展能力、打包/ABI 与可选沙箱基础设施 |
+| `tower-agent-plugin-sdk` | 插件作者：Host/ABI、tool、Provider、动态入口，以及可选 storage、codemode、jit、wasmtime | 扩展能力、打包/ABI、脚本运行契约与可选沙箱基础设施 |
 | `tower-agent-runtime`    | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`              | 有钩子，但很薄、且不统一                   |
-| `tower-agent-monty` / `tower-agent-codemode` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
+| `tower-agent-plugin-monty` / `tower-agent-plugin-rquickjs` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
 
 结论（`codemode.md` Q7 已定）： **扩展点作者 API 直接加在 `tower-agent-plugin-sdk` 上**，按模块分层；`tower-agent-plugin` 仍是背后的注册表与生命周期机制。
 
@@ -56,7 +56,14 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 - `host`：`HostApi` / 能力调用（ **已有**，保留）
 - `packaging`：manifest 宏、stabby 动态入口、动态工具描述与 ABI 类型（ **已有**，保留）
 - `storage`（feature）：配置、凭据、会话、历史、记忆与 codemode 脚本的持久化契约；默认关闭，由存储插件和需要持久化能力的宿主启用。
+- `codemode`（feature）：脚本权限、CapabilitySurface、Hook、Prompt、解释器描述与 codemode 执行路由；同时启用 `wasmtime`。
+- `jit`（feature）：JIT 插件 load / reload / unload 契约和解释器路由；依赖 `codemode` 与 `storage`。
 - `wasmtime`（feature）：组件沙箱、WASI、资源限制、JIT 缓存与实例池；默认关闭，由 codemode、monty 或其他 wasm 解释器插件启用。它是编译期基础设施，不是插件能力。
+
+解释器通过 `ScriptInterpreter` 向模型声明 id、名称、语言和支持的
+`codemode` / `jit` 模式。`ScriptRuntimeCatalog` 汇总所有解释器，宿主将
+`describe_for_llm()` 加入提示词；LLM 据此选择模式与语言，再由
+`ScriptRuntimeRouter`、`CodemodeRegistry` 或 `JitRegistry` 路由到具体实现。
 
 也就是说：plugin-sdk 从"只有打包 + HostApi"扩成"打包 + HostApi + 扩展点"。好处是脚本侧（codemode host function）与 Rust 侧天然同一套定义，不再有第三个 crate。
 
@@ -190,7 +197,7 @@ context.register_tool(tool);
 
 旧模型有 `tools / register_tools / ui / state / fs` 五个字段；monty 现在保留
 `ModPermissions` 这个名字，但它是 `ScriptPermissions` 的类型别名。引擎无关的共享模型已经落在
-`tower-agent-codemode-core`：
+`tower-agent-plugin-sdk`：
 
 ```rust
 pub struct ScriptPermissions {
@@ -212,7 +219,7 @@ JSON 回传脚本（未授权 / 未知能力 / 引擎错误 / 超时 / 取消 / 
 
 与 `docs/plugins.md` 第 12 节的运行时提示机制打通：首次调用需要权限的扩展点时询问用户（`AllowOnce` / `AllowSession` / `Deny`），无人值守默认拒绝。
 
-脚本 hook 由 `tower-agent-codemode-core::ScriptHookRegistry` 统一注册和调用：
+脚本 hook 由 `tower-agent-plugin-sdk::ScriptHookRegistry` 统一注册和调用：
 
 - `on("tool_call", handler)` / `on("tool_result", handler)` 在脚本安装时注册；同一 owner 的同一事件重复注册会替换。
 - registry 按 owner 稳定顺序调用 handler，默认每个 hook 5 秒超时，并接受 `CancellationToken`。

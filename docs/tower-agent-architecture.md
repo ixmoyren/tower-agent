@@ -29,11 +29,9 @@ tower-agent/                 （facade：re-export core + runtime + provider + t
   tower-agent-plugin-tools/         六个静态内置工具 + tower-agent-plugin-shell（动态 shell）
   tower-agent-protocol/      帧 / CBOR / RPC（按需保留）
   tower-agent-plugin/        通用插件宿主：注册表 / 生命周期 / HostApi / 权限 / 三类加载器 / extension slot
-  tower-agent-plugin-sdk/    插件能力 SDK：静态宏 / 动态 ABI / Host 能力；可选 Provider、storage 与 wasmtime
-  tower-agent-codemode-core/ 引擎无关的脚本能力、Hook 与 Prompt 契约
-  tower-agent-codemode/      JavaScript wasm 宿主与命令层
-  tower-agent-monty/         monty/Python 沙箱与 JIT 热重载后端
-                            （wasmtime feature 提供组件、WASI、资源限制、JIT 缓存与实例池）
+  tower-agent-plugin-sdk/    插件能力 SDK：Host/ABI；可选 Provider、storage、codemode、jit、wasmtime
+  tower-agent-plugin-rquickjs/ rquickjs 的 codemode + JIT 解释器实现
+  tower-agent-plugin-monty/    monty/Python 的 codemode + JIT 解释器实现
   tower-agent-plugin-turso/  默认嵌入式存储插件
   tower-agent-ui/            前端无关 UI 会话插件（事件归约 / 命令 / 可序列化视图）
   tower-agent-tui/           终端前端（实现 UiPlugin）
@@ -108,11 +106,11 @@ tower-agent/                 （facade：re-export core + runtime + provider + t
 
 ### 4.6 热重载插件 = monty（替代 Roto）
 
-- 用 monty（Python 子集）作为 codemode Python 引擎，解释器编译为 wasm 组件并由 Wasmtime 执行。
+- monty（Python 子集）实现 codemode 与 JIT 两种模式；解释器编译为 wasm 组件并由 Wasmtime 执行。
 - 宿主能力调用通过 `MontyHost` 派发；脚本未定义函数会挂起为宿主动作，宿主完成后 resume。
 - 热更新使用 `reload_checked`：新版本试跑成功后原子替换，失败保留旧版本。
 - 资源限制由 Wasmtime 组件、WASI 配置、内存/栈上限和调用超时共同约束；trap 只终止本次脚本调用，不波及宿主进程。
-- 旧 `tower-agent-plugin` 的 Roto JIT 实现已退役；当前热重载由独立的 `tower-agent-monty` 提供。
+- 旧 `tower-agent-plugin` 的 Roto JIT 实现已退役；当前热重载由独立的 `tower-agent-plugin-monty` 提供。
 
 ### 4.7 命名与仓库
 
@@ -186,7 +184,7 @@ transcript（会话记录 / 上下文）是 **按顺序发给模型的全部消�
 **后续（本轮不做）**
 
 - **P5 ✅ 静态插件 Layer 化**：`tower-agent-plugin::layer` 提供对象安全的 `AgentLayer` / `ToolLayer` / `EventHandler`（含闭包与 tower `Layer` 适配器 `tower_agent_layer` / `tower_tool_layer`）；`PluginContext` 增加登记 + `apply_agent_layers` / `apply_tool_layers` / `dispatch_event`；`StaticPlugin` 增加 `agent_layers()` / `tool_layers()` / `tools()` / `event_handlers()` 默认方法，`Resolution::install` 统一收集。
-- **P6 ✅ monty 替换 Roto**：删除旧 JIT 路径，新增 `tower-agent-monty`：monty 解释器编译为 wasm 组件并由 Wasmtime 执行，宿主函数经 `MontyHost` 回调，`reload` 原子替换源码、`reload_checked` 失败保留旧版本。
+- **P6 ✅ monty 替换 Roto**：删除旧 JIT 路径，新增 `tower-agent-plugin-monty`：monty 解释器编译为 wasm 组件并由 Wasmtime 执行，宿主函数经 `MontyHost` 回调，`reload` 原子替换源码、`reload_checked` 失败保留旧版本。
 - **P7 ✅ UI 后端与 TUI 拆分**：`tower-agent-ui` 提供前端无关的 `AgentUi`、事件归约、命令协议与静态插件；`tower-agent-tui` 仅保留 ratatui 页面和终端输入。门面 crate 不再依赖 `tower-agent-tui`。
 - **P8 入口适配器**：axum / tonic / mcp / web。
 

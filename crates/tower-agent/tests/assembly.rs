@@ -29,6 +29,32 @@ fn wasmtime_is_an_sdk_feature_not_a_protected_plugin() {
     assert!(registry.ensure_not_protected("wasmtime").is_ok());
 }
 
+#[cfg(all(feature = "jit", feature = "rquickjs", feature = "monty"))]
+#[test]
+fn script_catalog_advertises_both_interpreters_and_modes() {
+    use tower_agent_plugin_sdk::codemode::ScriptMode;
+
+    let catalog = tower_agent::assembly::HostPlugins::new(".").script_catalog();
+    let prompt = catalog.describe_for_llm();
+    for expected in [
+        "rquickjs",
+        "javascript",
+        "monty",
+        "python",
+        "codemode",
+        "jit",
+    ] {
+        assert!(prompt.contains(expected), "missing `{expected}`:\n{prompt}");
+    }
+    assert!(
+        catalog
+            .interpreters
+            .iter()
+            .all(|interpreter| interpreter.supports(ScriptMode::Codemode)
+                && interpreter.supports(ScriptMode::Jit))
+    );
+}
+
 #[test]
 fn builtin_and_user_providers_are_assembled_as_plugins() {
     use std::sync::Arc;
@@ -160,7 +186,7 @@ fn dynamic_provider_uses_generic_plugin_resolution_and_shadowing() {
     );
 }
 
-#[cfg(feature = "codemode-js")]
+#[cfg(feature = "rquickjs")]
 #[test]
 fn codemode_is_registered_and_protected() {
     use tower_agent::assembly::{HostPlugins, SessionRoot};
@@ -179,7 +205,7 @@ fn codemode_is_registered_and_protected() {
     assert!(registry.ensure_not_protected("codemode").is_err());
 }
 
-#[cfg(feature = "codemode-python")]
+#[cfg(feature = "monty")]
 #[test]
 fn mods_host_is_assembled_on_top_of_the_plugins() {
     let manager = tower_agent::assembly::HostPlugins::new(".")

@@ -42,7 +42,7 @@ examples/
 - **静态插件**：`tower_agent_plugin::StaticPlugin { manifest(); install(&mut PluginContext) }`，`install` 把 `AgentTool` 登记进上下文；六个静态内置工具各注册一个插件。注册表支持能力/依赖/版本收敛/同名覆盖（静态<动态<JIT）/环检测。
 - **生命周期/宿主 API/权限**：`Lifecycle` / `PluginState` / `InflightGuard`、`HostApi` / `PluginAccess`（`requires` 收窄 + 中介调用，目前只中介 `tool.*`）、`PermissionPolicy` / `PermissionPrompter`。
 - **动态插件（stabby）**：`tower-agent-plugin` 的 `dynamic` feature（`dep:stabby` + `dep:libloading`）；`crates/tower-agent-plugin/src/dynamic.rs` 定义 `AbiVersion` / `AbiCapability` / `AbiManifest` / `PluginVTable`，`LoadedPlugin::load/call/stop/unload`，做 SDK ABI major 校验。`tower-agent-plugin-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。
-- **热重载/JIT**：已改为 `tower-agent-monty`（早期实现是 `plugins` 的 `jit` feature + Roto，已删除）。
+- **热重载/JIT**：已改为 `tower-agent-plugin-monty`（早期实现是 `plugins` 的 `jit` feature + Roto，已删除）。
 - 注意：插件 ABI 类型定义在 **宿主** `tower_agent_plugin::dynamic`，`tower-agent-plugin-sdk` 只是再导出。
 
 ### 1.4 cli / tui 与 agent 的耦合

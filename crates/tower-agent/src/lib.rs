@@ -22,11 +22,16 @@ pub use tower_agent_runtime as runtime;
 
 pub mod assembly;
 
-#[cfg(feature = "codemode-js")]
-pub use tower_agent_codemode as codemode;
-#[cfg(feature = "codemode-python")]
-pub use tower_agent_monty as monty;
-#[cfg(any(feature = "plugin-sdk", feature = "storage-turso"))]
+#[cfg(feature = "monty")]
+pub use tower_agent_plugin_monty as monty;
+#[cfg(feature = "rquickjs")]
+pub use tower_agent_plugin_rquickjs as rquickjs;
+#[cfg(any(
+    feature = "plugin-sdk",
+    feature = "storage-turso",
+    feature = "codemode",
+    feature = "jit"
+))]
 pub use tower_agent_plugin_sdk as plugin_sdk;
 #[cfg(feature = "storage-turso")]
 pub use tower_agent_plugin_turso as turso;

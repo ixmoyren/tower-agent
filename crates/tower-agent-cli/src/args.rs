@@ -7,7 +7,7 @@
 use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser, Subcommand, builder::NonEmptyStringValueParser};
-use tower_agent_codemode_core::ScriptLanguage;
+use tower_agent_plugin_sdk::codemode::ScriptLanguage;
 
 /// 配置作用域（对应 storage 的 `ConfigScope`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn codemode_engine_cli_flag_overrides_config() {
-        use tower_agent_codemode_core::EngineSelection;
+        use tower_agent_plugin_sdk::codemode::EngineSelection;
 
         let args = parse_ok(&["--codemode-engine", "monty"]);
         let selection = EngineSelection {
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn codemode_config_engine_is_used_without_cli_override() {
-        use tower_agent_codemode_core::EngineSelection;
+        use tower_agent_plugin_sdk::codemode::EngineSelection;
 
         let selection = EngineSelection {
             cli: None,
@@ -605,7 +605,7 @@ mod tests {
 
     #[test]
     fn codemode_script_metadata_overrides_process_default() {
-        use tower_agent_codemode_core::{EngineSelection, ScriptMetadata};
+        use tower_agent_plugin_sdk::codemode::{EngineSelection, ScriptMetadata};
 
         let selection = EngineSelection {
             cli: Some(ScriptLanguage::Monty),

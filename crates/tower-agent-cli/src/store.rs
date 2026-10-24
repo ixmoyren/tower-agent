@@ -415,7 +415,7 @@ impl CliStore {
 /// `ScriptStore` 适配器：把 CLI 的写队列语义暴露给 codemode。
 ///
 /// Turso 的普通写入是 fire-and-forget；作者工具必须在返回前让 upsert/delete 可见，
-/// 否则紧接着的 `codemode_list` 会读到旧状态，后台错误也会被吞掉。
+/// 否则紧接着的 `jit_list` 会读到旧状态，后台错误也会被吞掉。
 struct CliScriptStore {
     store: Arc<CliStore>,
 }

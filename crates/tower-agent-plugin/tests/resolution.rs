@@ -462,7 +462,7 @@ fn protected_names_are_reported_by_ensure_not_protected() {
     registry
         .register_manifest(
             manifest("foundation", v(1, 0, 0), PluginKind::Static)
-                .providing(cap("tool", "codemode_write"), v(1, 0, 0))
+                .providing(cap("tool", "jit_write"), v(1, 0, 0))
                 .protected(),
         )
         .unwrap();

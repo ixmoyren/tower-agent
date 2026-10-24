@@ -1,7 +1,7 @@
 # monty-sandbox (wasm component)
 
 把 [monty](https://crates.io/crates/monty) 解释器编译成一个 wasm 组件，供
-`tower-agent-monty` 用 wasmtime 在沙箱里执行 AI 生成的 mods 代码。
+`tower-agent-plugin-monty` 用 wasmtime 在沙箱里执行 AI 生成的 mods 代码。
 
 ## 接口
 
@@ -28,7 +28,7 @@
 ./generate.sh
 ```
 
-产物写到 `crates/tower-agent-monty/assets/monty-sandbox.wasm`。管线：
+产物写到 `crates/tower-agent-plugin-monty/assets/monty-sandbox.wasm`。管线：
 
 1. `cargo component bindings` 生成 WIT 绑定；
 2. `cargo build --release --target wasm32-wasip2` 由 rustc 直出 component。

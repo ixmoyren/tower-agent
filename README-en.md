@@ -73,9 +73,10 @@ dependencies are declared once through workspace dependencies.
 | `tower-agent-plugin-providers` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, and sidecars, registered through the SDK  |
 | `tower-agent-plugin-tools`      | **Tool plugin collection**: read / edit / write / grep / find / ls, each as an independent static plugin                         |
 | `tower-agent-plugin`    | **General plugin host**: registry, resolution, lifecycle, HostApi, permissions, and extension slots; Provider-agnostic              |
-| `tower-agent-plugin-sdk` | **Plugin capability SDK**: static / dynamic ABI, host capabilities, Provider support, optional storage and Wasmtime sandbox infrastructure |
+| `tower-agent-plugin-sdk` | **Plugin capability SDK**: host/ABI, Provider, storage, and optional codemode, JIT and Wasmtime capabilities |
 | `tower-agent-ui`         | **Frontend-neutral UI backend**: event reduction, session view, slash commands, static UI plugins                                  |
-| `tower-agent-monty`      | **codemode Python host**: embedded monty (Python subset) sandbox plugins + hot-reload script manager                               |
+| `tower-agent-plugin-rquickjs` | **rquickjs interpreter plugin**: JavaScript implementations of codemode and JIT |
+| `tower-agent-plugin-monty`      | **monty interpreter plugin**: Python-subset implementations of codemode and JIT                               |
 | `tower-agent-protocol`   | **Protocol**: framing, strict CBOR subset, RPC envelopes                                                                           |
 | `tower-agent-tui`        | **Terminal frontend**: differential-rendering TUI over the agent event stream                                                      |
 | `tower-agent-cli`        | **CLI host**: binary named `tower-agent`, assembling the session via `Service` / `Layer`                                           |
@@ -95,7 +96,7 @@ and `tower-agent-tui` handles only ratatui and terminal integration.
 | Loading     | compile time                             | `libloading` at runtime                | runtime compile + atomic rebind        |
 | Unloading   | none (lives with the process)            | supported                              | hot replacement                        |
 | Call cost   | zero (direct call)                       | one indirect call + ABI codec          | near-native after JIT                  |
-| Typical use | built-in tools, providers, observability | sandbox, memory, persistence, codemode | codemode Python scripts, light extensions |
+| Typical use | built-in tools, providers, observability | sandbox, memory, persistence, codemode | JIT plugins, light extensions |
 
 A static plugin implements `StaticPlugin` and can contribute **capabilities**, **tools**,
 and three middleware layers (`agent_layers()` / `tool_layers()` / `event_handlers()`).
@@ -205,9 +206,9 @@ them** — otherwise `include_bytes!` fails with `couldn't read …/assets/*.was
 
 | Artifact                                             | Embedded by            | How to build                                         |
 |------------------------------------------------------|------------------------|------------------------------------------------------|
-| `crates/tower-agent-monty/assets/monty-sandbox.wasm` | `tower-agent-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
-| `crates/tower-agent-codemode/assets/coreutils.wasm`  | `tower-agent-codemode` | `./wasm/coreutils-wasm/generate.sh`                  |
-| `crates/tower-agent-codemode/assets/codemode.wasm`   | `tower-agent-codemode` | `WASI_SDK=<sdk> ./wasm/rquickjs-sandbox/generate.sh` |
+| `crates/tower-agent-plugin-monty/assets/monty-sandbox.wasm` | `tower-agent-plugin-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
+| `crates/tower-agent-plugin-rquickjs/assets/coreutils.wasm`  | `tower-agent-plugin-rquickjs` | `./wasm/coreutils-wasm/generate.sh`                  |
+| `crates/tower-agent-plugin-rquickjs/assets/codemode.wasm`   | `tower-agent-plugin-rquickjs` | `WASI_SDK=<sdk> ./wasm/rquickjs-sandbox/generate.sh` |
 
 Toolchain (needed only when building wasm, not for everyday `cargo build`):
 

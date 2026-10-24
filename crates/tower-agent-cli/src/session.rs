@@ -19,13 +19,13 @@ use std::{
 
 use tokio::sync::mpsc;
 use tower::ServiceExt as _;
-use tower_agent_codemode_core::{ScriptHookRegistry, ScriptLanguage, ScriptMetadata};
 use tower_agent_core::UiState;
-#[cfg(feature = "codemode-python")]
-use tower_agent_monty::ModManager;
 use tower_agent_plugin::PermissionPolicy;
-#[cfg(feature = "codemode-js")]
+#[cfg(feature = "rquickjs")]
 use tower_agent_plugin::StaticPlugin as _;
+#[cfg(feature = "monty")]
+use tower_agent_plugin_monty::ModManager;
+use tower_agent_plugin_sdk::codemode::{ScriptHookRegistry, ScriptLanguage, ScriptMetadata};
 use tower_agent_plugin_sdk::storage::{ConfigScope, ProviderCredential};
 
 use crate::store::CliStore;
@@ -50,8 +50,8 @@ pub struct Session {
     cwd: PathBuf,
     /// mods 未启用时的工具目录（内置工具）。
     base_tools: Mutex<Vec<AgentTool>>,
-    /// codemode Python 宿主；解释器内嵌在 `tower-agent-monty` 中，默认启用。
-    #[cfg(feature = "codemode-python")]
+    /// monty JIT 运行时；解释器内嵌在 `tower-agent-plugin-monty` 中，默认启用。
+    #[cfg(feature = "monty")]
     mods: Option<Arc<ModManager>>,
     /// 工具过滤（`--tools` / `--exclude-tools` / `--no-tools`）。
     tool_filter: Mutex<ToolFilter>,
@@ -150,7 +150,7 @@ impl Session {
     /// 启用 mods 时把 codemode 作为**受保护静态插件**注册进统一注册表（名字 `codemode`、
     /// 能力 `tool.codemode` 因此进 `protected_*`，动态 / JIT 插件不能顶替）；未启用 mods
     /// 时退化成直接追加到地基工具集。
-    #[cfg(feature = "codemode-js")]
+    #[cfg(feature = "rquickjs")]
     pub fn enable_codemode(
         &self,
         workspace: &Path,
@@ -159,30 +159,33 @@ impl Session {
     ) -> Result<(), String> {
         let parsed = mounts
             .iter()
-            .map(|spec| tower_agent_codemode::Mount::parse(spec))
+            .map(|spec| tower_agent_plugin_sdk::codemode::Mount::parse(spec))
             .collect::<Result<Vec<_>, _>>()?;
         let root = match session {
-            Some(name) => tower_agent_codemode::SessionRoot::Persistent(
-                tower_agent_codemode::default_session_dir(name)
+            Some(name) => tower_agent_plugin_sdk::codemode::SessionRoot::Persistent(
+                tower_agent_plugin_sdk::codemode::default_session_dir(name)
                     .ok_or_else(|| "拿不到配置目录".to_owned())?,
             ),
-            None => tower_agent_codemode::SessionRoot::Ephemeral,
+            None => tower_agent_plugin_sdk::codemode::SessionRoot::Ephemeral,
         };
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         let exec_surface = self
             .mods
             .as_ref()
             .map(|_| {
-                tower_agent_codemode::ExecCapabilitySurface::new(root.clone(), parsed.clone())
-                    .map(Arc::new)
-                    .map_err(|error| error.to_string())
+                tower_agent_plugin_rquickjs::ExecCapabilitySurface::new(
+                    root.clone(),
+                    parsed.clone(),
+                )
+                .map(Arc::new)
+                .map_err(|error| error.to_string())
             })
             .transpose()?;
-        let plugin = tower_agent_codemode::CodemodePlugin::new(workspace, root)
+        let plugin = tower_agent_plugin_rquickjs::CodemodePlugin::new(workspace, root)
             .with_mounts(parsed)
             .with_permission_policy(self.permission_policy.clone())
             .with_hook_registry(Arc::clone(&self.script_hooks));
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         if let Some(mods) = &self.mods {
             mods.register_static_plugin(Arc::new(plugin))
                 .map_err(|error| error.to_string())?;
@@ -260,21 +263,33 @@ impl Session {
         codemode_enabled: bool,
     ) -> Self {
         let cwd = cwd.as_ref().to_path_buf();
+        #[cfg(feature = "jit")]
+        let script_catalog = tower_agent::assembly::HostPlugins::new(&cwd)
+            .script_catalog()
+            .describe_for_llm();
+        #[cfg(not(feature = "jit"))]
+        let script_catalog = String::new();
+        #[cfg(feature = "jit")]
+        let script_mode_rules = "codemode 用于生成一段程序完成一次复杂操作；\
+             jit 用于生成一个持久插件来改变 agent 的工具、Hook 或 UI 行为。";
+        #[cfg(not(feature = "jit"))]
+        let script_mode_rules = "codemode 用于生成一段程序完成一次复杂操作。";
         let system_prompt = format!(
             "你是 tower-agent（pi 的 Rust 移植版）的编码助手。可用工具：{}。\n\
-         使用工具而不是猜测文件内容；修改文件前先读一遍。",
-            tower_agent::tools::DEFAULT_TOOL_NAMES.join(", ")
+         使用工具而不是猜测文件内容；修改文件前先读一遍。\n\n\
+         脚本模式规则：{script_mode_rules}\n{script_catalog}",
+            tower_agent::tools::DEFAULT_TOOL_NAMES.join(", "),
         );
         let base_tools = tower_agent::assembly::HostPlugins::new(&cwd)
             .tools()
             .expect("内置工具插件应可解析");
         let script_hooks = Arc::new(ScriptHookRegistry::new());
-        #[cfg(not(feature = "codemode-python"))]
+        #[cfg(not(feature = "monty"))]
         let _ = codemode_enabled;
         // mods（cc `mods` 模式）：LLM 生成 monty 代码当插件，可提供工具、改 UI。
         // 内置静态插件与 JIT mod 共用一张注册表：工具目录来自「解析 + 安装」。
-        // monty 解释器随 `tower-agent-monty` 内嵌（CLI feature `codemode-python`）。
-        #[cfg(feature = "codemode-python")]
+        // monty 解释器随 `tower-agent-plugin-monty` 内嵌（CLI feature `monty`）。
+        #[cfg(feature = "monty")]
         let mods = if codemode_enabled {
             // 插件集合与 mods 宿主都来自组装层（含 wasmtime 等受保护宿主能力），
             // 不在会话里硬编码。
@@ -286,7 +301,7 @@ impl Session {
                     Some(manager)
                 }
                 Err(error) => {
-                    eprintln!("codemode Python 宿主初始化失败（本次会话已关闭）：{error}");
+                    eprintln!("monty JIT 运行时初始化失败（本次会话已关闭）：{error}");
                     None
                 }
             }
@@ -294,12 +309,12 @@ impl Session {
             None
         };
 
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         let initial_tools = match &mods {
             Some(mods) => mods.tools(),
             None => base_tools.clone(),
         };
-        #[cfg(not(feature = "codemode-python"))]
+        #[cfg(not(feature = "monty"))]
         let initial_tools = base_tools.clone();
 
         let mut options = AgentOptions::new(stream);
@@ -321,7 +336,7 @@ impl Session {
             control,
             cwd,
             base_tools: Mutex::new(base_tools),
-            #[cfg(feature = "codemode-python")]
+            #[cfg(feature = "monty")]
             mods,
             tool_filter: Mutex::new(ToolFilter::default()),
             codemode_engine: Mutex::new(ScriptLanguage::JavaScript),
@@ -346,7 +361,7 @@ impl Session {
     /// （对齐 pi 的 `auth.json` / `settings.json`）。
     #[must_use]
     pub fn with_store(mut self, store: Arc<CliStore>) -> Self {
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         if let Some(mods) = &self.mods {
             mods.set_script_store(
                 store.script_store(),
@@ -391,7 +406,7 @@ impl Session {
     /// Attach the shared runtime permission policy used by both codemode engines.
     #[must_use]
     pub fn with_permission_policy(mut self, permission_policy: PermissionPolicy) -> Self {
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         if let Some(mods) = &self.mods {
             mods.set_permission_policy(permission_policy.clone());
         }
@@ -505,11 +520,11 @@ impl Session {
     /// mods 的共享 UI 状态（未启用 mods 时为 `None`）。
     #[must_use]
     pub fn ui_state(&self) -> Option<UiState> {
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         {
             self.mods.as_ref().map(|mods| mods.ui())
         }
-        #[cfg(not(feature = "codemode-python"))]
+        #[cfg(not(feature = "monty"))]
         {
             None
         }
@@ -517,7 +532,7 @@ impl Session {
 
     /// 后台预热 mods 沙箱（编译组件 + 预建实例）；在运行时内调用才生效。
     pub fn prewarm_mods(&self) {
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         if let Some(mods) = &self.mods {
             mods.spawn_warmup();
         }
@@ -525,14 +540,14 @@ impl Session {
 
     /// 加载持久化的 mod（`dirs` 的 config 目录）；返回加载数量。
     pub async fn load_persisted_mods(&self) -> usize {
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         {
             match &self.mods {
                 Some(mods) => mods.load_persisted().await,
                 None => 0,
             }
         }
-        #[cfg(not(feature = "codemode-python"))]
+        #[cfg(not(feature = "monty"))]
         {
             0
         }
@@ -544,12 +559,12 @@ impl Session {
     /// [`DynamicPluginLoad::shell_notice`].
     #[allow(unsafe_code)] // 加载用户配置目录里的动态库，视作受信任。
     pub fn load_dynamic_plugins(&self) -> DynamicPluginLoad {
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         {
             let Some(mods) = &self.mods else {
                 return DynamicPluginLoad {
                     loaded: Vec::new(),
-                    error: Some("动态插件宿主未启用（需要 `codemode-python` feature）".to_owned()),
+                    error: Some("动态插件宿主未启用（需要 `monty` feature）".to_owned()),
                 };
             };
             match unsafe { mods.load_dynamic_plugins_from_config() } {
@@ -563,11 +578,11 @@ impl Session {
                 },
             }
         }
-        #[cfg(not(feature = "codemode-python"))]
+        #[cfg(not(feature = "monty"))]
         {
             DynamicPluginLoad {
                 loaded: Vec::new(),
-                error: Some("动态插件宿主未启用（缺少 `codemode-python` feature）".to_owned()),
+                error: Some("动态插件宿主未启用（缺少 `monty` feature）".to_owned()),
             }
         }
     }
@@ -577,12 +592,12 @@ impl Session {
     /// mod 在运行中 `tool_register` 之后，下一轮 turn 开始前会走到这里，因此新工具
     /// 会被 agent 看到。
     fn refresh_tools(&self) {
-        #[cfg(feature = "codemode-python")]
+        #[cfg(feature = "monty")]
         let catalog = match &self.mods {
             Some(mods) => mods.tools(),
             None => self.base_tools.lock().expect("base tools poisoned").clone(),
         };
-        #[cfg(not(feature = "codemode-python"))]
+        #[cfg(not(feature = "monty"))]
         let catalog = self.base_tools.lock().expect("base tools poisoned").clone();
         let filter = self
             .tool_filter
@@ -642,15 +657,15 @@ impl Session {
     }
 }
 
-/// 地基作者工具名（`codemode_write` 等）：不受 `--tools` 过滤影响，否则就没法写脚本了。
+/// 地基作者工具名（`jit_write` 等）：不受 `--tools` 过滤影响，否则就没法写脚本了。
 ///
 /// 没有编译进 mods 能力时不存在作者工具，一律不算保留名。
 fn is_host_reserved(name: &str) -> bool {
-    #[cfg(feature = "codemode-python")]
+    #[cfg(feature = "monty")]
     {
-        tower_agent_monty::is_reserved_name(name)
+        tower_agent_plugin_monty::is_reserved_name(name)
     }
-    #[cfg(not(feature = "codemode-python"))]
+    #[cfg(not(feature = "monty"))]
     {
         let _ = name;
         false
@@ -669,7 +684,7 @@ fn script_before_tool_call(
             let mut arguments = serde_json::Value::Object(context.args.clone());
             let results = hooks
                 .invoke(
-                    tower_agent_codemode_core::ScriptHookEvent::ToolCall,
+                    tower_agent_plugin_sdk::codemode::ScriptHookEvent::ToolCall,
                     serde_json::json!({
                         "name": context.tool_call.name,
                         "arguments": arguments,
@@ -776,7 +791,7 @@ fn script_after_tool_result(
             let mut is_error = context.is_error;
             let results = hooks
                 .invoke(
-                    tower_agent_codemode_core::ScriptHookEvent::ToolResult,
+                    tower_agent_plugin_sdk::codemode::ScriptHookEvent::ToolResult,
                     serde_json::json!({
                         "name": context.tool_call.name,
                         "arguments": context.args,
@@ -1252,7 +1267,7 @@ pub async fn run_tui(
     });
 
     let plugins = tower_agent_tui::frontend_plugins();
-    #[cfg(feature = "codemode-python")]
+    #[cfg(feature = "monty")]
     let plugins = {
         let mut plugins = plugins;
         if let Some(mods) = &session.mods {
@@ -1411,7 +1426,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "codemode-python")]
+    #[cfg(feature = "monty")]
     #[test]
     fn no_codemode_disables_the_python_host() {
         use tower_agent_runtime::{CompactionSettings, Compactor};
@@ -1605,14 +1620,14 @@ mod tests {
         assert!(last_assistant_text(&state).contains("工具结果已收到"));
     }
 
-    #[cfg(feature = "codemode-python")]
+    #[cfg(feature = "monty")]
     #[tokio::test]
     async fn python_script_hooks_change_agent_behavior() {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::write(dir.path().join("original.txt"), "ORIGINAL\n").unwrap();
         std::fs::write(dir.path().join("redirected.txt"), "SECRET\n").unwrap();
         let session = session(dir.path());
-        let manager = session.mods.as_ref().expect("Python codemode host");
+        let manager = session.mods.as_ref().expect("monty JIT runtime");
         let script = r#"
 tool_register("script_echo", "script_echo", "", {"type": "object"})
 
@@ -1677,7 +1692,7 @@ on("tool_call", "block")
         assert_eq!(text, "danger blocked");
     }
 
-    #[cfg(feature = "codemode-js")]
+    #[cfg(feature = "rquickjs")]
     #[tokio::test]
     async fn js_script_hooks_change_agent_behavior() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -2025,7 +2040,7 @@ on("tool_call", "block");
         assert_eq!(snapshot.default_model.as_deref(), Some("deepseek-chat"));
     }
 
-    #[cfg(feature = "codemode-python")]
+    #[cfg(feature = "monty")]
     #[tokio::test]
     async fn codemode_scripts_survive_restart_from_turso() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -2037,7 +2052,7 @@ on("tool_call", "block");
             tokio::runtime::Handle::current(),
         ));
         let first = session(dir.path()).with_store(Arc::clone(&store));
-        let manager = first.mods.as_ref().expect("Python codemode host");
+        let manager = first.mods.as_ref().expect("monty JIT runtime");
         let code = "\
 tool_register(\"persisted_echo\", \"persisted_echo\", \"\", {\"type\": \"object\"})
 
@@ -2047,11 +2062,11 @@ def persisted_echo(args):
         let write_tool = manager
             .tools()
             .into_iter()
-            .find(|tool| tool.name() == "codemode_write")
-            .expect("codemode_write tool");
+            .find(|tool| tool.name() == "jit_write")
+            .expect("jit_write tool");
         let written = call_codemode_tool(
             &write_tool,
-            "codemode_write",
+            "jit_write",
             serde_json::json!({ "name": "restart", "code": code }),
         )
         .await;
@@ -2059,9 +2074,9 @@ def persisted_echo(args):
         let list_tool = manager
             .tools()
             .into_iter()
-            .find(|tool| tool.name() == "codemode_list")
-            .expect("codemode_list tool");
-        let listed = call_codemode_tool(&list_tool, "codemode_list", serde_json::json!({})).await;
+            .find(|tool| tool.name() == "jit_list")
+            .expect("jit_list tool");
+        let listed = call_codemode_tool(&list_tool, "jit_list", serde_json::json!({})).await;
         assert!(
             listed.contains("restart") && listed.contains("loaded"),
             "write must be visible to list immediately: {listed}"
@@ -2073,7 +2088,7 @@ def persisted_echo(args):
         let tool = second
             .mods
             .as_ref()
-            .expect("Python codemode host")
+            .expect("monty JIT runtime")
             .tools()
             .into_iter()
             .find(|tool| tool.name() == "persisted_echo")
@@ -2095,7 +2110,7 @@ def persisted_echo(args):
         assert_eq!(record.source, code);
     }
 
-    #[cfg(feature = "codemode-python")]
+    #[cfg(feature = "monty")]
     #[tokio::test]
     async fn codemode_export_import_restores_and_runs_scripts() {
         let workspace = tempfile::tempdir().expect("workspace");
@@ -2116,15 +2131,15 @@ def exported_echo(args):
             tokio::runtime::Handle::current(),
         ));
         let writer_session = session(workspace.path()).with_store(Arc::clone(&original));
-        let manager = writer_session.mods.as_ref().expect("Python codemode host");
+        let manager = writer_session.mods.as_ref().expect("monty JIT runtime");
         let write = manager
             .tools()
             .into_iter()
-            .find(|tool| tool.name() == "codemode_write")
-            .expect("codemode_write");
+            .find(|tool| tool.name() == "jit_write")
+            .expect("jit_write");
         let written = call_codemode_tool(
             &write,
-            "codemode_write",
+            "jit_write",
             serde_json::json!({ "name": "exported", "code": code }),
         )
         .await;
@@ -2145,7 +2160,7 @@ def exported_echo(args):
             .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("codemode"))
             .expect("exported script file");
         let contents = std::fs::read_to_string(&file).expect("read export");
-        assert!(contents.starts_with("--- tower-agent-codemode v1\n"));
+        assert!(contents.starts_with("--- tower-agent-plugin-rquickjs v1\n"));
         assert!(contents.contains("\"source_hash\""));
         assert!(contents.contains("\"permissions\""));
         assert!(contents.ends_with(code));
@@ -2175,7 +2190,7 @@ def exported_echo(args):
         let tool = restored_session
             .mods
             .as_ref()
-            .expect("Python codemode host")
+            .expect("monty JIT runtime")
             .tools()
             .into_iter()
             .find(|tool| tool.name() == "exported_echo")

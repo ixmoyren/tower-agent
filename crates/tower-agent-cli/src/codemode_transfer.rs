@@ -11,11 +11,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower_agent_codemode_core::{ScriptLanguage, ScriptPermissions};
+use tower_agent_plugin_sdk::codemode::{ScriptLanguage, ScriptPermissions};
 use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore};
 
 const FORMAT_VERSION: u32 = 1;
-const MAGIC_LINE: &str = "--- tower-agent-codemode v1";
+const MAGIC_LINE: &str = "--- tower-agent-plugin-rquickjs v1";
 const FILE_EXTENSION: &str = "codemode";
 
 #[derive(Debug, Serialize, Deserialize)]

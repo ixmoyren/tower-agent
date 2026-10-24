@@ -5,13 +5,13 @@
 # 依赖：cargo-component、`wasm32-wasip2` target，以及 **WASI_SDK**：rquickjs 要编 quickjs 的
 # C 源码（crates.io 上的 rquickjs-sys 自带这 4 个 .c 文件，所以**不需要子模块或 vendor**）。
 #
-# 产物：crates/tower-agent-codemode/assets/codemode.wasm（**入库**，被宿主 include_bytes! 内嵌；
+# 产物：crates/tower-agent-plugin-rquickjs/assets/codemode.wasm（**入库**，被宿主 include_bytes! 内嵌；
 # src/bindings.rs 与 target/ 不入库）
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target_dir="${CARGO_TARGET_DIR:-$here/target}"
-out="$here/../../crates/tower-agent-codemode/assets/codemode.wasm"
+out="$here/../../crates/tower-agent-plugin-rquickjs/assets/codemode.wasm"
 
 if [ -z "${WASI_SDK:-}" ]; then
     echo "需要 WASI_SDK=<wasi-sdk 根目录>（rquickjs 编 quickjs C 源码用；本机在 ~/.cache/wasi-sdk-*）" >&2

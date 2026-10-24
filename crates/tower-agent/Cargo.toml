@@ -11,8 +11,9 @@ workspace = true
 [features]
 default = [
     "codemode",
-    "codemode-python",
-    "codemode-js",
+    "jit",
+    "monty",
+    "rquickjs",
     "storage-turso",
 ]
 # 可选的前端无关 UI 会话插件 / 协议 / 插件 SDK。
@@ -22,11 +23,13 @@ plugin-sdk = []
 # 默认存储后端：内嵌 Turso（持久化 config / provider 凭据 / 会话 / 历史 / 记忆）。
 storage-turso = ["dep:tower-agent-plugin-turso", "tower-agent-plugin-sdk/storage"]
 # codemode 的引擎无关宿主入口；具体解释器由下面两个子 feature 引入。
-codemode = ["tower-agent-plugin-sdk/wasmtime"]
-# Python（monty）解释器。
-codemode-python = ["codemode", "dep:tower-agent-monty"]
-# JavaScript（rquickjs）解释器。
-codemode-js = ["codemode", "dep:tower-agent-codemode"]
+codemode = ["tower-agent-plugin-sdk/codemode"]
+# JIT 插件运行时契约。
+jit = ["tower-agent-plugin-sdk/jit"]
+# monty 解释器实现。
+monty = ["codemode", "jit", "dep:tower-agent-plugin-monty"]
+# rquickjs 解释器实现。
+rquickjs = ["codemode", "jit", "dep:tower-agent-plugin-rquickjs"]
 
 [dependencies]
 tower-agent-core = { workspace = true }
@@ -34,8 +37,8 @@ tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-plugin-tools = { workspace = true }
 tower-agent-plugin = { workspace = true }
-tower-agent-codemode = { workspace = true, optional = true }
-tower-agent-monty = { workspace = true, optional = true }
+tower-agent-plugin-rquickjs = { workspace = true, optional = true }
+tower-agent-plugin-monty = { workspace = true, optional = true }
 tower-agent-protocol = { workspace = true, optional = true }
 tower-agent-plugin-sdk = { workspace = true, features = ["provider"] }
 tower-agent-plugin-turso = { workspace = true, optional = true }
@@ -49,4 +52,4 @@ serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tower.workspace = true
-tower-agent-codemode-core.workspace = true
+tower-agent-plugin-sdk = { workspace = true, features = ["codemode"] }

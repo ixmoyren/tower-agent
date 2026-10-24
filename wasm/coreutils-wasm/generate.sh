@@ -5,13 +5,13 @@
 # 与 monty-sandbox 不同，这里**不需要** wasi-sdk / wasm-opt / wasm-tools：
 # `wasm32-wasip2` 目标由 rustc 直出组件（代价是 wasm-opt 处理不了组件，体积靠 profile 压）。
 #
-# 产物：crates/tower-agent-codemode/assets/coreutils.wasm（约 7.4 MB，**入库**——
+# 产物：crates/tower-agent-plugin-rquickjs/assets/coreutils.wasm（约 7.4 MB，**入库**——
 # 宿主 crate 用 include_bytes! 内嵌，形状与 monty-sandbox 一致）。
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target_dir="${CARGO_TARGET_DIR:-$here/target}"
-out="$here/../../crates/tower-agent-codemode/assets/coreutils.wasm"
+out="$here/../../crates/tower-agent-plugin-rquickjs/assets/coreutils.wasm"
 
 if ! rustup target list --installed | grep -qx wasm32-wasip2; then
     echo "缺少 wasm32-wasip2 target：rustup target add wasm32-wasip2" >&2
