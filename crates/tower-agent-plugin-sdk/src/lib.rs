@@ -35,9 +35,9 @@ pub use tower_agent_plugin::{
     AgentLayer, Binding, CapabilityId, CapabilityOverride, Dependency, EventHandler, HOST_ABI,
     HostApi, InflightGuard, Lifecycle, Permission, PermissionDecision, PermissionPolicy,
     PermissionPrompter, PluginAccess, PluginContext, PluginError, PluginId, PluginKind,
-    PluginManifest, PluginRegistry, PluginState, ProvidedCapability, Resolution, ResolvedPlugin,
-    ShadowedPlugin, StaticPlugin, ToolDescriptor, ToolLayer, agent_layer, event_handler,
-    tool_layer, tower_agent_layer, tower_tool_layer,
+    PluginManifest, PluginRegistry, PluginShutdownFailure, PluginState, ProvidedCapability,
+    Resolution, ResolvedPlugin, ShadowedPlugin, StaticPlugin, ToolDescriptor, ToolLayer,
+    agent_layer, event_handler, tool_layer, tower_agent_layer, tower_tool_layer,
 };
 #[cfg(feature = "provider")]
 pub use tower_agent_provider::{

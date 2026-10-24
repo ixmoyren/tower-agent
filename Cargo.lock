@@ -5519,6 +5519,7 @@ dependencies = [
  "ratatui-textarea",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower-agent-plugin-ui",
  "tower-agent-provider",
  "tower-agent-runtime",

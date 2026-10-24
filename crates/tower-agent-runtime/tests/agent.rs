@@ -11,8 +11,9 @@ use std::{
 };
 
 use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 use tower_agent_runtime::{
-    Agent, AgentEvent, AgentInitialState, AgentOptions, AgentState, QueueMode,
+    Agent, AgentError, AgentEvent, AgentInitialState, AgentOptions, AgentState, QueueMode,
 };
 
 use support::{ScriptedStreamService, boxed_stream, test_model, text_script, user};
@@ -56,6 +57,26 @@ async fn prompt_updates_state_and_emits_the_lifecycle() {
     assert!(!state.is_streaming);
     assert_eq!(state.messages.len(), 2, "user prompt plus assistant reply");
     assert_eq!(recorder.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn host_shutdown_signal_rejects_new_agent_runs() {
+    let model = test_model();
+    let provider = ScriptedStreamService::new(vec![text_script(&model, "unused")]);
+    let recorder = provider.clone();
+    let mut options = AgentOptions::new(boxed_stream(provider));
+    options.initial.model = Some(model);
+    let shutdown = CancellationToken::new();
+    options.shutdown_signal = Some(shutdown.clone());
+    let agent = Agent::new(options);
+    shutdown.cancel();
+
+    let error = agent
+        .prompt_text("must not start")
+        .await
+        .expect_err("shutdown rejects the run");
+    assert!(matches!(error, AgentError::ShuttingDown));
+    assert!(recorder.requests().is_empty());
 }
 
 #[tokio::test]

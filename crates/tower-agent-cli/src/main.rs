@@ -32,13 +32,16 @@ use args::{CliArgs, CliCommand, ConfigScopeArg, parse};
 use provider::ProviderStackOptions;
 use session::{Session, run_print, run_tui};
 use std::{
+    future::Future,
     io::{IsTerminal as _, Read as _},
     path::{Path, PathBuf},
     process::ExitCode,
     sync::Arc,
+    time::Duration,
 };
 use tower_agent_plugin_sdk::codemode::{EngineSelection, ScriptLanguage};
 use tower_agent_plugin_sdk::storage::{ConfigScope, StorageError};
+use tower_agent_runtime::{ShutdownCoordinator, ShutdownOptions};
 
 fn main() -> ExitCode {
     let args = match parse(std::env::args().skip(1)) {
@@ -119,6 +122,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let shutdown = ShutdownCoordinator::new();
     let store = match store::CliStore::open_for_cli(
         &runtime,
         store::storage_path(),
@@ -310,6 +314,7 @@ fn main() -> ExitCode {
         Arc::clone(&compactor),
         !args.no_codemode,
     )
+    .with_shutdown(shutdown.clone())
     .with_provider_registry(Arc::new(provider_registry))
     .with_provider_credentials(runtime_credentials);
     let session = match &transcript {
@@ -320,6 +325,10 @@ fn main() -> ExitCode {
         Some(store) => session.with_store(Arc::clone(store)),
         None => session,
     });
+    if let Err(error) = shutdown.register_hook("cli-session", session.shutdown_hook()) {
+        eprintln!("注册 CLI 停机 Hook 失败：{error}");
+        return ExitCode::FAILURE;
+    }
     session.set_codemode_engine(codemode_engine);
     if args.codemode {
         #[cfg(feature = "rquickjs")]
@@ -361,12 +370,12 @@ fn main() -> ExitCode {
 
     let outcome = if print_mode {
         match prompt {
-            Some(prompt) => run_print_blocking(&session, prompt, &runtime),
+            Some(prompt) => run_print_blocking(&session, prompt, &runtime, &shutdown),
             // 上面已经拦住了 print 模式下没有提示词的情况。
             None => return ExitCode::FAILURE,
         }
     } else {
-        run_tui_blocking(&session, prompt, tui_notice, &runtime)
+        run_tui_blocking(&session, prompt, tui_notice, &runtime, &shutdown)
     };
 
     // 把 `/login` `/model` `/thinking` 写下的配置落盘（写入是 fire-and-forget）。
@@ -770,8 +779,9 @@ fn run_print_blocking(
     session: &Session,
     prompt: String,
     runtime: &tokio::runtime::Runtime,
+    shutdown: &ShutdownCoordinator,
 ) -> std::io::Result<()> {
-    runtime.block_on(async {
+    run_with_cli_shutdown(runtime, shutdown, async {
         session.load_persisted_mods().await;
         if let Some(notice) = session.load_dynamic_plugins().shell_notice() {
             eprintln!("{notice}");
@@ -792,8 +802,99 @@ fn run_tui_blocking(
     prompt: Option<String>,
     notice: Option<String>,
     runtime: &tokio::runtime::Runtime,
+    shutdown: &ShutdownCoordinator,
 ) -> std::io::Result<()> {
-    runtime.block_on(run_tui(session, prompt, "tower-agent", notice))
+    run_with_cli_shutdown(runtime, shutdown, async {
+        run_tui(session, prompt, "tower-agent", notice).await
+    })
+}
+
+fn run_with_cli_shutdown<F>(
+    runtime: &tokio::runtime::Runtime,
+    shutdown: &ShutdownCoordinator,
+    operation: F,
+) -> std::io::Result<()>
+where
+    F: Future<Output = std::io::Result<()>>,
+{
+    runtime.block_on(async {
+        let coordinator = shutdown.clone();
+        let operation = async {
+            let _guard = coordinator
+                .track_operation()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            operation.await
+        };
+        let shutdown_options = ShutdownOptions {
+            grace_period: Duration::from_secs(30),
+            cancellation_timeout: Duration::from_secs(5),
+        };
+        let drain = async {
+            tokio::select! {
+                _ = cli_shutdown_signal() => {
+                    shutdown.begin_shutdown();
+                }
+                _ = shutdown.wait_for_shutdown_start() => {}
+            }
+            shutdown.shutdown_with(shutdown_options).await
+        };
+        tokio::pin!(operation, drain);
+        tokio::select! {
+            result = &mut operation => {
+                shutdown.begin_shutdown();
+                let report = shutdown.shutdown_with(shutdown_options).await;
+                log_shutdown_report(&report);
+                result
+            }
+            report = &mut drain => {
+                log_shutdown_report(&report);
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    if report.drained {
+                        "收到停机信号，CLI 已完成排空"
+                    } else {
+                        "收到停机信号，CLI 到达停机上限并强制退出"
+                    },
+                ))
+            }
+        }
+    })
+}
+
+async fn cli_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut terminate) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                result = tokio::signal::ctrl_c() => {
+                    let _ = result;
+                }
+                _ = terminate.recv() => {}
+            }
+        } else {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+fn log_shutdown_report(report: &tower_agent_runtime::ShutdownReport) {
+    if report.forced {
+        eprintln!("优雅停机超过宽限期，已触发强制取消。");
+    }
+    if report.remaining_operations > 0 {
+        eprintln!(
+            "停机结束时仍有 {} 个操作未完成。",
+            report.remaining_operations
+        );
+    }
+    for error in &report.hook_errors {
+        eprintln!("停机 Hook 失败：{error}");
+    }
 }
 
 /// 构造 CLI 使用的 tokio runtime。
@@ -848,6 +949,36 @@ mod tests {
         // 这个测试进程的 stdin 在 cargo test 下通常是空/非 TTY，两种结果都合法；
         // 关键是调用不会 panic。
         let _ = read_stdin_prompt();
+    }
+
+    #[test]
+    fn cli_shutdown_runs_registered_hooks_after_normal_operation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Hook(Arc<AtomicUsize>);
+
+        impl tower_agent_runtime::ShutdownHook for Hook {
+            fn shutdown(&self) -> futures_util::future::BoxFuture<'static, Result<(), String>> {
+                let calls = Arc::clone(&self.0);
+                Box::pin(async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                })
+            }
+        }
+
+        let runtime = runtime().expect("runtime");
+        let shutdown = ShutdownCoordinator::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        shutdown
+            .register_hook("test", Arc::new(Hook(Arc::clone(&calls))))
+            .expect("register hook");
+        run_with_cli_shutdown(&runtime, &shutdown, async { Ok(()) }).expect("graceful shutdown");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            shutdown.state(),
+            tower_agent_runtime::ShutdownState::Stopped
+        );
     }
 
     #[test]

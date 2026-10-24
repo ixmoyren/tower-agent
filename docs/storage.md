@@ -1,23 +1,19 @@
-# Storage plugins and switching
+# 存储插件与切换
 
-`tower-agent` registers available storage implementations through
-`tower-agent-plugin-sdk`'s `storage` feature. Runtime has exactly one active
-backend; all configuration, credentials, sessions, history, memory and scripts
-are read from and written to that backend.
+`tower-agent` 通过 `tower-agent-plugin-sdk` 的 `storage` feature 注册可用的存储实现。
+运行时同一时间只能有一个活动后端；所有配置、凭据、会话、历史、记忆和脚本都从该后端
+读取并写入该后端。
 
-## Selection
+## 选择
 
-Upper layers such as the CLI receive `StorageBackendRegistration` values from
-the plugin assembly layer. If more than one backend is available and no active
-backend is configured, the frontend must ask the user to choose one. The
-selection belongs in a separate control configuration file, not in the storage
-backend being selected.
+CLI 等上层组件从插件装配层接收 `StorageBackendRegistration`。如果存在多个可用后端，
+且尚未配置活动后端，前端必须要求用户选择一个后端。选择结果应保存在独立的控制配置
+文件中，而不是保存在待选择的存储后端内。
 
-Use `StorageManager::new(backends, active)` to enforce the single-active rule.
-`CliStore::from_manager` and other hosts can consume the manager through the
-generic `Storage` trait.
+使用 `StorageManager::new(backends, active)` 强制落实“单活动后端”规则。
+`CliStore::from_manager` 和其他宿主可以通过通用 `Storage` trait 使用该管理器。
 
-The CLI stores selection state in:
+CLI 将选择状态保存在：
 
 ```text
 ~/.config/tower-agent/storage.toml
@@ -29,17 +25,16 @@ active = "turso"
 disabled = []
 ```
 
-`TOWER_AGENT_STORAGE_CONTROL` overrides this path. The file is written with
-`temp file → fsync → rename → directory fsync`; it never lives in a storage
-backend, so switching backends cannot move the selection itself.
+环境变量 `TOWER_AGENT_STORAGE_CONTROL` 可以覆盖此路径。文件按
+`临时文件 → fsync → rename → 目录 fsync` 的顺序写入；选择状态从不存放在存储后端中，
+因此切换后端时不会连同选择状态一起迁移。
 
-At startup, one enabled backend is selected automatically. With multiple
-enabled backends, an interactive terminal prompts for a choice; a
-non-interactive process must pass `--storage <name>` and otherwise fails with
-the candidate list. Once a selection exists, `--storage` can only confirm it.
-Changing an existing selection requires the explicit migration command below.
+启动时，如果只有一个已启用后端，系统会自动选择它。如果存在多个已启用后端，交互式
+终端会提示用户选择；非交互式进程必须通过 `--storage <name>` 指定后端，否则会以候选
+后端列表作为错误信息退出。选择已经存在时，`--storage` 只能用于确认该选择。更改现有
+选择必须执行下文的显式迁移命令。
 
-## CLI commands
+## CLI 命令
 
 ```sh
 tower-agent storage list
@@ -49,41 +44,36 @@ tower-agent storage disable <name>
 tower-agent storage enable <name>
 ```
 
-`switch` runs the migration in the command process; no daemon or separate
-maintenance process or `tower-agent` restart is required. Reads and writes are
-blocked by the manager during the exclusive snapshot copy, but the process
-itself does not stop. The active backend cannot be disabled.
+`switch` 会在命令进程中执行迁移，不需要守护进程、独立维护进程，也不需要重启
+`tower-agent`。独占复制快照期间，管理器会阻塞存储读写，但进程本身不会停止。活动后端
+不能被禁用。
 
-## Switching
+## 切换流程
 
-`StorageManager::switch_to_with(target, persist_selection)` performs an
-in-process migration:
+`StorageManager::switch_to_with(target, persist_selection)` 在同一进程内执行迁移：
 
-1. Acquire the manager's exclusive lock. New storage reads and writes wait.
-2. Wait for all in-flight storage operations and flush the source.
-3. Require an empty target backend.
-4. Export one complete snapshot, including session transcripts.
-5. Import the snapshot into the target and flush it.
-6. Export the target again and compare the normalized snapshots.
-7. Persist the new backend selection.
-8. Change the in-memory active backend.
+1. 获取管理器的独占锁，新的存储读写开始等待。
+2. 等待所有在途存储操作完成，并刷新源后端。
+3. 要求目标后端为空。
+4. 导出一份包含会话 transcript 的完整快照。
+5. 将快照导入目标后端并刷新。
+6. 再次导出目标后端，并比较标准化后的快照。
+7. 持久化新的后端选择。
+8. 切换内存中的活动后端。
 
-There is no dual-write. If copying, verification, or selection persistence
-fails, the active backend remains the source and staging data is cleared on a
-best-effort basis.
+迁移不做双写。如果复制、校验或选择状态持久化失败，活动后端仍保持为源后端，并尽力
+清理暂存数据。
 
-The source backend is retained after a successful switch. It can later be
-disabled with `StorageManager::set_backend_enabled(name, false)`; disabling the
-active backend is rejected.
+切换成功后，源后端仍然保留。之后可以通过
+`StorageManager::set_backend_enabled(name, false)` 禁用它；禁用活动后端会被拒绝。
 
-## Backend requirements
+## 后端要求
 
-`StorageMaintenance` supplies the operations needed by switching:
+`StorageMaintenance` 提供切换流程所需的操作：
 
 - `flush`
-- full snapshot export/import
-- clear staging
+- 完整快照导出与导入
+- 清理暂存数据
 
-The default snapshot implementation walks all six storage domains. Backends
-only need to provide scope enumeration for config/scripts and their normal
-store methods.
+默认快照实现会遍历全部六个存储域。后端只需为 config/scripts 提供作用域枚举，并实现
+其常规存储方法。

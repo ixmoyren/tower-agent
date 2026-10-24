@@ -71,8 +71,8 @@ tower-agent-plugin-* 实现 → tower-agent-plugin-sdk → tower-agent-plugin
 | 卸载     | 不卸载（随进程）               | 支持卸载                        | 支持热替换                      |
 | 热更新   | 不支持（重新构建）             | 需 stop→unload→load（可选实现） | 原生热加载                      |
 | 调用开销 | 零（直接函数调用）             | 一次间接调用 + ABI 编解码       | 编译后接近原生                  |
-| 典型用途 | 内置 tool、provider 层、观测层 | 沙箱、记忆、持久化、codemode    | JIT 插件、轻量扩展  |
-| feature  | 默认开启                       | `dynamic`                       | `tower-agent-plugin-monty`             |
+| 典型用途 | 内置 tool、provider 层、观测层 | 沙箱、记忆、持久化、codemode    | JIT 插件、轻量扩展              |
+| feature  | 默认开启                       | `dynamic`                       | `tower-agent-plugin-monty`      |
 
 ### 4.1 静态插件（tower Layer）
 
@@ -102,7 +102,8 @@ tower-agent-plugin-* 实现 → tower-agent-plugin-sdk → tower-agent-plugin
 - 原子换绑实现 **热加载**：试跑新版本 → 成功才替换源码槽位 → 旧版本等待 in-flight 完成后释放；失败保留旧版本并回报错误。
 - 目标场景：JIT 插件（用户/LLM 可写、可热更的轻量逻辑）。
 
-> 实现状态：`tower-agent-plugin-monty` 实现 SDK 的 `CodemodeExecutor` 与 `JitRuntime`，并保留 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload` 作为生命周期实现细节。 **执行在 wasm 沙箱里**：`wasm/monty-sandbox` 把 monty 解释器（及其 ruff 解析器依赖）编译成 `wasm32-wasip2` 组件，由 release profile 优化后内嵌进 `tower-agent-plugin-monty`（`assets/monty-sandbox.wasm`，约 5.5 MB），宿主用 wasmtime 的 **组件绑定**驱动，开启 JIT + JIT 缓存（缓存键含 wasmtime 版本，升级后自动失效）。没有外部 `monty`
+> 实现状态：`tower-agent-plugin-monty` 实现 SDK 的 `CodemodeExecutor` 与 `JitRuntime`，并保留 `MontyPlugin::load` / `activate` / `call_function` / `reload` / `reload_checked` / `stop` / `unload` 作为生命周期实现细节。 **执行在 wasm 沙箱里**：`wasm/monty-sandbox` 把 monty 解释器（及其 ruff 解析器依赖）编译成 `wasm32-wasip2` 组件，由 release profile 优化后内嵌进 `tower-agent-plugin-monty`（`assets/monty-sandbox.wasm`，约 5.5 MB），宿主用 wasmtime 的 **组件绑定**驱动，开启 JIT + JIT 缓存（缓存键含 wasmtime 版本，升级后自动失效）。没有外部
+> `monty`
 > CLI、没有子进程、不需要 `TPA_MONTY_BIN`；脚本代码的越界/栈溢出/内存超限被 wasmtime 转成 trap 错误，不会带走宿主进程。WIT 接口是宿主驱动的 REPL 状态机（`start` + `resume-*`），参数/返回值都是 JSON；脚本里未定义的函数调用经 `MontyHost::dispatch` 异步派发到宿主，热加载用 `reload_checked` 试跑成功后原子替换源码。重新生成组件：`./wasm/monty-sandbox/generate.sh`。
 >
 > **monty JIT 插件**：`ModManager` 管理一组 monty 插件，对 LLM 暴露 `jit_write` / `jit_reload` / `jit_list` / `jit_remove` / `jit_persist` / `jit_discard` 作者工具。脚本可：
@@ -286,9 +287,9 @@ stabby::export! {
 2. **静态 tool 都是 tower 中的 layer**：`tower-agent-plugin-tools` 里的六个静态工具插件除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tower_agent_plugin_tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上。动态 `shell` 通过 `AbiToolCall` / `AbiToolResult` 边界接入同一工具服务契约。
 3. **工具钩子也是 layer**：`tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`，分别对应 pi 的 `tool_call`（可放行/改写/拦截）与 `tool_result`（逐条改写结果）钩子。
 4. **typed 工具注册**：`tower_agent_runtime::ToolRegistration::new::<P, _, _>(...)` 用 schemars 生成参数 schema、用 serde 反序列化入参，校验失败编码为 `is_error` 工具结果。
-5. `tower-agent-plugin-tools` 导出六个独立静态插件和 `builtin_plugins(cwd)` 插件集合，但**不创建注册表、不解析、不安装**；`shell` 由 `tower-agent-plugin-shell` 以动态 `cdylib` 提供。`tower-agent::assembly::HostPlugins` 负责登记静态插件，运行时动态插件由宿主加载器登记到同一 `PluginRegistry` 并解析安装。`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在装配后的解析结果上过滤。
+5. `tower-agent-plugin-tools` 导出六个独立静态插件和 `builtin_plugins(cwd)` 插件集合，但 **不创建注册表、不解析、不安装**；`shell` 由 `tower-agent-plugin-shell` 以动态 `cdylib` 提供。`tower-agent::assembly::HostPlugins` 负责登记静态插件，运行时动态插件由宿主加载器登记到同一 `PluginRegistry` 并解析安装。`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在装配后的解析结果上过滤。
 6. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为工具的实现细节，不对外暴露成能力。
-7. 内置工具覆盖以**插件名**为单位：替换 `read` 就注册另一个名为 `read` 的高优先级插件，只影响 `read`；`tool.read` 仅作为能力/依赖标识，不作为工具插件覆盖入口。
+7. 内置工具覆盖以 **插件名**为单位：替换 `read` 就注册另一个名为 `read` 的高优先级插件，只影响 `read`；`tool.read` 仅作为能力/依赖标识，不作为工具插件覆盖入口。
 8. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `tower-agent-cli::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
 
 ### 9.1 Provider 插件
@@ -375,11 +376,11 @@ pub enum PluginError {
 
 ## 15. 里程碑
 
-| 里程碑 | 内容                                                                                                                                                                 |
-|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| M1 ✅  | `tower-agent-plugin` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具以独立静态插件接入；生命周期 / 宿主 API / 权限 / 错误已落地 |
-| M2 ✅  | `tower-agent-plugin-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `examples/plugin-dyn` 示例 cdylib + 端到端测试 |
-| M3 ✅  | `tower-agent-plugin-monty`：内嵌 monty wasm 组件、宿主能力回调、原子换绑热加载与失败回滚                                                                                    |
+| 里程碑 | 内容                                                                                                                                                                                                                         |
+|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| M1 ✅  | `tower-agent-plugin` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具以独立静态插件接入；生命周期 / 宿主 API / 权限 / 错误已落地                                                                          |
+| M2 ✅  | `tower-agent-plugin-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `examples/plugin-dyn` 示例 cdylib + 端到端测试                                                                          |
+| M3 ✅  | `tower-agent-plugin-monty`：内嵌 monty wasm 组件、宿主能力回调、原子换绑热加载与失败回滚                                                                                                                                     |
 | M4 ◐   | 沙箱（SDK `wasmtime` feature）/ 记忆 / 持久化 / codemode 已落地；Python / JS 引擎共享 capability、提示词、feature 与 CLI 开关。**未完成**：动态形态的沙箱与记忆、统一脚本仓库。其余未完成项见 [`roadmap.md`](./roadmap.md)。 |
 
 ## 16. 已确认决策

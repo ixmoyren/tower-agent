@@ -18,6 +18,10 @@ pub enum AgentError {
     #[error("agent loop error: {0}")]
     Loop(String),
 
+    /// 宿主正在为优雅停机排空，已不再接受新任务。
+    #[error("agent is shutting down")]
+    ShuttingDown,
+
     /// 建立 provider 流失败（凭据、传输、超时等）。
     #[error(transparent)]
     Provider(#[from] tower_agent_provider::PiError),

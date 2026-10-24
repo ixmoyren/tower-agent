@@ -8,7 +8,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{
+        Arc, Mutex, OnceLock, Weak,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use futures_util::{StreamExt as _, future::BoxFuture};
@@ -27,7 +30,8 @@ use tower_agent_plugin_sdk::codemode::{
 use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore};
 use tower_agent_plugin_sdk::{
     CapabilityId, HostApi, Permission, PermissionPolicy, PluginContext, PluginError, PluginId,
-    PluginKind, PluginManifest, PluginRegistry, ShadowedPlugin, StaticPlugin,
+    PluginKind, PluginManifest, PluginRegistry, PluginShutdownFailure, ShadowedPlugin,
+    StaticPlugin,
 };
 use tower_agent_provider::{Arguments, ToolCall};
 
@@ -172,6 +176,7 @@ pub struct ModManager {
     script_storage: Mutex<Option<ScriptStorage>>,
     /// Session-scoped script hook registry shared with other codemode engines.
     hook_registry: Mutex<Option<Arc<ScriptHookRegistry>>>,
+    closed: AtomicBool,
     self_weak: OnceLock<Weak<ModManager>>,
 }
 
@@ -263,6 +268,7 @@ impl ModManager {
             kv: Mutex::new(BTreeMap::new()),
             script_storage: Mutex::new(None),
             hook_registry: Mutex::new(None),
+            closed: AtomicBool::new(false),
             self_weak: OnceLock::new(),
         });
         let _ = manager.self_weak.set(Arc::downgrade(&manager));
@@ -286,6 +292,7 @@ impl ModManager {
     /// 与直接操作 [`PluginRegistry`] 不同，这里会立即回写工具目录，因此插件的工具与
     /// **受保护的名字 / 能力**随即对后续 JIT / 动态插件生效；解析失败会回滚候选。
     pub fn register_static_plugin(&self, plugin: Arc<dyn StaticPlugin>) -> Result<(), PluginError> {
+        self.ensure_open()?;
         let name = plugin.manifest().name;
         self.registry
             .lock()
@@ -594,6 +601,9 @@ impl ModManager {
 
     /// Load enabled scripts from storage, with project records overriding user records.
     pub async fn load_persisted(self: &Arc<Self>) -> usize {
+        if self.closed.load(Ordering::SeqCst) {
+            return 0;
+        }
         let Some(storage) = self.script_storage() else {
             return 0;
         };
@@ -723,6 +733,7 @@ impl ModManager {
         self: &Arc<Self>,
         dir: impl AsRef<Path>,
     ) -> Result<Vec<String>, PluginError> {
+        self.ensure_open()?;
         let loaded = {
             let mut registry = self.registry.lock().expect("registry poisoned");
             unsafe { crate::dynamic::load_from_dir(&mut registry, dir, self) }?
@@ -846,6 +857,7 @@ impl ModManager {
         code: &str,
         options: ScriptWriteOptions,
     ) -> Result<ModSummary, PluginError> {
+        self.ensure_open()?;
         let ScriptWriteOptions {
             permissions,
             requires,
@@ -923,6 +935,7 @@ impl ModManager {
         code: &str,
         options: ModOptions,
     ) -> Result<ModSummary, PluginError> {
+        self.ensure_open()?;
         if let Some(permissions) = options.permissions {
             self.set_permissions(name, permissions);
         }
@@ -1022,6 +1035,45 @@ impl ModManager {
         let _ = plugin.unload();
         self.resolve_and_apply()?;
         Ok(true)
+    }
+
+    /// 停止 JIT 与动态插件，释放宿主后台资源。
+    ///
+    /// 调用方应先完成 agent 请求排空。本方法幂等，返回全部插件关闭失败。
+    pub fn shutdown(&self) -> Vec<PluginShutdownFailure> {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return Vec::new();
+        }
+        let names = self
+            .mods
+            .lock()
+            .expect("mods poisoned")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut failures = Vec::new();
+        for name in names {
+            if let Err(error) = self.remove(&name) {
+                failures.push(PluginShutdownFailure {
+                    plugin: name,
+                    message: error.to_string(),
+                });
+            }
+        }
+        failures.extend(self.registry.lock().expect("registry poisoned").shutdown());
+        self.host.replace_tools(Vec::<AgentTool>::new());
+        self.catalog.lock().expect("catalog poisoned").clear();
+        failures
+    }
+
+    fn ensure_open(&self) -> Result<(), PluginError> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(PluginError::Install {
+                plugin: "agent-monty".to_owned(),
+                message: "JIT runtime is shutting down".to_owned(),
+            });
+        }
+        Ok(())
     }
 
     /// 创建并安装一个新 mod（构造 → `activate` → 进注册表 → 解析安装）。
@@ -1570,6 +1622,10 @@ impl StaticPlugin for ModJitPlugin {
             context.register_tool(tool);
         }
         Ok(())
+    }
+
+    fn shutdown(&self) -> Result<(), PluginError> {
+        self.plugin.stop()
     }
 }
 

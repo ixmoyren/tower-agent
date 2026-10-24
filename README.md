@@ -26,7 +26,7 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 ### 特性亮点
 
 - **tower-native**：`Agent` 实现 `Service<AgentRequest>`，可用 `ServiceBuilder` 与任意
-  `Layer` 组合；同时提供 **有状态会话**、**无状态 Service** 和 **池化 Service**。
+  `Layer` 组合；同时提供 **有状态会话**、 **无状态 Service** 和 **池化 Service**。
 - **丰富的插件开发手段**：静态插件、动态 `cdylib` 插件和热重载插件共享统一注册、解析、
   覆盖与生命周期模型；可扩展工具、Provider、中间件、事件 Hook、UI、存储和沙箱能力。
 - **Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存和实例池由 SDK 的
@@ -49,40 +49,40 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 
 `tower-agent` 是一个 facade，按层再导出其余 crate；所有内部依赖统一走 workspace 依赖。
 
-| Crate                    | 职责                                                                                                  |
-|--------------------------|-------------------------------------------------------------------------------------------------------|
-| `tower-agent`            | **门面与装配层**：再导出 core / runtime / provider / tools / plugin，并装配宿主插件（可选 ui/protocol/plugin-sdk） |
-| `tower-agent-core`       | **契约**：`AgentRequest`/`AgentResponse`/`AgentEventStream`、消息与事件、工具边界、Layer 扩展点、错误 |
-| `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
-| `tower-agent-provider`   | **Provider 协议**：消息/模型/请求/事件、Stream Service、Models、HTTP/SSE、插件契约；不含具体厂商实现 |
-| `tower-agent-plugin-providers` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar，通过 SDK 注册 Provider 能力 |
-| `tower-agent-plugin-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
-| `tower-agent-plugin-shell` | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                    |
-| `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；只由 SDK 直接依赖 |
-| `tower-agent-plugin-sdk` | **插件能力 SDK**：依赖 plugin 并再导出宿主 API；所有 `plugin-*` 实现只依赖 SDK |
-| `tower-agent-plugin-turso` | **默认存储插件**：实现 SDK storage 契约的嵌入式 Turso 后端 |
-| `tower-agent-plugin-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
-| `tower-agent-plugin-rquickjs` | **rquickjs 解释器插件**：JavaScript 的 codemode 与 JIT 实现 |
-| `tower-agent-plugin-monty`      | **monty 解释器插件**：Python 子集的 codemode 与 JIT 实现                       |
-| `tower-agent-protocol`   | **协议**：帧、严格 CBOR 子集、RPC 信封                                                                |
-| `tower-agent-tui`        | **终端渲染前端**：消费 `tower-agent-plugin-ui`，负责 ratatui 页面、编辑器与终端事件循环                       |
-| `tower-agent-cli`        | **CLI 宿主**：二进制名 `tower-agent`，以 `Service` / `Layer` 组合装配会话                             |
+| Crate                          | 职责                                                                                                               |
+|--------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| `tower-agent`                  | **门面与装配层**：再导出 core / runtime / provider / tools / plugin，并装配宿主插件（可选 ui/protocol/plugin-sdk） |
+| `tower-agent-core`             | **契约**：`AgentRequest`/`AgentResponse`/`AgentEventStream`、消息与事件、工具边界、Layer 扩展点、错误              |
+| `tower-agent-runtime`          | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                                           |
+| `tower-agent-provider`         | **Provider 协议**：消息/模型/请求/事件、Stream Service、Models、HTTP/SSE、插件契约；不含具体厂商实现               |
+| `tower-agent-plugin-providers` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar，通过 SDK 注册 Provider 能力         |
+| `tower-agent-plugin-tools`     | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                                           |
+| `tower-agent-plugin-shell`     | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                                    |
+| `tower-agent-plugin`           | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；只由 SDK 直接依赖                        |
+| `tower-agent-plugin-sdk`       | **插件能力 SDK**：依赖 plugin 并再导出宿主 API；所有 `plugin-*` 实现只依赖 SDK                                     |
+| `tower-agent-plugin-turso`     | **默认存储插件**：实现 SDK storage 契约的嵌入式 Turso 后端                                                         |
+| `tower-agent-plugin-ui`        | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费                         |
+| `tower-agent-plugin-rquickjs`  | **rquickjs 解释器插件**：JavaScript 的 codemode 与 JIT 实现                                                        |
+| `tower-agent-plugin-monty`     | **monty 解释器插件**：Python 子集的 codemode 与 JIT 实现                                                           |
+| `tower-agent-protocol`         | **协议**：帧、严格 CBOR 子集、RPC 信封                                                                             |
+| `tower-agent-tui`              | **终端渲染前端**：消费 `tower-agent-plugin-ui`，负责 ratatui 页面、编辑器与终端事件循环                            |
+| `tower-agent-cli`              | **CLI 宿主**：二进制名 `tower-agent`，以 `Service` / `Layer` 组合装配会话                                          |
 
-**分层原则**：`tower-agent-core` 只放契约与类型，**不依赖** runtime / plugin / 前端；
+**分层原则**：`tower-agent-core` 只放契约与类型， **不依赖** runtime / plugin / 前端；
 编排循环、队列、事件总线在 `runtime`；`tools` 提供工具实现与插件声明，`plugin` 提供注册表、
 解析、生命周期与扩展机制；`tower-agent-plugin-ui` 承载前端无关的会话状态和命令，
 `tower-agent-tui` 只做 ratatui 渲染。门面 crate 不依赖终端前端。
 
 ### 三种插件形态
 
-| 维度     | 静态插件                    | 动态插件                    | 热重载插件                      |
-|----------|-----------------------------|-----------------------------|---------------------------------|
-| 载体     | Rust crate（编译进宿主）    | `cdylib`（`.so` / `.dll`）  | monty 脚本（Python 子集）       |
-| 组合方式 | `tower::Layer` 叠加         | stabby ABI 导出入口         | 内嵌 wasm 组件（wasmtime 执行） |
-| 加载     | 编译期                      | `libloading` 运行时加载     | 运行时编译 + 原子换绑           |
-| 卸载     | 不卸载（随进程）            | 支持卸载                    | 支持热替换                      |
-| 调用开销 | 零（直接函数调用）          | 一次间接调用 + ABI 编解码   | 编译后接近原生                  |
-| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemode | JIT 插件、轻量扩展 |
+| 维度     | 静态插件                    | 动态插件                     | 热重载插件                      |
+|----------|-----------------------------|------------------------------|---------------------------------|
+| 载体     | Rust crate（编译进宿主）    | `cdylib`（`.so` / `.dll`）   | monty 脚本（Python 子集）       |
+| 组合方式 | `tower::Layer` 叠加         | stabby ABI 导出入口          | 内嵌 wasm 组件（wasmtime 执行） |
+| 加载     | 编译期                      | `libloading` 运行时加载      | 运行时编译 + 原子换绑           |
+| 卸载     | 不卸载（随进程）            | 支持卸载                     | 支持热替换                      |
+| 调用开销 | 零（直接函数调用）          | 一次间接调用 + ABI 编解码    | 编译后接近原生                  |
+| 典型用途 | 内置 tool、provider、观测层 | 沙箱、记忆、持久化、codemode | JIT 插件、轻量扩展              |
 
 静态插件实现 `StaticPlugin`，可贡献 **能力**、 **工具** 以及三层中间件
 （`agent_layers()` / `tool_layers()` / `event_handlers()`）。动态插件用
@@ -134,12 +134,12 @@ echo "解释一下 crates/tower-agent-runtime 的编排循环" \
 | `-t`, `--tools <list>`              | 只启用列出的内置工具（逗号分隔）                            |
 | `--exclude-tools <list>`            | 排除列出的内置工具（逗号分隔）                              |
 | `--no-tools` / `--no-builtin-tools` | 禁用全部内置工具                                            |
-| `--codemode`                         | 显式启用 JavaScript codemode 沙箱                           |
-| `--no-codemode`                      | 关闭全部 codemode 宿主、工具与沙箱                          |
-| `--codemode-engine <monty\|js>`      | 设置 codemode 默认引擎（脚本 language 可覆盖）              |
-| `--codemode-session <name>`          | 使用持久化 codemode 会话                                    |
-| `--codemode-mount <spec>`            | 额外 codemode 挂载（可重复）                                 |
-| `--storage <name>`                   | 首次有多个 storage backend 时选择默认项                      |
+| `--codemode`                        | 显式启用 JavaScript codemode 沙箱                           |
+| `--no-codemode`                     | 关闭全部 codemode 宿主、工具与沙箱                          |
+| `--codemode-engine <monty\|js>`     | 设置 codemode 默认引擎（脚本 language 可覆盖）              |
+| `--codemode-session <name>`         | 使用持久化 codemode 会话                                    |
+| `--codemode-mount <spec>`           | 额外 codemode 挂载（可重复）                                |
+| `--storage <name>`                  | 首次有多个 storage backend 时选择默认项                     |
 | `-h`, `--help` · `-v`, `--version`  | 帮助 / 版本                                                 |
 
 多 storage backend 的查看、迁移切换与停用：
@@ -158,12 +158,12 @@ tower-agent storage enable <name>
 
 **环境变量**
 
-| 变量          | 作用                                              |
-|---------------|---------------------------------------------------|
-| `TPA_WORKERS` | runtime worker 数（默认 `available_parallelism`） |
-| `TOWER_AGENT_PROVIDERS` | 覆盖 CLI 的用户 provider 配置文件路径 |
-| `TOWER_AGENT_STORAGE` | 覆盖默认 Turso 数据文件路径 |
-| `TOWER_AGENT_STORAGE_CONTROL` | 覆盖 storage 选择控制文件路径 |
+| 变量                          | 作用                                              |
+|-------------------------------|---------------------------------------------------|
+| `TPA_WORKERS`                 | runtime worker 数（默认 `available_parallelism`） |
+| `TOWER_AGENT_PROVIDERS`       | 覆盖 CLI 的用户 provider 配置文件路径             |
+| `TOWER_AGENT_STORAGE`         | 覆盖默认 Turso 数据文件路径                       |
+| `TOWER_AGENT_STORAGE_CONTROL` | 覆盖 storage 选择控制文件路径                     |
 
 ### 仓库结构
 
@@ -184,9 +184,10 @@ tower-agent/
 - [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md)：crate 分层、扩展模型与演进方向。
 - [`docs/plugins.md`](docs/plugins.md)：插件 / 扩展体系（静态 / 动态 / JIT 脚本）。
 - [`docs/storage.md`](docs/storage.md)：多 storage 插件、单活跃 backend 与迁移切换。
+- [`docs/graceful-shutdown.md`](docs/graceful-shutdown.md)：Axum 等长期运行宿主的请求排空、强制取消与资源关闭。
 - [`docs/codemode.md`](docs/codemode.md)：codemode —— **agent 可以编程**（LLM 生成脚本、沙箱执行；解释器可选 monty/Python 或 rquickjs/JS）。§0 是 v2 统一提案，§1–§11 是 JS 引擎细节。
 - [`docs/sdk.md`](docs/sdk.md)：插件作者 SDK 与扩展点设计；Rust 插件和沙箱脚本共享能力、Hook 与注册语义。
-- [`docs/roadmap.md`](docs/roadmap.md)：**未完成事项**的单一入口（以及建议顺序）。
+- [`docs/roadmap.md`](docs/roadmap.md)： **未完成事项**的单一入口（以及建议顺序）。
 - [`docs/architecture-review.md`](docs/architecture-review.md)：现状评审。
 - [`wasm/monty-sandbox/README.md`](wasm/monty-sandbox/README.md)：wasm 组件接口与再生成流程。
 
@@ -207,8 +208,8 @@ cargo clippy --all-features --all-targets
 `cargo build` / `cargo test` 之前，必须先把产物编出来**（否则 `include_bytes!` 报
 `couldn't read …/assets/*.wasm`）。三个产物、三条生成脚本：
 
-| 产物                                                 | 谁内嵌                 | 怎么编                                               |
-|------------------------------------------------------|------------------------|------------------------------------------------------|
+| 产物                                                        | 谁内嵌                        | 怎么编                                               |
+|-------------------------------------------------------------|-------------------------------|------------------------------------------------------|
 | `crates/tower-agent-plugin-monty/assets/monty-sandbox.wasm` | `tower-agent-plugin-monty`    | `./wasm/monty-sandbox/generate.sh`                   |
 | `crates/tower-agent-plugin-rquickjs/assets/coreutils.wasm`  | `tower-agent-plugin-rquickjs` | `./wasm/coreutils-wasm/generate.sh`                  |
 | `crates/tower-agent-plugin-rquickjs/assets/codemode.wasm`   | `tower-agent-plugin-rquickjs` | `WASI_SDK=<sdk> ./wasm/rquickjs-sandbox/generate.sh` |

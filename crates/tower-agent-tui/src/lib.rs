@@ -28,7 +28,8 @@ pub mod render;
 
 pub use app::Tui;
 pub use backend::{
-    Action, AppTerminal, action_for, init_terminal, restore_terminal, run_agent_tui, run_tui,
+    Action, AppTerminal, action_for, init_terminal, restore_terminal, run_agent_tui,
+    run_agent_tui_with_shutdown, run_tui, run_tui_with_shutdown,
 };
 pub use command::{BUILTIN_SLASH_COMMANDS, CommandHost, SlashCommand};
 pub use editor::{Editor, EditorAction, Mode};

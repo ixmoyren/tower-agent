@@ -18,7 +18,7 @@ use std::{
 
 use futures_core::Stream;
 use futures_util::future::BoxFuture;
-use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, TryAcquireError, mpsc};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError, mpsc};
 use tower::Service;
 use tower_agent_core::{
     AgentError, AgentEvent, AgentEventStream, AgentMessage, AgentRequest, AgentResponse, AgentTool,
@@ -27,7 +27,7 @@ use tower_agent_core::{
 use tower_agent_provider::{BoxStreamService, Message, Model, StopReason};
 
 use crate::{
-    Agent, AgentOptions,
+    Agent, AgentOptions, ShutdownCoordinator, ShutdownGuard,
     agent::{failure_message, summarize},
 };
 
@@ -38,6 +38,7 @@ pub struct AgentService {
     // 让 `AgentService` 本身 `Send + Sync`（跨 await 持 `&self` 才安全）。
     template: Arc<Mutex<AgentOptions>>,
     sessions: Option<Arc<dyn SessionStore>>,
+    shutdown: Option<ShutdownCoordinator>,
 }
 
 impl AgentService {
@@ -47,6 +48,7 @@ impl AgentService {
         Self {
             template: Arc::new(Mutex::new(AgentOptions::new(stream_fn))),
             sessions: None,
+            shutdown: None,
         }
     }
 
@@ -56,6 +58,7 @@ impl AgentService {
         Self {
             template: Arc::new(Mutex::new(template)),
             sessions: None,
+            shutdown: None,
         }
     }
 
@@ -64,6 +67,19 @@ impl AgentService {
     pub fn with_sessions(mut self, store: Arc<dyn SessionStore>) -> Self {
         self.sessions = Some(store);
         self
+    }
+
+    /// 接入宿主优雅停机。
+    #[must_use]
+    pub fn with_shutdown(mut self, shutdown: ShutdownCoordinator) -> Self {
+        self.shutdown = Some(shutdown);
+        self
+    }
+
+    /// 返回已配置的停机协调器。
+    #[must_use]
+    pub fn shutdown(&self) -> Option<&ShutdownCoordinator> {
+        self.shutdown.as_ref()
     }
 
     /// 设置默认模型。
@@ -130,11 +146,15 @@ impl AgentService {
             _ => messages,
         };
         options.initial.messages = transcript;
+        if let Some(shutdown) = &self.shutdown {
+            options.shutdown_signal = Some(shutdown.force_signal());
+        }
         Agent::new(options)
     }
 
     /// 跑一次无状态 run，返回本次新增的消息与汇总。
     pub async fn run(&self, request: AgentRequest) -> Result<AgentResponse, AgentError> {
+        let _guard = self.track_operation()?;
         let session = request.session_id.clone();
         let agent = self.prepare(request).await;
         let before = agent.state().messages.len();
@@ -159,9 +179,15 @@ impl AgentService {
 
     /// 跑一次流式 run，返回事件流（`AgentEventStream`）。
     pub fn run_stream(&self, request: AgentRequest) -> AgentEventStream {
+        let model = self.template().initial.model.clone().unwrap_or_default();
+        let guard = match self.track_operation() {
+            Ok(guard) => guard,
+            Err(error) => return failed_stream(&model, &error),
+        };
         let (tx, rx) = mpsc::unbounded_channel::<AgentEvent>();
         let service = self.clone();
         tokio::spawn(async move {
+            let _guard = guard;
             let session = request.session_id.clone();
             let model = service.template().initial.model.clone().unwrap_or_default();
             let agent = service.prepare(request).await;
@@ -199,6 +225,13 @@ impl AgentService {
         });
         Box::pin(ReceiverStream { rx })
     }
+
+    fn track_operation(&self) -> Result<Option<ShutdownGuard>, AgentError> {
+        self.shutdown
+            .as_ref()
+            .map(ShutdownCoordinator::track_operation)
+            .transpose()
+    }
 }
 
 impl Service<AgentRequest> for AgentService {
@@ -207,6 +240,13 @@ impl Service<AgentRequest> for AgentService {
     type Future = BoxFuture<'static, Result<AgentResponse, AgentError>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if self
+            .shutdown
+            .as_ref()
+            .is_some_and(|shutdown| !shutdown.is_accepting())
+        {
+            return Poll::Ready(Err(AgentError::ShuttingDown));
+        }
         Poll::Ready(Ok(()))
     }
 
@@ -229,6 +269,13 @@ impl AgentStreamService {
         Self { inner }
     }
 
+    /// 通过内部服务接入宿主优雅停机。
+    #[must_use]
+    pub fn with_shutdown(mut self, shutdown: ShutdownCoordinator) -> Self {
+        self.inner = self.inner.with_shutdown(shutdown);
+        self
+    }
+
     /// 无状态服务。
     #[must_use]
     pub fn inner(&self) -> &AgentService {
@@ -241,11 +288,18 @@ impl Service<AgentRequest> for AgentStreamService {
     type Error = AgentError;
     type Future = BoxFuture<'static, Result<AgentEventStream, AgentError>>;
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, request: AgentRequest) -> Self::Future {
+        if self
+            .inner
+            .shutdown()
+            .is_some_and(|shutdown| !shutdown.is_accepting())
+        {
+            return Box::pin(async { Err(AgentError::ShuttingDown) });
+        }
         let stream = self.inner.run_stream(request);
         Box::pin(async move { Ok(stream) })
     }
@@ -257,7 +311,7 @@ pub struct AgentPool {
     permits: Arc<Semaphore>,
     max: usize,
     permit: Option<OwnedSemaphorePermit>,
-    pending: Option<BoxFuture<'static, Result<OwnedSemaphorePermit, AcquireError>>>,
+    pending: Option<BoxFuture<'static, Result<Option<OwnedSemaphorePermit>, AgentError>>>,
 }
 
 impl AgentPool {
@@ -272,6 +326,13 @@ impl AgentPool {
             permit: None,
             pending: None,
         }
+    }
+
+    /// 通过内部服务接入宿主优雅停机。
+    #[must_use]
+    pub fn with_shutdown(mut self, shutdown: ShutdownCoordinator) -> Self {
+        self.service = self.service.with_shutdown(shutdown);
+        self
     }
 
     /// 最大并发。
@@ -305,6 +366,14 @@ impl Service<AgentRequest> for AgentPool {
     type Future = BoxFuture<'static, Result<AgentResponse, AgentError>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if self
+            .service
+            .shutdown()
+            .is_some_and(|shutdown| !shutdown.is_accepting())
+        {
+            self.pending = None;
+            return Poll::Ready(Err(AgentError::ShuttingDown));
+        }
         if self.permit.is_some() {
             return Poll::Ready(Ok(()));
         }
@@ -312,13 +381,13 @@ impl Service<AgentRequest> for AgentPool {
             if let Some(pending) = self.pending.as_mut() {
                 match pending.as_mut().poll(cx) {
                     Poll::Ready(Ok(permit)) => {
-                        self.permit = Some(permit);
+                        self.permit = permit;
                         self.pending = None;
                         return Poll::Ready(Ok(()));
                     }
-                    Poll::Ready(Err(_)) => {
+                    Poll::Ready(Err(error)) => {
                         self.pending = None;
-                        return Poll::Ready(Err(pool_closed()));
+                        return Poll::Ready(Err(error));
                     }
                     Poll::Pending => return Poll::Pending,
                 }
@@ -329,7 +398,28 @@ impl Service<AgentRequest> for AgentPool {
                     return Poll::Ready(Ok(()));
                 }
                 Err(TryAcquireError::NoPermits) => {
-                    self.pending = Some(Box::pin(Arc::clone(&self.permits).acquire_owned()));
+                    let permits = Arc::clone(&self.permits);
+                    let shutdown = self.service.shutdown().cloned();
+                    self.pending = Some(Box::pin(async move {
+                        match shutdown {
+                            Some(shutdown) => {
+                                let stop = shutdown.stop_signal();
+                                tokio::select! {
+                                    permit = permits.acquire_owned() => {
+                                        permit.map(Some).map_err(|_| pool_closed())
+                                    }
+                                    _ = stop.cancelled() => {
+                                        Err(AgentError::ShuttingDown)
+                                    }
+                                }
+                            }
+                            None => permits
+                                .acquire_owned()
+                                .await
+                                .map(Some)
+                                .map_err(|_| pool_closed()),
+                        }
+                    }));
                 }
                 Err(TryAcquireError::Closed) => return Poll::Ready(Err(pool_closed())),
             }
@@ -427,4 +517,10 @@ fn emit_failure(tx: &mpsc::UnboundedSender<AgentEvent>, model: &Model, error: &A
     let _ = tx.send(AgentEvent::AgentEnd {
         messages: vec![agent_message],
     });
+}
+
+fn failed_stream(model: &Model, error: &AgentError) -> AgentEventStream {
+    let (tx, rx) = mpsc::unbounded_channel();
+    emit_failure(&tx, model, error);
+    Box::pin(ReceiverStream { rx })
 }

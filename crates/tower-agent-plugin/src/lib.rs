@@ -42,7 +42,9 @@ pub use model::{
     ProvidedCapability, ToolDescriptor,
 };
 pub use permission::{PermissionDecision, PermissionPolicy, PermissionPrompter};
-pub use registry::{Binding, PluginRegistry, Resolution, ResolvedPlugin, ShadowedPlugin};
+pub use registry::{
+    Binding, PluginRegistry, PluginShutdownFailure, Resolution, ResolvedPlugin, ShadowedPlugin,
+};
 pub use static_plugin::{PluginContext, StaticPlugin};
 
 /// 宿主 SDK/ABI 版本：静态插件清单默认使用它；major 不兼容即拒绝加载。

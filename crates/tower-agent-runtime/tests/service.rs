@@ -2,13 +2,17 @@
 
 mod support;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use futures_util::StreamExt as _;
+use tokio::sync::Semaphore;
 use tower::ServiceExt as _;
-use tower_agent_core::{AgentEvent, AgentRequest};
+use tower_agent_core::{AgentError, AgentEvent, AgentRequest};
 use tower_agent_provider::StopReason;
-use tower_agent_runtime::{AgentPool, AgentService, AgentStreamService, MemorySessionStore};
+use tower_agent_runtime::{
+    AgentPool, AgentService, AgentStreamService, MemorySessionStore, ShutdownCoordinator,
+    ShutdownOptions,
+};
 
 use support::{ScriptedStreamService, boxed_stream, test_model, text_script, user};
 
@@ -111,4 +115,109 @@ async fn pool_serves_requests_up_to_its_concurrency() {
     let second = pool.oneshot(request("2")).await.unwrap();
     assert_eq!(first.text, "a");
     assert_eq!(second.text, "b");
+}
+
+#[tokio::test]
+async fn shutdown_rejects_new_requests_and_drains_active_work() {
+    let model = test_model();
+    let gate = Arc::new(Semaphore::new(0));
+    let shutdown = ShutdownCoordinator::new();
+    let service = AgentService::new(boxed_stream(
+        ScriptedStreamService::new(vec![text_script(&model, "finished")]).gated(Arc::clone(&gate)),
+    ))
+    .with_model(model)
+    .with_shutdown(shutdown.clone());
+
+    let active = tokio::spawn({
+        let service = service.clone();
+        async move { service.oneshot(request("active")).await }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while shutdown.inflight() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("active request starts");
+
+    assert!(shutdown.begin_shutdown());
+    let error = service
+        .clone()
+        .oneshot(request("rejected"))
+        .await
+        .expect_err("new work is rejected");
+    assert!(matches!(error, AgentError::ShuttingDown));
+
+    let drain = tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            shutdown
+                .shutdown_with(ShutdownOptions {
+                    grace_period: Duration::from_secs(1),
+                    cancellation_timeout: Duration::from_millis(100),
+                })
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert_eq!(shutdown.inflight(), 1);
+    gate.add_permits(1);
+
+    let response = active.await.expect("active task").expect("active request");
+    assert_eq!(response.text, "finished");
+    let report = drain.await.expect("drain task");
+    assert!(report.drained);
+    assert!(!report.forced);
+    assert_eq!(report.remaining_operations, 0);
+}
+
+#[tokio::test]
+async fn pool_rejects_new_requests_during_shutdown() {
+    let model = test_model();
+    let shutdown = ShutdownCoordinator::new();
+    let service = AgentService::new(boxed_stream(ScriptedStreamService::new(vec![text_script(
+        &model, "unused",
+    )])))
+    .with_model(model)
+    .with_shutdown(shutdown.clone());
+    let pool = AgentPool::new(service, 1);
+    shutdown.begin_shutdown();
+
+    let error = pool
+        .oneshot(request("rejected"))
+        .await
+        .expect_err("pool rejects new work");
+    assert!(matches!(error, AgentError::ShuttingDown));
+}
+
+#[tokio::test]
+async fn streaming_request_remains_inflight_until_background_run_finishes() {
+    let model = test_model();
+    let gate = Arc::new(Semaphore::new(0));
+    let shutdown = ShutdownCoordinator::new();
+    let service = AgentService::new(boxed_stream(
+        ScriptedStreamService::new(vec![text_script(&model, "streamed")]).gated(Arc::clone(&gate)),
+    ))
+    .with_model(model)
+    .with_shutdown(shutdown.clone());
+
+    let mut stream = service.run_stream(request("stream"));
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while shutdown.inflight() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("streaming request starts");
+    shutdown.begin_shutdown();
+    let drain = tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move { shutdown.shutdown().await }
+    });
+    gate.add_permits(1);
+
+    while stream.next().await.is_some() {}
+    let report = drain.await.expect("drain task");
+    assert!(report.drained);
+    assert_eq!(report.remaining_operations, 0);
 }

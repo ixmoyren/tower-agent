@@ -14,6 +14,8 @@
 //!   `tool_execution_end` 按完成顺序发出，工具结果消息按 assistant 源顺序发出。
 //! - [`Agent`] 自身实现 `Service<AgentRequest, Response = AgentResponse>`（[`BoxAgentService`]），
 //!   因此可以像 `tower-mcp` 那样与 axum 等 tower 生态组合。
+//! - [`ShutdownCoordinator`] 为 Axum/tonic 等宿主提供排空、超时取消、资源 Hook 与
+//!   新请求拒绝；`AgentService`、`AgentStreamService`、`AgentPool` 都接入同一生命周期。
 //! - [`layer`] 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`（`tool_call` / `tool_result`
 //!   钩子），[`ToolRegistration`] 提供 schemars 的 typed 工具注册。
 
@@ -24,6 +26,7 @@ mod control;
 mod event_bus;
 mod router;
 mod service;
+mod shutdown;
 
 pub use agent::{Agent, AgentInitialState, AgentOptions, AgentState, QueueMode};
 pub use compaction::{
@@ -34,6 +37,10 @@ pub use control::{AgentControl, BoxAgentControl};
 pub use event_bus::{EventBus, Subscription};
 pub use router::{ToolRouter, ToolRouterFuture};
 pub use service::{AgentPool, AgentService, AgentStreamService, MemorySessionStore};
+pub use shutdown::{
+    ShutdownCoordinator, ShutdownGuard, ShutdownHook, ShutdownOptions, ShutdownReport,
+    ShutdownState,
+};
 pub use tower_agent_core::{
     AfterToolResultLayer, AfterToolResultService, AgentError, AgentEvent, AgentEventStream,
     AgentMessage, AgentRequest, AgentResponse, AgentServiceExt, AgentTool, AgentToolResult,

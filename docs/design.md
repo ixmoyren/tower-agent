@@ -1,13 +1,13 @@
 # tower-agent 整体设计
 
-| 项目     | 值                                                                                                                                                                                                  |
-|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 项目     | 值                                                                                       |
+|----------|------------------------------------------------------------------------------------------|
 | 状态     | 设计基线 v1.6（核心 runtime、Provider、插件、codemode、Wasmtime 沙箱与 UI 分层均已落地） |
-| 能力参考 | pi-agent `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03） |
-| 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）                                                                                                                                            |
-| 目标仓库 | `tower-agent`（Rust，edition 2024，nightly）                                                                                                                                                        |
+| 能力参考 | pi-agent `a276dabe57911253350bffb93cb7d7aff6a73261`（`main`，2026-10-03）                |
+| 架构依赖 | tower `0.5.3`（tower-service 0.3.3 / tower-layer 0.3.3）                                 |
+| 目标仓库 | `tower-agent`（Rust，edition 2024，nightly）                                             |
 
-本文档回答一个问题：**在构建 tower-native agent 时，`Service` / `Layer`、流、会话与插件分别承担哪些职责。**
+本文档回答一个问题： **在构建 tower-native agent 时，`Service` / `Layer`、流、会话与插件分别承担哪些职责。**
 
 pi-agent 是 agent 能力设计的重要参考，但不是 `tower-agent` 的兼容性目标。文中的“pi 概念映射”用于对照能力边界与交互语义，具体 API、模块结构和实现以 Rust / tower 架构为准。文档后部保留的实现进度记录可能使用早期“移植”措辞，不代表当前项目定位。
 
@@ -205,10 +205,10 @@ tower-agent-cli/        // CLI 入口；bash/read/write/edit 等内置工具与�
 - `tower_agent_runtime::Agent` 实现 `Service<AgentRequest, Response = AgentResponse>`，并提供 `BoxAgentService` / `AgentServiceExt`，可与 axum 等 tower 生态组合（定位类似 `tower-mcp`）。
 - `tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`（pi 的 `tool_call` / `tool_result` 钩子即 tower `Layer`）；工具服务可与 `tower::timeout` / `tower::limit` 等生态 layer 混用（会把错误擦成 `BoxError` 的 layer 用 `map_err(AgentError::other)` 转回）。
 - `tower_agent_runtime::ToolRegistration` 提供 schemars + serde 的 typed tool 注册：参数 schema 自动生成，入参自动反序列化，校验失败编码成 `is_error` 工具结果。
-- `tower_agent_runtime::Compactor` 提供**核心的上下文压缩**（pi `core/compaction`）：宿主构造一个 `Compactor` 放进 `AgentOptions`，agent 循环在每次模型请求前按阈值（`context_window - reserve_tokens`）自动压缩；`compact()` / `request_compaction()` 供异步 / 同步宿主手动触发。摘要走同一个 provider 流服务，消息按 pi 的 `serializeConversation` 形状序列化，切点只落在 user / assistant 上（绝不切 tool result），压缩后模型看到的是 `system + 摘要 + 保留的消息`——**原始 transcript 不改写**，与终端无关，CLI / axum 共用。
-  - **溢出 / 长度恢复**：provider 报上下文溢出（建立请求失败，或流内 `error` 文案命中溢出关键词），或响应被长度截断且没有工具调用时，会**压缩一次再重试当前请求**（每个请求只试一次）。终态事件（`MessageEnd`）由外层在确定不重试后才发出，因此被丢弃的那次尝试不会进 transcript、也不会渲染成条目。
-  - **压缩钩子**：`CompactionHook`（`before` / `after` / `failed`）对应 pi 的 `session_before_compact` / `session_compact` / `session_compact_failed`；`before` 可取消压缩或用自定义摘要跳过内置摘要调用，`after` / `failed` 供遥测。`CompactionReason` 区分 `Threshold` / `Manual` / `Overflow` / `Length`。
-  - **可持久化 / 可恢复**：`Compaction` 是 serde 可序列化的（`summary` / `first_kept` / `tokens_before`），`Compactor::restore` 可把已持久化的压缩装回去，续接会话时不必重新摘要。
+- `tower_agent_runtime::Compactor` 提供 **核心的上下文压缩**（pi `core/compaction`）：宿主构造一个 `Compactor` 放进 `AgentOptions`，agent 循环在每次模型请求前按阈值（`context_window - reserve_tokens`）自动压缩；`compact()` / `request_compaction()` 供异步 / 同步宿主手动触发。摘要走同一个 provider 流服务，消息按 pi 的 `serializeConversation` 形状序列化，切点只落在 user / assistant 上（绝不切 tool result），压缩后模型看到的是 `system + 摘要 + 保留的消息`—— **原始 transcript 不改写**，与终端无关，CLI / axum 共用。
+    - **溢出 / 长度恢复**：provider 报上下文溢出（建立请求失败，或流内 `error` 文案命中溢出关键词），或响应被长度截断且没有工具调用时，会 **压缩一次再重试当前请求**（每个请求只试一次）。终态事件（`MessageEnd`）由外层在确定不重试后才发出，因此被丢弃的那次尝试不会进 transcript、也不会渲染成条目。
+    - **压缩钩子**：`CompactionHook`（`before` / `after` / `failed`）对应 pi 的 `session_before_compact` / `session_compact` / `session_compact_failed`；`before` 可取消压缩或用自定义摘要跳过内置摘要调用，`after` / `failed` 供遥测。`CompactionReason` 区分 `Threshold` / `Manual` / `Overflow` / `Length`。
+    - **可持久化 / 可恢复**：`Compaction` 是 serde 可序列化的（`summary` / `first_kept` / `tokens_before`），`Compactor::restore` 可把已持久化的压缩装回去，续接会话时不必重新摘要。
 - `tower_agent_plugin_ui::AgentUi` 是前端无关的 UI 会话后端（事件归约、斜杠命令、submit/handled/quit 动作），GUI 与 axum 可直接消费；`tower_agent_tui::UiPlugin` 只保留终端渲染扩展点（状态栏片段 / overlay / 工具结果定制渲染）。
 - tower-agent-cli 侧：`cli` crate 重命名为 `tower-agent-cli`，其余 crate 名称与职责不变。
 
@@ -218,8 +218,10 @@ Provider 协议层（`tower-agent-provider`）与具体实现层（`tower-agent-
 - `sse`：增量 SSE 解析（`event:` / 多行 `data:` / 注释 / CRLF，任意切分）。
 - `tower_agent_plugin_providers::provider::anthropic`：Anthropic Messages provider —— 请求构造（system / messages / tools / thinking / temperature / metadata）、`text` / `thinking` / `redacted_thinking` / `tool_use` 四种内容块的流式映射、usage 与成本（含计价档位）、`stop_reason` 映射（`end_turn`→stop、`max_tokens`→length、`tool_use`→toolUse、`refusal`/未知→error），错误按契约区分：非重试的 4xx 与流内 `error` 编码进流，429/5xx/传输错误走 `Service::Error` 交给 retry 层。
 - `tower_agent_plugin_providers::provider::openai`：OpenAI Chat Completions provider —— 一条实现覆盖大量兼容端点（OpenAI / Azure OpenAI / OpenRouter / Cerebras / Groq / DeepSeek …）。请求构造（system / tools / temperature / `stream_options.include_usage` / `user`）、`content` / `reasoning_content` / `tool_calls` 的流式映射（含分片 partial JSON）、`finish_reason` 映射、`data: [DONE]` 收尾；错误归属与 Anthropic 一致。
-- `tower_agent_plugin_providers::provider::google`：Google Generative AI provider —— 用来验证抽象能容纳 **形状完全不同**的 API：URL 把模型放进路径（`:streamGenerateContent?alt=sse`）、认证用 `x-goog-api-key`、请求体是 `contents`+`parts` 而不是 `messages`（system 走 `systemInstruction`、工具走 `tools[].functionDeclarations`）、`functionCall` 是整块对象（因此一次发 start/delta/end）、思考用 `thought: true` 的 part、用量在 `usageMetadata`（input 扣掉 cached、output 加上 thoughts）。另外按 pi 的行为在有工具调用时把 `STOP` 纠正成 `toolUse`。
-- `tower_agent_plugin_providers::provider::openai_responses`：OpenAI Responses provider —— 与 chat completions 又是另一套协议：请求体是类型化 `input` item 列表（`function_call` / `function_call_output` 与消息平级、`store: false`、`max_output_tokens` 下限 16），流是 **事件类型化**的 SSE（`response.output_text.delta`、`response.reasoning_summary_text.delta`、`response.function_call_arguments.delta|done`、`response.output_item.done`、`response.completed|incomplete|failed`），需要按 `output_index` 把 deltas 归并到对应输出项，并用终态 item 修正文本/参数。
+- `tower_agent_plugin_providers::provider::google`：Google Generative AI provider —— 用来验证抽象能容纳 **形状完全不同**的 API：URL 把模型放进路径（`:streamGenerateContent?alt=sse`）、认证用 `x-goog-api-key`、请求体是 `contents`+`parts` 而不是 `messages`（system 走 `systemInstruction`、工具走 `tools[].functionDeclarations`）、`functionCall` 是整块对象（因此一次发 start/delta/end）、思考用 `thought: true` 的 part、用量在 `usageMetadata`（input 扣掉 cached、output 加上 thoughts）。另外按 pi 的行为在有工具调用时把 `STOP` 纠正成
+  `toolUse`。
+- `tower_agent_plugin_providers::provider::openai_responses`：OpenAI Responses provider —— 与 chat completions 又是另一套协议：请求体是类型化 `input` item 列表（`function_call` / `function_call_output` 与消息平级、`store: false`、`max_output_tokens` 下限 16），流是 **事件类型化**的 SSE（`response.output_text.delta`、`response.reasoning_summary_text.delta`、`response.function_call_arguments.delta|done`、`response.output_item.done`、`response.completed|incomplete|failed`），需要按 `output_index` 把 deltas 归并到对应输出项，并用终态
+  item 修正文本/参数。
 - `provider::layers`：`HeaderTransport`（auth：注入/覆盖请求头，大小写不敏感）、`RetryTransport`（对 429/5xx 与可重试传输错误重试；`Retry-After` 超过 `maxRetryDelayMs` 时立即返回，落实第 7 节第 7 条）、`ObserveTransport`（`onPayload` 可观测/替换载荷，`onResponse` 观测状态码与响应头；[`CallContext`] 携带 provider/api/model 但不上线），以及 `TimeoutService`（`timeoutMs`：只约束 `call` 返回的「建立请求」future，超时映射成 `PiError::Timeout`）。
 - `models::Models`：三块内容 —— `(provider, api) → provider Service` 的路由 Service、`(provider, model id) → Model` 的模型目录，以及 `refresh`：逐个 provider 调用注册的目录来源，成功替换该 provider 的目录并统计 added/updated/removed，失败保留旧条目并把错误记进报告（对应 pi `Models.refresh()` 返回 `{ aborted, errors }` 的语义）。选项支持 `allow_network` / `providers`（限定范围）/ `signal`（取消）。未注册路由返回 `PiError::Unsupported`。
 - `tower_agent_plugin_providers::provider::faux`：确定性离线 provider， **仅供测试**——挂在 plugin-providers 的 `test-util` feature（或 `cfg(test)`）下，正常构建不编入任何二进制。
@@ -239,7 +241,8 @@ Provider 协议层（`tower-agent-provider`）与具体实现层（`tower-agent-
 
 尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
-`tower-agent-plugin-tools` 已落地的静态工具插件（`crates/tower-agent-plugin-tools`）：`read` / `edit` / `write` / `grep` / `find` / `ls`，以及共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。`shell` 位于独立动态插件 `crates/tower-agent-plugin-shell`，内嵌 [brush](https://github.com/reubeno/brush)（`brush-core` + `brush-builtins`，bash 兼容的 Rust shell）。静态插件登记与解析由 `tower-agent::assembly` 完成，动态 shell 由插件加载器登记进同一注册表。
+`tower-agent-plugin-tools` 已落地的静态工具插件（`crates/tower-agent-plugin-tools`）：`read` / `edit` / `write` / `grep` / `find` / `ls`，以及共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。`shell` 位于独立动态插件 `crates/tower-agent-plugin-shell`，内嵌 [brush](https://github.com/reubeno/brush)（`brush-core` + `brush-builtins`，bash 兼容的 Rust shell）。静态插件登记与解析由
+`tower-agent::assembly` 完成，动态 shell 由插件加载器登记进同一注册表。
 
 与 pi 的实现差异（都是"进程内实现替代外部二进制"或环境能力所限）：
 
@@ -266,9 +269,10 @@ Provider 协议层（`tower-agent-provider`）与具体实现层（`tower-agent-
   `build_with_api_key` 覆盖环境变量。
 - `provider`：把 `--provider` / `--model` 映射到 `ai` 的真实 provider 栈——`ProviderKind`（`anthropic` / `openai` / `openai-responses` / `google`）给出 `(provider, api)`、凭据环境变量与默认模型 id；`build` 读环境变量并用 `Models` 注册路由 + 模型目录，真实 provider 用 `RetryTransport → ReqwestTransport` 加 `TimeoutService`（建立请求超时）。缺凭据返回 `MissingApiKey`，未知 provider 返回 `Unknown`（都带可读文案）。没给 `--provider` 时 `default_kind_from_env` 按 `anthropic → openai → google` 挑第一个有凭据的，都没有就报错。
 
-- `store`：CLI 配置的持久化层，**配置一律经 `tower-agent-plugin-sdk` 的 `storage` feature**（默认后端为 `tower-agent-plugin-turso`，`~/.local/share/tower-agent/storage.db`，`TOWER_AGENT_STORAGE` 可覆盖路径）——provider 凭据存进 `ProviderStore`（对应 pi `~/.pi/agent/auth.json`），`defaultProvider` / `defaultModel` / `defaultThinkingLevel` 存进 `ConfigStore`（对应 pi `~/.pi/agent/settings.json`）。`ConfigStore` 按**作用域**分区（`ConfigScope::User` / `ConfigScope::Project(<项目 id>)`，项目级覆盖用户级，`resolve_config` / `effective_config` 是唯一实现）；作用是 storage 接口的职责，不是某个终端或某个后端的私事，axum / webui 走同一套接口。取值优先级对齐 pi：命令行（`--provider` / `--api-key` / `--model` / `--thinking`）> 环境变量 > 存储；启动时读出快照，运行期由 `/login` `/model` `/thinking` 写回**用户级**（fire-and-forget，退出前 `flush` 落盘）。查看 / 修改配置由 `--config-get` / `--config-set` / `--config-unset` / `--config-list` + `--config-scope <user|project>` 提供（写指令默认 user 作用域）。存储打不开时只警告，CLI 退回纯环境变量模式。
+- `store`：CLI 配置的持久化层， **配置一律经 `tower-agent-plugin-sdk` 的 `storage` feature**（默认后端为 `tower-agent-plugin-turso`，`~/.local/share/tower-agent/storage.db`，`TOWER_AGENT_STORAGE` 可覆盖路径）——provider 凭据存进 `ProviderStore`（对应 pi `~/.pi/agent/auth.json`），`defaultProvider` / `defaultModel` / `defaultThinkingLevel` 存进 `ConfigStore`（对应 pi `~/.pi/agent/settings.json`）。`ConfigStore` 按 **作用域**分区（`ConfigScope::User` / `ConfigScope::Project(<项目 id>)`，项目级覆盖用户级，`resolve_config` /
+  `effective_config` 是唯一实现）；作用是 storage 接口的职责，不是某个终端或某个后端的私事，axum / webui 走同一套接口。取值优先级对齐 pi：命令行（`--provider` / `--api-key` / `--model` / `--thinking`）> 环境变量 > 存储；启动时读出快照，运行期由 `/login` `/model` `/thinking` 写回 **用户级**（fire-and-forget，退出前 `flush` 落盘）。查看 / 修改配置由 `--config-get` / `--config-set` / `--config-unset` / `--config-list` + `--config-scope <user|project>` 提供（写指令默认 user 作用域）。存储打不开时只警告，CLI 退回纯环境变量模式。
 - `session::Session`：持有 `tower_agent_runtime::Agent` + 六个静态内置工具（以及运行时加载的 shell 动态插件）+ 系统提示，暴露 `subscribe` / `ask` / `continue_run` / `abort` / `state`，以及 `set_model` / `set_thinking_level` / `set_tools` / `reset`（CLI 选项与 TUI 的 `/model` `/thinking` `/new` 共用）。它实现 `tower_agent_plugin_ui::CommandHost`，把会话能力交给前端无关的命令层。
-- **transcript 持久化**：会话按**项目（工作目录）**归属，元数据写进 `SessionStore` 的 `session.metadata.cwd`、消息逐条写进 `HistoryStore`（都在同一份 storage 里）。`store::Transcript` 在每轮结束时把「还没落盘的尾巴」追加进去（`sync` 幂等，成功 / 取消 / 失败都落盘），标题取第一条用户消息。CLI 参数对齐 pi：默认**自动保存**新会话，`--continue` 续接当前目录最近一次会话，`--session <id>` 续接指定会话，`--no-session` 关闭保存；`/new` 换一个新会话 id。续接时把落盘的消息作为 `AgentInitialState.messages` 重新喂回运行时的 agent 循环。
+- **transcript 持久化**：会话按 **项目（工作目录） **归属，元数据写进 `SessionStore` 的 `session.metadata.cwd`、消息逐条写进 `HistoryStore`（都在同一份 storage 里）。`store::Transcript` 在每轮结束时把「还没落盘的尾巴」追加进去（`sync` 幂等，成功 / 取消 / 失败都落盘），标题取第一条用户消息。CLI 参数对齐 pi：默认**自动保存**新会话，`--continue` 续接当前目录最近一次会话，`--session <id>` 续接指定会话，`--no-session` 关闭保存；`/new` 换一个新会话 id。续接时把落盘的消息作为 `AgentInitialState.messages` 重新喂回运行时的 agent 循环。
 - `session::run_print` / `run_tui`：同一条事件流的两种渲染方式（纯文本 / TUI）。TUI 模式下界面在事件循环里跑，用户在输入区提交的文本经 mpsc 交给驱动任务：`Session::submit` 空闲时开新一轮、 **流式期间则走 `steer`**（不会撞上 "already processing"）；用户退出时取消进行中的一轮。以 `/` 开头的输入不进 agent，而是交给 `tui` 的斜杠命令层。
 - `faux`：确定性的离线 provider， **测试替身**——实现放在 `tower_agent_plugin_providers::provider::faux`（plugin-providers 的 `test-util` feature，`tower-agent-cli` 以 dev-dependency 引入），发布的二进制不含它；不联网也能端到端跑通会话。
 - 二进制 `tower-agent-cli`： **不带参数且 stdin/stdout 都是终端时直接进 TUI**（提示词可选，TUI 里用 `/` 命令驱动）；`--print` 或任一路被重定向时走一次性纯文本模式（提示词来自位置参数或 stdin），`--list-tools` 打印八个工具后退屏；`--provider` / `--model` / `--thinking` / `-t` 系列选择 provider、模型与工具。这与 pi「终端交互默认进 TUI、重定向默认 print」一致。

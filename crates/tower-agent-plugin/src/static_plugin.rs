@@ -207,11 +207,25 @@ pub trait StaticPlugin: Send + Sync + 'static {
     fn event_handlers(&self) -> Vec<Box<dyn EventHandler>> {
         Vec::new()
     }
+
+    /// 停止插件并释放其持有的后台资源。
+    ///
+    /// 宿主应先在请求排空后调用此方法。静态插件默认没有额外资源，因此返回成功；
+    /// 动态插件和需要后台任务的插件应覆盖此方法。
+    fn shutdown(&self) -> Result<(), PluginError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use super::*;
+    use crate::PluginRegistry;
 
     #[derive(Debug, PartialEq, Eq)]
     struct First(u32);
@@ -244,5 +258,43 @@ mod tests {
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].value.0, "x");
         assert!(context.extensions::<String>().next().is_none());
+    }
+
+    #[test]
+    fn registry_shutdown_calls_plugins_once_and_closes_registration() {
+        struct Managed(Arc<AtomicUsize>);
+
+        impl StaticPlugin for Managed {
+            fn manifest(&self) -> PluginManifest {
+                PluginManifest::new("managed", semver::Version::new(1, 0, 0), PluginKind::Static)
+            }
+
+            fn install(&self, _context: &mut PluginContext) -> Result<(), PluginError> {
+                Ok(())
+            }
+
+            fn shutdown(&self) -> Result<(), PluginError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = PluginRegistry::new();
+        registry
+            .register_plugin(Arc::new(Managed(Arc::clone(&calls))))
+            .expect("register plugin");
+        assert!(registry.shutdown().is_empty());
+        assert!(registry.shutdown().is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(
+            registry
+                .register_manifest(PluginManifest::new(
+                    "late",
+                    semver::Version::new(1, 0, 0),
+                    PluginKind::Static,
+                ))
+                .is_err()
+        );
     }
 }

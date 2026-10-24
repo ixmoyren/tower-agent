@@ -14,9 +14,10 @@ use std::{
     collections::BTreeMap,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 
+use futures_util::future::BoxFuture;
 use tokio::sync::mpsc;
 use tower::ServiceExt as _;
 use tower_agent_core::UiState;
@@ -35,7 +36,7 @@ use tower_agent_provider::{
 };
 use tower_agent_runtime::{
     AgentError, AgentEvent, AgentMessage, AgentOptions, AgentRequest, AgentState, AgentTool,
-    BoxAgentControl, BoxAgentService, Compactor, Subscription,
+    BoxAgentControl, BoxAgentService, Compactor, ShutdownCoordinator, ShutdownHook, Subscription,
 };
 
 /// 会话。
@@ -72,6 +73,34 @@ pub struct Session {
     providers: Arc<ProviderRegistry>,
     /// Credentials known to this process, used by provider switches.
     provider_credentials: Mutex<BTreeMap<String, String>>,
+    /// 宿主停机协调器；接入后运行中请求会响应强制取消。
+    shutdown: Option<ShutdownCoordinator>,
+}
+
+struct SessionShutdownHook {
+    session: Weak<Session>,
+}
+
+impl ShutdownHook for SessionShutdownHook {
+    fn shutdown(&self) -> BoxFuture<'static, Result<(), String>> {
+        let session = self.session.upgrade();
+        Box::pin(async move {
+            let Some(session) = session else {
+                return Ok(());
+            };
+            let mut errors = session.shutdown_plugins();
+            if let Some(store) = &session.store
+                && let Err(error) = store.flush().await
+            {
+                errors.push(format!("storage flush: {error}"));
+            }
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(errors.join("; "))
+            }
+        })
+    }
 }
 
 /// 工具过滤：`none` 清空，`allow` 白名单（空 = 全放行），`exclude` 黑名单。
@@ -347,6 +376,7 @@ impl Session {
             compactor,
             providers,
             provider_credentials: Mutex::new(BTreeMap::new()),
+            shutdown: None,
         }
     }
 
@@ -370,6 +400,39 @@ impl Session {
         }
         self.store = Some(store);
         self
+    }
+
+    /// 接入 CLI 优雅停机。
+    #[must_use]
+    pub fn with_shutdown(mut self, shutdown: ShutdownCoordinator) -> Self {
+        self.control
+            .set_shutdown_signal(Some(shutdown.force_signal()));
+        self.shutdown = Some(shutdown);
+        self
+    }
+
+    /// 返回可注册到停机协调器的会话关闭 Hook。
+    #[must_use]
+    pub fn shutdown_hook(self: &Arc<Self>) -> Arc<dyn ShutdownHook> {
+        Arc::new(SessionShutdownHook {
+            session: Arc::downgrade(self),
+        })
+    }
+
+    /// 停止 JIT/动态插件并返回错误说明。
+    #[must_use]
+    pub fn shutdown_plugins(&self) -> Vec<String> {
+        self.abort();
+        self.control.set_tools(Vec::new());
+        #[cfg(feature = "monty")]
+        if let Some(mods) = &self.mods {
+            return mods
+                .shutdown()
+                .into_iter()
+                .map(|failure| format!("plugin `{}`: {}", failure.plugin, failure.message))
+                .collect();
+        }
+        Vec::new()
     }
 
     /// Replace the provider plugin registry used by session commands.
@@ -1282,13 +1345,19 @@ pub async fn run_tui(
         plugins
     };
 
-    let rendered = tower_agent_tui::run_agent_tui(
+    let shutdown = session
+        .shutdown
+        .as_ref()
+        .map(ShutdownCoordinator::stop_signal)
+        .unwrap_or_default();
+    let rendered = tower_agent_tui::run_agent_tui_with_shutdown(
         subscription,
         submissions_tx,
         host,
         title.to_string(),
         notice,
         plugins,
+        shutdown,
     )
     .await;
 

@@ -148,6 +148,9 @@ pub struct AgentOptions {
     pub follow_up_mode: QueueMode,
     /// 工具执行方式。
     pub tool_execution: ToolExecutionMode,
+    /// 宿主停机信号。每次 run 的取消令牌都是它的子令牌，因此取消会停止在途
+    /// provider 和工具调用。
+    pub shutdown_signal: Option<CancellationToken>,
 }
 
 impl AgentOptions {
@@ -166,6 +169,7 @@ impl AgentOptions {
             steering_mode: QueueMode::OneAtATime,
             follow_up_mode: QueueMode::OneAtATime,
             tool_execution: ToolExecutionMode::Parallel,
+            shutdown_signal: None,
         }
     }
 }
@@ -193,6 +197,7 @@ struct Core {
     pending_tool_calls: BTreeSet<String>,
     error_message: Option<String>,
     current_signal: Option<CancellationToken>,
+    shutdown_signal: Option<CancellationToken>,
     streaming_tx: watch::Sender<bool>,
 }
 
@@ -305,6 +310,7 @@ impl Agent {
             steering_mode,
             follow_up_mode,
             tool_execution,
+            shutdown_signal,
         } = options;
         let model = initial.model.unwrap_or_default();
         let thinking_level = initial.thinking_level.unwrap_or(ModelThinkingLevel::Off);
@@ -343,6 +349,7 @@ impl Agent {
             pending_tool_calls: BTreeSet::new(),
             error_message: None,
             current_signal: None,
+            shutdown_signal,
             streaming_tx,
         };
         Self {
@@ -477,6 +484,11 @@ impl Agent {
         }
     }
 
+    /// 设置或替换宿主停机信号。
+    pub fn set_shutdown_signal(&self, signal: Option<CancellationToken>) {
+        lock(&self.core).shutdown_signal = signal;
+    }
+
     /// 等待当前 run 与所有被 await 的 listener 完成。
     pub async fn wait_for_idle(&self) {
         let mut rx = lock(&self.core).streaming_tx.subscribe();
@@ -579,6 +591,13 @@ impl Agent {
     async fn run(&self, mode: RunMode, skip_initial_steering: bool) -> Result<(), AgentError> {
         let (signal, stream_fn, context, config, sink) = {
             let mut core = lock(&self.core);
+            if core
+                .shutdown_signal
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(AgentError::ShuttingDown);
+            }
             if core.run_active {
                 return Err(AgentError::Loop(
                     "Agent is already processing. Use steer() or followUp() to queue messages, \
@@ -592,7 +611,11 @@ impl Agent {
             core.error_message = None;
             core.streaming_tx.send_replace(true);
 
-            let signal = CancellationToken::new();
+            let signal = core
+                .shutdown_signal
+                .as_ref()
+                .map(CancellationToken::child_token)
+                .unwrap_or_default();
             core.current_signal = Some(signal.clone());
             let context = AgentContext {
                 messages: core.messages.clone(),
@@ -614,7 +637,7 @@ impl Agent {
             )
         };
 
-        let result = match mode {
+        let mut result = match mode {
             RunMode::Prompt(messages) => agent_loop::run_agent_loop(
                 messages,
                 context,
@@ -631,6 +654,15 @@ impl Agent {
                     .map(|_| ())
             }
         };
+
+        if result.is_ok()
+            && lock(&self.core)
+                .shutdown_signal
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+        {
+            result = Err(AgentError::ShuttingDown);
+        }
 
         if let Err(error) = &result {
             self.emit_run_failure(&sink, error, signal.is_cancelled())

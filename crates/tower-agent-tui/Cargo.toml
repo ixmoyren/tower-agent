@@ -14,6 +14,7 @@ ratatui-textarea = { git = "https://github.com/ixmoyren/ratatui-textarea", defau
 unicode-width = "0.2"
 tokio = { workspace = true }
 tower-agent-plugin-ui.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

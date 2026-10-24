@@ -31,6 +31,7 @@ use ratatui::{
     },
 };
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tower_agent_plugin_ui::{AgentEvent, AgentUi, CommandHost, Subscription, UiAction};
 
 use crate::{app::Tui, editor::EditorAction, plugin::UiPlugin};
@@ -168,12 +169,35 @@ pub fn action_for(event: &Event) -> Action {
 ///
 /// `submissions` 把用户在输入区提交的文本交给调用方，由调用方驱动 agent。
 pub async fn run_agent_tui(
+    subscription: Subscription,
+    submissions: mpsc::UnboundedSender<String>,
+    host: Arc<dyn CommandHost>,
+    title: impl Into<String>,
+    notice: Option<String>,
+    plugins: Vec<Box<dyn UiPlugin>>,
+) -> io::Result<()> {
+    run_agent_tui_with_shutdown(
+        subscription,
+        submissions,
+        host,
+        title,
+        notice,
+        plugins,
+        CancellationToken::new(),
+    )
+    .await
+}
+
+/// 订阅 agent 事件，并把停机信号传给 TUI 循环。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_agent_tui_with_shutdown(
     mut subscription: Subscription,
     submissions: mpsc::UnboundedSender<String>,
     host: Arc<dyn CommandHost>,
     title: impl Into<String>,
     notice: Option<String>,
     plugins: Vec<Box<dyn UiPlugin>>,
+    shutdown: CancellationToken,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::unbounded_channel();
     let pump = tokio::spawn(async move {
@@ -183,19 +207,43 @@ pub async fn run_agent_tui(
             }
         }
     });
-    let result = run_tui(rx, submissions, host, title, notice, plugins).await;
+    let result =
+        run_tui_with_shutdown(rx, submissions, host, title, notice, plugins, shutdown).await;
     pump.abort();
     result
 }
 
 /// 用一条事件通道驱动 TUI（[`run_agent_tui`] 与调用方自定义驱动都走这里）。
 pub async fn run_tui(
+    events: mpsc::UnboundedReceiver<AgentEvent>,
+    submissions: mpsc::UnboundedSender<String>,
+    host: Arc<dyn CommandHost>,
+    title: impl Into<String>,
+    notice: Option<String>,
+    plugins: Vec<Box<dyn UiPlugin>>,
+) -> io::Result<()> {
+    run_tui_with_shutdown(
+        events,
+        submissions,
+        host,
+        title,
+        notice,
+        plugins,
+        CancellationToken::new(),
+    )
+    .await
+}
+
+/// 用可取消信号驱动 TUI；停机信号触发时恢复终端后正常返回。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_tui_with_shutdown(
     mut events: mpsc::UnboundedReceiver<AgentEvent>,
     submissions: mpsc::UnboundedSender<String>,
     host: Arc<dyn CommandHost>,
     title: impl Into<String>,
     notice: Option<String>,
     plugins: Vec<Box<dyn UiPlugin>>,
+    shutdown: CancellationToken,
 ) -> io::Result<()> {
     let (terminal, reader) = init_terminal()?;
     let ui = AgentUi::with_commands(title, host);
@@ -205,7 +253,7 @@ pub async fn run_tui(
     let mut tui = Tui::with_ui(terminal, ui, plugins);
     let mut input = spawn_input_reader(reader);
 
-    let result = run_loop(&mut tui, &mut events, &mut input, &submissions).await;
+    let result = run_loop(&mut tui, &mut events, &mut input, &submissions, &shutdown).await;
 
     let mut terminal = tui.into_terminal();
     let restored = restore_terminal(&mut terminal);
@@ -217,10 +265,12 @@ async fn run_loop(
     events: &mut mpsc::UnboundedReceiver<AgentEvent>,
     input: &mut InputReader,
     submissions: &mpsc::UnboundedSender<String>,
+    shutdown: &CancellationToken,
 ) -> io::Result<()> {
     tui.draw()?;
     loop {
         tokio::select! {
+            _ = shutdown.cancelled() => return Ok(()),
             Some(event) = events.recv() => tui.handle(&event),
             Some(key) = input.recv() => {
                 match action_for(&key) {

@@ -15,13 +15,13 @@ Provider 插件把宿主配置转换成 LLM 流式 Service 和模型目录。Age
 
 `tower-agent-plugin-providers` 注册五个独立静态插件：
 
-| 插件 | API | 凭据 |
-|---|---|---|
-| `provider.anthropic` | `anthropic-messages` | `ANTHROPIC_API_KEY` |
-| `provider.openai` | `openai-completions` | `OPENAI_API_KEY` |
-| `provider.openai-responses` | `openai-responses` | `OPENAI_API_KEY` |
-| `provider.google` | `google-generative-ai` | `GEMINI_API_KEY` |
-| `provider.deepseek` | `openai-completions` | `DEEPSEEK_API_KEY` |
+| 插件                        | API                    | 凭据                |
+|-----------------------------|------------------------|---------------------|
+| `provider.anthropic`        | `anthropic-messages`   | `ANTHROPIC_API_KEY` |
+| `provider.openai`           | `openai-completions`   | `OPENAI_API_KEY`    |
+| `provider.openai-responses` | `openai-responses`     | `OPENAI_API_KEY`    |
+| `provider.google`           | `google-generative-ai` | `GEMINI_API_KEY`    |
+| `provider.deepseek`         | `openai-completions`   | `DEEPSEEK_API_KEY`  |
 
 宿主通过 `HostPlugins::assemble()` 取得 `ProviderRegistry`。CLI 的 provider 选择、`/login`
 和 `/model` 都读取该注册表。
@@ -61,8 +61,8 @@ impl ProviderPlugin for MyProvider {
 }
 
 let providers = tower_agent::assembly::HostPlugins::new(cwd)
-    .with_provider(Arc::new(MyProvider))
-    .providers()?;
+.with_provider(Arc::new(MyProvider))
+.providers() ?;
 ```
 
 `with_provider` 使用 `provider.<id>` 作为插件名。如果用户插件的 id 与内置 provider 相同，
@@ -129,7 +129,10 @@ Provider 插件与工具插件共享同一个 `tower-agent-plugin::PluginRegistr
       "kind": "sidecar",
       "name": "My Provider",
       "default_model": "my-model",
-      "command": ["./my-provider", "--stdio"],
+      "command": [
+        "./my-provider",
+        "--stdio"
+      ],
       "api_key_env": "MY_PROVIDER_API_KEY",
       "working_directory": "tools/provider",
       "env": {
@@ -146,7 +149,9 @@ Provider 插件与工具插件共享同一个 `tower-agent-plugin::PluginRegistr
 ```json
 {
   "protocol_version": 1,
-  "model": { "...": "..." },
+  "model": {
+    "...": "..."
+  },
   "messages": [],
   "temperature": null,
   "max_tokens": null,
@@ -158,17 +163,65 @@ Provider 插件与工具插件共享同一个 `tower-agent-plugin::PluginRegistr
 Sidecar 向 stdout 输出一行一个 JSON event：
 
 ```json
-{"type":"start"}
-{"type":"text_delta","text":"hello"}
-{"type":"thinking_delta","text":"reasoning"}
-{"type":"done","text":"final answer"}
-{"type":"error","message":"provider failed"}
+{
+  "type": "start"
+}
+{
+  "type": "text_delta",
+  "text": "hello"
+}
+{
+  "type": "thinking_delta",
+  "text": "reasoning"
+}
+{
+  "type": "done",
+  "text": "final answer"
+}
+{
+  "type": "error",
+  "message": "provider failed"
+}
 ```
 
 `done` 也可以携带完整 `AssistantMessage`：
 
 ```json
-{"type":"done","message":{"content":[],"api":"command-sidecar","provider":"sidecar","model":"my-model","response_model":null,"response_id":null,"provider_thinking_level":null,"thinking_level":null,"usage":{"input":0,"output":0,"cache_read":0,"cache_write":0,"cache_write_1h":null,"reasoning":null,"total_tokens":0,"cost":{"input":0.0,"output":0.0,"cache_read":0.0,"cache_write":0.0,"total":0.0}},"stop_reason":"Stop","deferred":null,"error_message":null,"raw_stop_reason":null,"end_turn":null,"timestamp":0}}
+{
+  "type": "done",
+  "message": {
+    "content": [],
+    "api": "command-sidecar",
+    "provider": "sidecar",
+    "model": "my-model",
+    "response_model": null,
+    "response_id": null,
+    "provider_thinking_level": null,
+    "thinking_level": null,
+    "usage": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0,
+      "cache_write_1h": null,
+      "reasoning": null,
+      "total_tokens": 0,
+      "cost": {
+        "input": 0.0,
+        "output": 0.0,
+        "cache_read": 0.0,
+        "cache_write": 0.0,
+        "total": 0.0
+      }
+    },
+    "stop_reason": "Stop",
+    "deferred": null,
+    "error_message": null,
+    "raw_stop_reason": null,
+    "end_turn": null,
+    "timestamp": 0
+  }
+}
 ```
 
 Host 提供以下环境变量：
@@ -215,8 +268,8 @@ extern "C" fn provider_manifest() -> AbiManifest {
             name: AbiString::from("dynamic"),
             // ...
         }]
-        .into_iter()
-        .collect(),
+            .into_iter()
+            .collect(),
     }
 }
 

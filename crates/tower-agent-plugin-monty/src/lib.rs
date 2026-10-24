@@ -949,6 +949,21 @@ def shout(args):
     }
 
     #[tokio::test]
+    async fn shutdown_unloads_jit_plugins_and_rejects_new_writes() {
+        let manager = manager();
+        manager
+            .write("demo", "value = 1\n")
+            .await
+            .expect("write JIT plugin");
+        assert!(manager.shutdown().is_empty());
+        assert!(manager.list().is_empty());
+        assert!(
+            manager.write("late", "value = 2\n").await.is_err(),
+            "shutdown JIT runtime must reject new plugins"
+        );
+    }
+
+    #[tokio::test]
     async fn host_functions_are_resolved_by_the_callback() {
         struct Greet;
         impl MontyHost for Greet {

@@ -3,7 +3,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use semver::Version;
@@ -140,6 +143,16 @@ impl Resolution {
 pub struct PluginRegistry {
     candidates: Vec<Candidate>,
     overrides: Vec<CapabilityOverride>,
+    shutdown_started: AtomicBool,
+}
+
+/// 一个插件在停机时返回的失败。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginShutdownFailure {
+    /// 插件名。
+    pub plugin: String,
+    /// 失败原因。
+    pub message: String,
 }
 
 impl PluginRegistry {
@@ -154,6 +167,7 @@ impl PluginRegistry {
     /// 载荷形态由 `manifest().kind` 决定：静态插件（编译期 Layer）与 JIT 插件（可热重载
     /// 的运行时载荷）都走这里；解析时的覆盖优先级、依赖与版本规则只看 `kind`。
     pub fn register_static(&mut self, plugin: Arc<dyn StaticPlugin>) -> Result<(), PluginError> {
+        self.ensure_running()?;
         let manifest = plugin.manifest();
         manifest.validate()?;
         self.candidates.push(Candidate {
@@ -240,6 +254,7 @@ impl PluginRegistry {
 
     /// 注册一个只有清单的实现（动态 / JIT 在 M1 之外；测试与后续加载器用）。
     pub fn register_manifest(&mut self, manifest: PluginManifest) -> Result<(), PluginError> {
+        self.ensure_running()?;
         manifest.validate()?;
         self.candidates.push(Candidate {
             manifest,
@@ -250,7 +265,44 @@ impl PluginRegistry {
 
     /// 添加一条能力级覆盖。
     pub fn add_override(&mut self, capability_override: CapabilityOverride) {
+        if self.shutdown_started.load(Ordering::SeqCst) {
+            return;
+        }
         self.overrides.push(capability_override);
+    }
+
+    /// 停止所有活跃插件并运行它们的关闭逻辑。
+    ///
+    /// 该操作幂等；重复调用不会再次停止插件。
+    pub fn shutdown(&mut self) -> Vec<PluginShutdownFailure> {
+        if self.shutdown_started.swap(true, Ordering::SeqCst) {
+            return Vec::new();
+        }
+        let failures = self
+            .candidates
+            .iter()
+            .filter_map(|candidate| {
+                candidate.payload.as_ref().and_then(|payload| {
+                    payload.shutdown().err().map(|error| PluginShutdownFailure {
+                        plugin: candidate.manifest.name.clone(),
+                        message: error.to_string(),
+                    })
+                })
+            })
+            .collect();
+        self.candidates.clear();
+        self.overrides.clear();
+        failures
+    }
+
+    fn ensure_running(&self) -> Result<(), PluginError> {
+        if self.shutdown_started.load(Ordering::SeqCst) {
+            return Err(PluginError::Install {
+                plugin: "<registry>".to_owned(),
+                message: "plugin registry is shutting down".to_owned(),
+            });
+        }
+        Ok(())
     }
 
     /// 解析：同名覆盖 → 能力选择 → 形态约束 → 依赖图/环 → 初始化顺序。

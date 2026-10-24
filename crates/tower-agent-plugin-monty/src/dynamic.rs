@@ -77,6 +77,10 @@ impl StaticPlugin for LoadedPluginPayload {
         }
         Ok(())
     }
+
+    fn shutdown(&self) -> Result<(), PluginError> {
+        self.loaded.stop()
+    }
 }
 
 /// 动态插件工具：把结构化参数归档后调插件，读回归档结果。

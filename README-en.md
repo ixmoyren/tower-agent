@@ -184,6 +184,7 @@ tower-agent/
 - [`docs/plugins.md`](docs/plugins.md): the plugin/extension system (static / dynamic / hot-reload).
 - [`docs/codemode.md`](docs/codemode.md): codemode mode (rquickjs + wasmtime + uutils — script and commands both run inside the wasm sandbox).
 - [`docs/sdk.md`](docs/sdk.md): plugin author SDK and extension points shared by Rust plugins and sandboxed scripts.
+- [`docs/graceful-shutdown.md`](docs/graceful-shutdown.md): request draining, forced cancellation, and resource shutdown for Axum and other hosts.
 - [`docs/architecture-review.md`](docs/architecture-review.md): current-state review.
 - [`wasm/monty-sandbox/README.md`](wasm/monty-sandbox/README.md): wasm component interface and regeneration.
 

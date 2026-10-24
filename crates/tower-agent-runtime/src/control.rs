@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
+use tokio_util::sync::CancellationToken;
 use tower_agent_core::{AgentError, AgentMessage, AgentTool};
 use tower_agent_provider::{BoxStreamService, Model, ModelThinkingLevel};
 
@@ -28,6 +29,9 @@ pub trait AgentControl: Send + Sync + 'static {
 
     /// 取消进行中的一轮。
     fn abort(&self);
+
+    /// 设置宿主停机信号。
+    fn set_shutdown_signal(&self, signal: Option<CancellationToken>);
 
     /// 替换模型。
     fn set_model(&self, model: Model);
@@ -67,6 +71,10 @@ impl AgentControl for Agent {
 
     fn abort(&self) {
         Agent::abort(self);
+    }
+
+    fn set_shutdown_signal(&self, signal: Option<CancellationToken>) {
+        Agent::set_shutdown_signal(self, signal);
     }
 
     fn set_model(&self, model: Model) {

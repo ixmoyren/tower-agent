@@ -48,5 +48,6 @@ pub use tower_agent_core::{
 };
 pub use tower_agent_runtime::{
     Agent, AgentOptions, AgentPool, AgentService, AgentState, AgentStreamService, EventBus,
-    MemorySessionStore, QueueMode,
+    MemorySessionStore, QueueMode, ShutdownCoordinator, ShutdownGuard, ShutdownHook,
+    ShutdownOptions, ShutdownReport, ShutdownState,
 };

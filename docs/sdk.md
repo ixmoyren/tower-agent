@@ -1,10 +1,10 @@
 # 插件能力与扩展点（`tower-agent-plugin-sdk`）
 
-| 项目     | 值                                                                                                               |
-|----------|------------------------------------------------------------------------------------------------------------------|
-| 状态     | 当前实现 + 后续提案；tool / hook / Provider 能力已落地，其余扩展点按表推进 |
-| 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、[`codemode.md`](./codemode.md) §0                      |
-| 参考基线 | pi `packages/coding-agent/src/core/extensions/`（`ExtensionAPI`、41 个事件）                                     |
+| 项目     | 值                                                                                          |
+|----------|---------------------------------------------------------------------------------------------|
+| 状态     | 当前实现 + 后续提案；tool / hook / Provider 能力已落地，其余扩展点按表推进                  |
+| 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、[`codemode.md`](./codemode.md) §0 |
+| 参考基线 | pi `packages/coding-agent/src/core/extensions/`（`ExtensionAPI`、41 个事件）                |
 
 本文档回答： **"给 agent 加能力"这件事应该长什么样**，以及它如何落在现有 `tower-agent-plugin-sdk` / `tower-agent-plugin`，并与 codemode 脚本共用同一套语义。
 
@@ -36,12 +36,12 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 
 现状：
 
-| crate                    | 现在负责                                                                                   | 问题                                       |
-|--------------------------|--------------------------------------------------------------------------------------------|--------------------------------------------|
-| `tower-agent-plugin`    | 通用插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                     | 面向"插件系统"，不是"扩展点"               |
-| `tower-agent-plugin-sdk` | 插件作者：Host/ABI、tool、Provider、动态入口，以及可选 storage、codemode、jit、wasmtime | 扩展能力、打包/ABI、脚本运行契约与可选沙箱基础设施 |
-| `tower-agent-runtime`    | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`              | 有钩子，但很薄、且不统一                   |
-| `tower-agent-plugin-monty` / `tower-agent-plugin-rquickjs` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
+| crate                                                      | 现在负责                                                                                | 问题                                                   |
+|------------------------------------------------------------|-----------------------------------------------------------------------------------------|--------------------------------------------------------|
+| `tower-agent-plugin`                                       | 通用插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                  | 面向"插件系统"，不是"扩展点"                           |
+| `tower-agent-plugin-sdk`                                   | 插件作者：Host/ABI、tool、Provider、动态入口，以及可选 storage、codemode、jit、wasmtime | 扩展能力、打包/ABI、脚本运行契约与可选沙箱基础设施     |
+| `tower-agent-runtime`                                      | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`           | 有钩子，但很薄、且不统一                               |
+| `tower-agent-plugin-monty` / `tower-agent-plugin-rquickjs` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`）              | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
 
 结论（`codemode.md` Q7 已定）： **扩展点作者 API 直接加在 `tower-agent-plugin-sdk` 上**，按模块分层；`tower-agent-plugin` 仍是背后的注册表与生命周期机制。
 
@@ -75,20 +75,20 @@ SDK 统一再导出宿主 API 和动态 ABI，避免插件直接耦合通用宿�
 
 状态图例：✅ 已有 / ◐ 部分（形式不同或只读）/ ❌ 没有。
 
-| pi 扩展点                                                                      | 现在                                                                                                                 | 缺口                                          | 目标 API                                  | 脚本可用                         |
-|--------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|-------------------------------------------|----------------------------------|
-| `registerTool`（含 `exposure` / `namespace` / `annotations` / `outputSchema`） | ✅ `AgentTool` 已带 exposure / namespace / annotations；SDK 提供 typed 注册与完整元数据 | provider 可逐步消费新字段                     | `plugin_sdk::tool::ToolMetadata::…`       | ✅（monty 已有 `tool_register`） |
-| `ctx.executeTool(name, args)`（嵌套调用、`parentToolCallId`、记账）            | ❌                                                                                                                   | 需要 runtime 支持"工具内再调工具"的记录与事件 | `plugin_sdk::tool::call(...)`             | ✅（monty 已有 `tool_call`）     |
-| `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ Rust 与 codemode 脚本均支持 `tool_call` / `tool_result` hook；其余事件仍为通知面 | 其余事件                                      | `plugin_sdk::hook::on(Event, handler)`    | ✅ v0 工具前后事件               |
-| `registerCommand` / `registerShortcut` / `registerFlag`                        | ❌ 斜杠命令是硬编码表                                                                                                | 命令/快捷键/flag 注册表 + 前端接线            | `plugin_sdk::command::*`                  | ❌                               |
-| `registerProvider` / `registerVirtualModel`                                    | ◐ Provider 作为普通 Static / Dynamic 插件注册 `Arc<dyn ProviderPlugin>`；virtual model 未实现                           | virtual model 目录与动态替换                  | `plugin_sdk::provider::ProviderPluginRegistration` | ❌                               |
-| `registerMcpServer`                                                            | ❌ MCP 未实现                                                                                                        | MCP 客户端                                    | `plugin_sdk::provider::register_mcp(...)` | ❌                               |
-| `sendMessage` / `sendUserMessage` / `appendEntry`                              | ❌                                                                                                                   | 会话注入入口                                  | `plugin_sdk::session::*`                  | ❌                               |
-| `ctx.ui.*`（对话框 / 状态 / widget / footer / 自定义组件）                     | ◐ `ui_status` / `ui_panel` / `ui_tool_render` 写进前端无关的 `UiState`                                               | 交互式 UI（确认框、输入框）与渲染器注册       | `plugin_sdk::ui::*`                       | ◐（monty 已有 `ui_*`）           |
-| `pi.events`（扩展间总线）                                                      | ◐ `HostApi` 中介调用（能力级）                                                                                       | 事件总线式订阅                                | `plugin_sdk::host::events()`              | ❌                               |
-| 会话控制（`setModel` / `setThinkingLevel` / `setActiveTools` / `compact`）     | ◐ `/model` `/thinking` `/compact` 有宿主实现                                                                         | 暴露成扩展点                                  | `plugin_sdk::session::control()`          | ❌                               |
-| 工具结果渲染器 / Markdown transformer                                          | ◐ `ui_tool_render`（模板）                                                                                           | 渲染器注册                                    | `plugin_sdk::ui::renderer(...)`           | ◐                                |
-| 资源发现（skills / prompts / themes / mcp.json）                               | ❌                                                                                                                   | ——                                            | `plugin_sdk::resources::*`                | ❌                               |
+| pi 扩展点                                                                      | 现在                                                                                          | 缺口                                          | 目标 API                                           | 脚本可用                         |
+|--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|-----------------------------------------------|----------------------------------------------------|----------------------------------|
+| `registerTool`（含 `exposure` / `namespace` / `annotations` / `outputSchema`） | ✅ `AgentTool` 已带 exposure / namespace / annotations；SDK 提供 typed 注册与完整元数据       | provider 可逐步消费新字段                     | `plugin_sdk::tool::ToolMetadata::…`                | ✅（monty 已有 `tool_register`） |
+| `ctx.executeTool(name, args)`（嵌套调用、`parentToolCallId`、记账）            | ❌                                                                                            | 需要 runtime 支持"工具内再调工具"的记录与事件 | `plugin_sdk::tool::call(...)`                      | ✅（monty 已有 `tool_call`）     |
+| `pi.on(...)` 41 个事件（多数可 transform / block / continue）                  | ◐ Rust 与 codemode 脚本均支持 `tool_call` / `tool_result` hook；其余事件仍为通知面            | 其余事件                                      | `plugin_sdk::hook::on(Event, handler)`             | ✅ v0 工具前后事件               |
+| `registerCommand` / `registerShortcut` / `registerFlag`                        | ❌ 斜杠命令是硬编码表                                                                         | 命令/快捷键/flag 注册表 + 前端接线            | `plugin_sdk::command::*`                           | ❌                               |
+| `registerProvider` / `registerVirtualModel`                                    | ◐ Provider 作为普通 Static / Dynamic 插件注册 `Arc<dyn ProviderPlugin>`；virtual model 未实现 | virtual model 目录与动态替换                  | `plugin_sdk::provider::ProviderPluginRegistration` | ❌                               |
+| `registerMcpServer`                                                            | ❌ MCP 未实现                                                                                 | MCP 客户端                                    | `plugin_sdk::provider::register_mcp(...)`          | ❌                               |
+| `sendMessage` / `sendUserMessage` / `appendEntry`                              | ❌                                                                                            | 会话注入入口                                  | `plugin_sdk::session::*`                           | ❌                               |
+| `ctx.ui.*`（对话框 / 状态 / widget / footer / 自定义组件）                     | ◐ `ui_status` / `ui_panel` / `ui_tool_render` 写进前端无关的 `UiState`                        | 交互式 UI（确认框、输入框）与渲染器注册       | `plugin_sdk::ui::*`                                | ◐（monty 已有 `ui_*`）           |
+| `pi.events`（扩展间总线）                                                      | ◐ `HostApi` 中介调用（能力级）                                                                | 事件总线式订阅                                | `plugin_sdk::host::events()`                       | ❌                               |
+| 会话控制（`setModel` / `setThinkingLevel` / `setActiveTools` / `compact`）     | ◐ `/model` `/thinking` `/compact` 有宿主实现                                                  | 暴露成扩展点                                  | `plugin_sdk::session::control()`                   | ❌                               |
+| 工具结果渲染器 / Markdown transformer                                          | ◐ `ui_tool_render`（模板）                                                                    | 渲染器注册                                    | `plugin_sdk::ui::renderer(...)`                    | ◐                                |
+| 资源发现（skills / prompts / themes / mcp.json）                               | ❌                                                                                            | ——                                            | `plugin_sdk::resources::*`                         | ❌                               |
 
 **结论：现在能支撑"脚本注册一个工具 + 改 UI 片段"，不能支撑"脚本改变 agent 的决策路径"。** v0 的目标就是把第 3 行的 **工具前后**两条做实（Q4 已定），其余留到 S4。
 
@@ -103,13 +103,13 @@ SDK 统一再导出宿主 API 和动态 ABI，避免插件直接耦合通用宿�
 use tower_agent_plugin_sdk::hook::{self, ToolCall, ToolResult};
 use tower_agent_runtime::ToolCallDecision;
 
-let before = hook::on(ToolCall, |mut request| async move {
-    // 可改 request.tool_call.arguments；这里演示拦截。
-    Ok(ToolCallDecision::block("blocked by policy"))
+let before = hook::on(ToolCall, | mut request| async move {
+// 可改 request.tool_call.arguments；这里演示拦截。
+Ok(ToolCallDecision::block("blocked by policy"))
 });
-let after = hook::on(ToolResult, |_request, mut result| async move {
-    result.is_error = false;
-    Ok(result)
+let after = hook::on(ToolResult, | _request, mut result| async move {
+result.is_error = false;
+Ok(result)
 });
 context.register_tool_layer(before);
 context.register_tool_layer(after);
@@ -128,11 +128,11 @@ use tower_agent_plugin_sdk::{
 };
 
 let metadata = ToolMetadata::new("demo.echo", "Echo text")
-    .exposure(ToolExposure::Codemode)
-    .namespace(ToolNamespace::new("demo"))
-    .annotations(ToolAnnotations { read_only_hint: Some(true), ..Default::default() })
-    .output_schema(serde_json::json!({ "type": "object" }));
-let tool = tool::typed::<Params, _, _>(metadata, handler);
+.exposure(ToolExposure::Codemode)
+.namespace(ToolNamespace::new("demo"))
+.annotations(ToolAnnotations { read_only_hint: Some(true), ..Default::default () })
+.output_schema(serde_json::json!({ "type": "object" }));
+let tool = tool::typed::<Params, _, _ > (metadata, handler);
 context.register_tool(tool);
 ```
 
@@ -232,14 +232,14 @@ JSON 回传脚本（未授权 / 未知能力 / 引擎错误 / 超时 / 取消 / 
 
 ## 7. 里程碑（提案）
 
-| 阶段 | 内容                                                                                                                                                |
-|------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| S0   | 本文档 + `codemode.md` §0（评审） ✅ 决策已定：Q1/Q2/Q4/Q7                                                                                          |
-| S1 ✅ | **`tower-agent-plugin-sdk` 扩展点 v0**：`tool` + async `hook`；工具前后钩子已接 `BeforeToolCallLayer` / `AfterToolResultLayer`，Rust 侧可用 |
+| 阶段  | 内容                                                                                                                                                     |
+|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| S0    | 本文档 + `codemode.md` §0（评审） ✅ 决策已定：Q1/Q2/Q4/Q7                                                                                               |
+| S1 ✅ | **`tower-agent-plugin-sdk` 扩展点 v0**：`tool` + async `hook`；工具前后钩子已接 `BeforeToolCallLayer` / `AfterToolResultLayer`，Rust 侧可用              |
 | S2 ✅ | 脚本侧 host function（v0 范围）：`tool_call` / `tool_register` / `on(tool_call)` / `on(tool_result)`；权限矩阵；prompt 同步；两引擎已改变真实 agent 行为 |
-| S3   | `command` / `ui` 扩展点；Rust 与脚本都能注册斜杠命令                                                                                                |
-| S4   | runtime 事件面补齐（§3.1 的第 3–5 条），脚本可真的“改行为”                                                                                          |
-| S5   | Provider 注册能力 ✅；`mcp` / `resources` 后续补齐                                                                                                  |
+| S3    | `command` / `ui` 扩展点；Rust 与脚本都能注册斜杠命令                                                                                                     |
+| S4    | runtime 事件面补齐（§3.1 的第 3–5 条），脚本可真的“改行为”                                                                                               |
+| S5    | Provider 注册能力 ✅；`mcp` / `resources` 后续补齐                                                                                                       |
 
 ## 8. 待决问题
 
