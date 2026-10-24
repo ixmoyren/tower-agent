@@ -11,9 +11,6 @@ publish = false
 name = "coreutils"
 path = "src/main.rs"
 
-# 上游 0.12 线。升级 = 改这里的版本 + 跑 generate.sh，见 README「升级与扩容」。
-# 注：crates.io 上的 uu_* / uucore 声明 MIT（各自带 LICENSE 文件），因此可以内嵌进本仓库
-# 的 MIT OR Apache-2.0 产物；上游仓库整体是另一个许可，发布前值得再确认一次。
 [dependencies]
 uucore = "0.12"
 

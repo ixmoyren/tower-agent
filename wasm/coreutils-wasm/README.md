@@ -4,7 +4,7 @@
 给 codemode 当「命令层」用：一份组件注册到多个命令名，宿主通过 `argv[0]` 分发。设计与边界见
 [`docs/codemode.md`](../../docs/codemode.md) §3.5 / §4.1。
 
-名字里没有 sandbox：**它不是一个沙箱，而是一个被宿主调用的 wasm 工具**（沙箱是跑脚本的那个
+名字里没有 sandbox： **它不是一个沙箱，而是一个被宿主调用的 wasm 工具**（沙箱是跑脚本的那个
 `wasm/rquickjs-sandbox`）。产物是 `dist/coreutils.wasm`，工具名 `coreutils`。
 
 ## 接口与宿主契约
@@ -29,11 +29,10 @@ wasmtime run --argv0 cat --dir=$PWD:: dist/coreutils.wasm /data/f.txt   # 宿主
 ## 重新生成
 
 ```sh
-./generate.sh              # 首次需要联网解析依赖；之后 Cargo.lock 固定，可 --offline
-./generate.sh --offline
+./generate.sh
 ```
 
-依赖：**只有 `wasm32-wasip2` target**（`rustup target add wasm32-wasip2`）。与 monty-sandbox
+依赖： **只有 `wasm32-wasip2` target**（`rustup target add wasm32-wasip2`）。与 monty-sandbox
 不同，这里不需要 `wasi-sdk` / `wasm-opt` / `wasm-tools`——`wasm32-wasip2` 由 rustc 直出组件。
 代价是 **`wasm-opt` 处理不了组件**，体积只能靠 `[profile.release]`（`opt-level="z"` + `lto` +
 `strip`）压：裸构建 11 MB → **7.4 MB**。
@@ -43,28 +42,28 @@ wasmtime run --argv0 cat --dir=$PWD:: dist/coreutils.wasm /data/f.txt   # 宿主
 
 ## 命令清单（60）
 
-| 组 | 命令 |
-|----|------|
-| 文本 | `cat head tail tac nl fold expand unexpand od cut tr uniq comm join paste split shuf tsort sort wc seq` |
-| 文件 / 路径 | `ls cp mv rm mkdir touch mktemp dirname basename realpath readlink ln link unlink truncate` |
-| 杂项 | `true false echo printf test expr date sleep tee yes pwd numfmt factor printenv` |
-| 校验 / 编码 | `md5sum sha1sum sha256sum sha512sum b2sum cksum sum base64 base32 basenc` |
+| 组          | 命令                                                                                                    |
+|-------------|---------------------------------------------------------------------------------------------------------|
+| 文本        | `cat head tail tac nl fold expand unexpand od cut tr uniq comm join paste split shuf tsort sort wc seq` |
+| 文件 / 路径 | `ls cp mv rm mkdir touch mktemp dirname basename realpath readlink ln link unlink truncate`             |
+| 杂项        | `true false echo printf test expr date sleep tee yes pwd numfmt factor printenv`                        |
+| 校验 / 编码 | `md5sum sha1sum sha256sum sha512sum b2sum cksum sum base64 base32 basenc`                               |
 
 ## 加一个命令
 
 1. `Cargo.toml` 加依赖（`uu_xxx = "0.12"`）；
 2. `src/main.rs` 的 `utils! { … }` 里加一行 `"xxx" => uu_xxx,`；
-3. `./generate.sh` 编一遍——**先编再信**。
+3. `./generate.sh` 编一遍—— **先编再信**。
 
 踩过的坑（决定「能不能收」）：
 
 - **碰 `std::os::wasi` 的 util 在 `wasm32-wasip2` 上编不过**，实测两个：`du`
   （`MetadataExt::dev()/ino()`）、`env`（`std::os::wasi::ffi`）。它们要 `#![feature(wasip2)]`
-  且属性必须写进**那个 crate** 的 crate 根。
+  且属性必须写进 **那个 crate** 的 crate 根。
 - **不能用 `RUSTFLAGS=-Zcrate-attr=feature(wasip2)` 绕过**：`wasip2` 是 std 的 gate，注入到图里
   的 `#![no_std]` 依赖（`cfg-if`/`typenum`/`smallvec`/`litemap`/…）会 `E0635`。
-- 因此命中这类 API 时只有两条路：**不收**，或给那**一个** crate 加一行 attribute。
-- `more`（crossterm）在**任何** wasm 目标都编不过，永久排除。
+- 因此命中这类 API 时只有两条路： **不收**，或给那 **一个** crate 加一行 attribute。
+- `more`（crossterm）在 **任何** wasm 目标都编不过，永久排除。
 
 ## 运行期已知限制
 

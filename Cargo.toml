@@ -22,8 +22,8 @@ tempfile = "3.27"
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "sync", "macros", "time", "process", "io-util", "fs"] }
 tokio-util = { version = "0.7", default-features = false }
-wasmtime = { version = "49", default-features = false, features = ["cranelift", "component-model", "cache", "runtime", "std", "parallel-compilation", "async"] }
-wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
+wasmtime = { version = "50", default-features = false, features = ["cranelift", "component-model", "cache", "runtime", "std", "parallel-compilation", "async"] }
+wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
 
 tower-agent-core = { path = "crates/tower-agent-core" }
 tower-agent-runtime = { path = "crates/tower-agent-runtime" }
