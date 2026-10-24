@@ -658,8 +658,12 @@ def shout(args):
             .expect("write");
         let records = storage.list_scripts(&project).await.expect("list scripts");
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].permissions, permissions);
-        assert_eq!(records[0].language, ScriptLanguage::Monty);
+        assert_eq!(
+            serde_json::from_value::<ScriptPermissions>(records[0].permissions.clone())
+                .expect("permissions"),
+            permissions
+        );
+        assert_eq!(records[0].language, "monty");
         assert!(records[0].enabled);
         drop(first);
 

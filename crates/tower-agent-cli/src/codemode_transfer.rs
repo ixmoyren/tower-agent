@@ -112,10 +112,12 @@ fn render_script_file(record: &ScriptRecord) -> Result<String, String> {
         version: FORMAT_VERSION,
         id: record.id.clone(),
         name: record.name.clone(),
-        language: record.language,
+        language: ScriptLanguage::parse(&record.language)
+            .ok_or_else(|| format!("脚本 `{}` 使用未知语言 `{}`", record.name, record.language))?,
         scope: record.scope.clone(),
         enabled: record.enabled,
-        permissions: record.permissions,
+        permissions: serde_json::from_value(record.permissions.clone())
+            .map_err(|error| format!("脚本 `{}` 的权限元数据无效：{error}", record.name))?,
         metadata: record.metadata.clone(),
         created_at: record.created_at,
         updated_at: record.updated_at,
@@ -178,15 +180,17 @@ fn record_from_file(header: ScriptFileHeader, source: String) -> Result<ScriptRe
     if header.id.trim().is_empty() {
         return Err(format!("脚本 `{}` 的 id 为空", header.name));
     }
+    let permissions = serde_json::to_value(header.permissions)
+        .map_err(|error| format!("无法序列化脚本 `{}` 的权限：{error}", header.name))?;
     Ok(ScriptRecord {
         source_hash: script_source_hash(&source),
         id: header.id,
         name: header.name,
-        language: header.language,
+        language: header.language.as_str().to_owned(),
         scope: header.scope,
         source,
         enabled: header.enabled,
-        permissions: header.permissions,
+        permissions,
         metadata: header.metadata,
         created_at: header.created_at,
         updated_at: header.updated_at,
@@ -272,14 +276,20 @@ mod tests {
         ScriptRecord {
             id: "script-1".to_owned(),
             name: "../unsafe/name".to_owned(),
-            language: ScriptLanguage::Monty,
+            language: "monty".to_owned(),
             scope: ConfigScope::project("/work/a"),
             source: "value = 1\n".to_owned(),
             enabled: true,
-            permissions: ScriptPermissions {
-                exec: false,
-                ..ScriptPermissions::default()
-            },
+            permissions: serde_json::json!({
+                "exec": false,
+                "fs": true,
+                "tools": true,
+                "register_tools": true,
+                "hooks": true,
+                "commands": true,
+                "ui": true,
+                "state": true,
+            }),
             metadata: serde_json::json!({ "requires": ["tool.read"] }),
             created_at: 10,
             updated_at: 20,

@@ -27,8 +27,6 @@ use tower_agent_plugin::{
     CapabilityId, PluginContext, PluginError, PluginKind, PluginManifest, StaticPlugin,
 };
 
-pub use tower_agent_codemode_core::{ScriptLanguage, ScriptPermissions};
-
 /// 存储操作的结果。
 pub type StorageResult<T> = Result<T, StorageError>;
 
@@ -144,8 +142,8 @@ pub async fn resolve_config(
 ) -> StorageResult<Option<Value>> {
     if let Some(project) = project
         && let Some(value) = store
-            .get_config(&ConfigScope::Project(project.to_owned()), key)
-            .await?
+        .get_config(&ConfigScope::Project(project.to_owned()), key)
+        .await?
     {
         return Ok(Some(value));
     }
@@ -237,50 +235,50 @@ pub trait SessionStore: Send + Sync + 'static {
     fn delete_session(&self, id: &str) -> StorageFuture<'_, ()>;
 }
 
-/// A persisted codemode script.
+///一个持久化的代码脚本。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptRecord {
-    /// Stable script id.
+    /// 脚本id。
     pub id: String,
-    /// Script name, unique inside its scope.
+    /// 脚本名称，在其作用域中唯一。
     pub name: String,
-    /// Interpreter selected for the script.
-    pub language: ScriptLanguage,
-    /// User or project scope.
+    /// 解释器标识符（例如‘ monty ’或‘ javascript ’）。
+    pub language: String,
+    /// 脚本范围。
     pub scope: ConfigScope,
-    /// Script source.
+    /// 脚本源码。
     pub source: String,
-    /// Whether the script should be loaded at startup.
+    /// 是否应该在启动时加载脚本。
     pub enabled: bool,
-    /// Capability permissions persisted with the script.
-    pub permissions: ScriptPermissions,
-    /// Application-specific metadata.
+    /// 应用程序定义的功能权限与脚本保持一致。
+    pub permissions: Value,
+    /// 应用程序特定的元数据。
     #[serde(default)]
     pub metadata: Value,
-    /// Creation time (Unix milliseconds).
+    /// 创建时间（Unix 毫秒）。
     pub created_at: i64,
-    /// Last update time (Unix milliseconds).
+    /// 上次更新时间（Unix 毫秒）。
     pub updated_at: i64,
-    /// Hash of the source used for change detection.
+    /// 用于变更检测的源的散列。
     pub source_hash: String,
 }
 
-/// Script storage: codemode scripts keyed by `(scope, name)`.
+/// 脚本存储：codemode脚本键值为`(scope, name)`。
 pub trait ScriptStore: Send + Sync + 'static {
-    /// Insert or replace a script in its scope.
+    /// 在其作用域中插入或替换脚本。
     fn upsert_script(&self, script: ScriptRecord) -> StorageFuture<'_, ()>;
 
-    /// Read a script by scope and name.
+    /// 根据作用域和名称读取脚本。
     fn get_script(
         &self,
         scope: &ConfigScope,
         name: &str,
     ) -> StorageFuture<'_, Option<ScriptRecord>>;
 
-    /// List scripts in one scope, newest `updated_at` first.
+    /// 列出一个作用域内的脚本，首先列出最新的‘ updated_at ’。
     fn list_scripts(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<ScriptRecord>>;
 
-    /// Delete a script by scope and name.
+    /// 通过范围和名称删除脚本。
     fn delete_script(&self, scope: &ConfigScope, name: &str) -> StorageFuture<'_, ()>;
 }
 
@@ -338,14 +336,13 @@ pub trait MemoryStore: Send + Sync + 'static {
 ///
 /// 宿主用 `Arc<dyn Storage>` 拿到一个后端；具体实现（Turso / 未来别的）只需实现这六个。
 pub trait Storage:
-    ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
-{
-}
+ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
+{}
 
-impl<T> Storage for T where
-    T: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
-{
-}
+impl<T> Storage for T
+where
+    T: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore,
+{}
 
 /// 把任意 [`Storage`] 后端包装成**静态存储插件**。
 ///

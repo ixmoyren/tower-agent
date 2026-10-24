@@ -7,8 +7,8 @@ use tower_agent_core::AgentMessage;
 use tower_agent_provider::{Message, UserContent, UserMessage};
 use tower_agent_storage::{
     ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
-    ProviderStore, ScriptLanguage, ScriptPermissions, ScriptRecord, ScriptStore, SessionRecord,
-    SessionStore, effective_config, resolve_config,
+    ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionStore, effective_config,
+    resolve_config,
 };
 use tower_agent_turso::TursoStorage;
 
@@ -26,11 +26,20 @@ fn script(id: &str, name: &str, scope: ConfigScope, source: &str, updated_at: i6
     ScriptRecord {
         id: id.to_owned(),
         name: name.to_owned(),
-        language: ScriptLanguage::Monty,
+        language: "monty".to_owned(),
         scope,
         source: source.to_owned(),
         enabled: true,
-        permissions: ScriptPermissions::allow_all(),
+        permissions: json!({
+            "exec": true,
+            "fs": true,
+            "tools": true,
+            "register_tools": true,
+            "hooks": true,
+            "commands": true,
+            "ui": true,
+            "state": true,
+        }),
         metadata: json!({ "origin": "test" }),
         created_at: 1,
         updated_at,
@@ -432,6 +441,6 @@ async fn storage_persists_across_reopen() {
         .unwrap()
         .expect("persisted script");
     assert_eq!(saved.source, "value = 3\n");
-    assert_eq!(saved.language, ScriptLanguage::Monty);
+    assert_eq!(saved.language, "monty");
     assert!(saved.enabled);
 }

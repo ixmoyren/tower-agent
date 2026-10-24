@@ -428,12 +428,19 @@ impl ModManager {
         let records = effective_script_records(&storage).await?;
         let mut summaries = BTreeMap::new();
         for record in records {
+            let Some(language) = ScriptLanguage::parse(&record.language) else {
+                eprintln!(
+                    "跳过 codemode 脚本 `{}`：未知语言 `{}`",
+                    record.name, record.language
+                );
+                continue;
+            };
             let summary = loaded.iter().find(|summary| summary.name == record.name);
             summaries.insert(
                 record.name.clone(),
                 ScriptSummary {
                     name: record.name,
-                    language: record.language,
+                    language,
                     scope: record.scope,
                     enabled: record.enabled,
                     code_len: record.source.len(),
@@ -546,13 +553,31 @@ impl ModManager {
             if !record.enabled {
                 continue;
             }
-            if record.language != ScriptLanguage::Monty {
+            let Some(language) = ScriptLanguage::parse(&record.language) else {
                 eprintln!(
-                    "跳过 codemode 脚本 `{}`：Python 宿主不支持 {}",
+                    "跳过 codemode 脚本 `{}`：未知语言 `{}`",
                     record.name, record.language
                 );
                 continue;
+            };
+            if language != ScriptLanguage::Monty {
+                eprintln!(
+                    "跳过 codemode 脚本 `{}`：Python 宿主不支持 {}",
+                    record.name, language
+                );
+                continue;
             }
+            let permissions =
+                match serde_json::from_value::<ScriptPermissions>(record.permissions.clone()) {
+                    Ok(permissions) => permissions,
+                    Err(error) => {
+                        eprintln!(
+                            "跳过 codemode 脚本 `{}`：权限元数据无效：{error}",
+                            record.name
+                        );
+                        continue;
+                    }
+                };
             if self
                 .mods
                 .lock()
@@ -561,10 +586,10 @@ impl ModManager {
             {
                 continue;
             }
-            self.set_permissions(&record.name, record.permissions);
+            self.set_permissions(&record.name, permissions);
             let requires = requires_from_record(&record);
             let options = ModOptions {
-                permissions: Some(record.permissions),
+                permissions: Some(permissions),
                 requires,
             };
             match self
@@ -604,13 +629,15 @@ impl ModManager {
             metadata = json!({});
         }
         metadata["requires"] = json!(requires);
+        let permissions = serde_json::to_value(permissions)
+            .map_err(|error| mod_error(name, error.to_string()))?;
         let record = ScriptRecord {
             id: existing
                 .as_ref()
                 .map(|record| record.id.clone())
                 .unwrap_or_else(|| new_script_id(name, now)),
             name: name.to_owned(),
-            language,
+            language: language.as_str().to_owned(),
             scope,
             source: source.to_owned(),
             enabled,
@@ -791,7 +818,11 @@ impl ModManager {
             None => None,
         };
         let permissions = permissions
-            .or_else(|| existing.as_ref().map(|record| record.permissions))
+            .or_else(|| {
+                existing.as_ref().and_then(|record| {
+                    serde_json::from_value::<ScriptPermissions>(record.permissions.clone()).ok()
+                })
+            })
             .unwrap_or_else(|| self.permissions(name));
         let summary = if enabled {
             self.write_with_options(

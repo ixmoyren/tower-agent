@@ -72,9 +72,8 @@ fn help_and_version_exit_successfully() {
 
 #[tokio::test]
 async fn codemode_export_import_commands_round_trip_through_the_database() {
-    use tower_agent_storage::{
-        ConfigScope, ScriptLanguage, ScriptPermissions, ScriptRecord, ScriptStore as _,
-    };
+    use tower_agent_codemode_core::{ScriptLanguage, ScriptPermissions};
+    use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore as _};
     use tower_agent_turso::TursoStorage;
 
     let home = tempfile::tempdir().expect("home");
@@ -93,11 +92,11 @@ async fn codemode_export_import_commands_round_trip_through_the_database() {
         .upsert_script(ScriptRecord {
             id: "round-trip".to_owned(),
             name: "round_trip".to_owned(),
-            language: ScriptLanguage::Monty,
+            language: ScriptLanguage::Monty.as_str().to_owned(),
             scope: project.clone(),
             source: source.to_owned(),
             enabled: true,
-            permissions: ScriptPermissions::default(),
+            permissions: serde_json::to_value(ScriptPermissions::default()).unwrap(),
             metadata: serde_json::json!({ "requires": [] }),
             created_at: 1,
             updated_at: 2,
@@ -143,7 +142,7 @@ async fn codemode_export_import_commands_round_trip_through_the_database() {
         .expect("read script")
         .expect("restored script");
     assert_eq!(record.source, source);
-    assert_eq!(record.language, ScriptLanguage::Monty);
+    assert_eq!(record.language, ScriptLanguage::Monty.as_str());
     assert!(record.enabled);
 }
 

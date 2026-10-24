@@ -51,8 +51,8 @@ use tokio::sync::{mpsc, oneshot};
 use tower_agent_core::AgentMessage;
 use tower_agent_storage::{
     ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
-    ProviderStore, ScriptLanguage, ScriptRecord, ScriptStore, SessionRecord, SessionStore,
-    StorageError, StorageFuture, StoragePlugin, StorageResult,
+    ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionStore, StorageError,
+    StorageFuture, StoragePlugin, StorageResult,
 };
 use turso::{Connection, Row, Value as TursoValue};
 
@@ -551,7 +551,7 @@ impl ScriptStore for TursoStorage {
                     text(scope_kind),
                     text(scope_id),
                     text(script.name),
-                    text(script.language.as_str()),
+                    text(script.language),
                     text(script.source),
                     integer(i64::from(script.enabled)),
                     text(permissions),
@@ -847,10 +847,7 @@ fn script_from_row(row: &Row) -> StorageResult<ScriptRecord> {
             )));
         }
     };
-    let language_name = column_text(row, 4)?;
-    let language = ScriptLanguage::parse(&language_name).ok_or_else(|| {
-        StorageError::Serialization(format!("unknown script language `{language_name}`"))
-    })?;
+    let language = column_text(row, 4)?;
     let enabled = match column_i64(row, 6)? {
         0 => false,
         1 => true,

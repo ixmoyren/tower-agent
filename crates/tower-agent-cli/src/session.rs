@@ -2090,7 +2090,7 @@ def persisted_echo(args):
             .await
             .expect("read ScriptStore")
             .expect("stored script");
-        assert_eq!(record.language, ScriptLanguage::Monty);
+        assert_eq!(record.language, ScriptLanguage::Monty.as_str());
         assert!(record.enabled);
         assert_eq!(record.source, code);
     }
@@ -2191,7 +2191,7 @@ def exported_echo(args):
             .await
             .expect("read restored script")
             .expect("restored script exists");
-        assert_eq!(record.language, ScriptLanguage::Monty);
+        assert_eq!(record.language, ScriptLanguage::Monty.as_str());
         assert!(record.enabled);
         assert_eq!(record.source, code);
     }
