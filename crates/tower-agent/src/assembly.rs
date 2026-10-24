@@ -44,6 +44,9 @@ pub struct HostAssembly {
     pub tools: Vec<AgentTool>,
     /// Installed provider plugins.
     pub providers: ProviderRegistry,
+    /// Storage backends contributed by installed plugins.
+    #[cfg(feature = "storage-turso")]
+    pub storage_backends: Vec<tower_agent_plugin_sdk::storage::StorageBackendRegistration>,
 }
 
 #[cfg(feature = "codemode-js")]
@@ -160,6 +163,11 @@ impl HostPlugins {
         Ok(HostAssembly {
             tools: context.tools().to_vec(),
             providers,
+            #[cfg(feature = "storage-turso")]
+            storage_backends: context
+                .extensions::<tower_agent_plugin_sdk::storage::StorageBackendRegistration>()
+                .map(|extension| extension.value.clone())
+                .collect(),
         })
     }
 

@@ -39,9 +39,11 @@ pub use tower_agent_runtime::{ToolAnnotations, ToolExposure, ToolNamespace, Tool
 
 #[cfg(feature = "storage")]
 pub use storage::{
-    ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
-    ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionStore, StorageError,
-    StorageFuture, StoragePlugin, StorageResult, effective_config, resolve_config,
+    ConfigRecord, ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore,
+    ProviderCredential, ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionSnapshot,
+    SessionStore, Storage, StorageBackendRegistration, StorageError, StorageFuture,
+    StorageMaintenance, StorageManager, StoragePlugin, StorageResult, StorageSnapshot,
+    effective_config, resolve_config,
 };
 
 /// 插件作者需要与宿主同一版本的 `rkyv`（归档格式与之绑定）。

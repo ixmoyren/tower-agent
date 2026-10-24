@@ -16,19 +16,23 @@
 //! fire-and-forget，退出前用 [`CliStore::flush`] 确保落盘。
 
 use std::{
+    collections::BTreeSet,
     future::Future,
+    io::{BufRead as _, IsTerminal as _, Write as _},
     path::{Path, PathBuf},
+    process,
     sync::atomic::{AtomicU64, Ordering},
     sync::{Arc, Mutex},
 };
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::runtime::{Handle, Runtime};
 use tokio::task::JoinHandle;
 use tower_agent_core::AgentMessage;
 use tower_agent_plugin_sdk::storage::{
-    ConfigScope, ConfigStore, HistoryStore, ProviderCredential, ProviderStore, ScriptRecord,
-    ScriptStore, SessionRecord, SessionStore, StorageError, StorageFuture,
+    ConfigScope, ProviderCredential, ScriptRecord, ScriptStore, SessionRecord, Storage,
+    StorageBackendRegistration, StorageError, StorageFuture, StorageManager,
 };
 use tower_agent_plugin_turso::TursoStorage;
 use tower_agent_provider::{Message, UserContent};
@@ -51,6 +55,30 @@ pub const COMPACTION_KEEP_RECENT_TOKENS: &str = "compaction.keepRecentTokens";
 
 /// 覆盖存储数据库路径的环境变量（测试与自定义位置用）。
 pub const STORAGE_PATH_ENV: &str = "TOWER_AGENT_STORAGE";
+/// 覆盖 storage 控制配置路径的环境变量（测试与隔离环境用）。
+pub const STORAGE_CONTROL_ENV: &str = "TOWER_AGENT_STORAGE_CONTROL";
+
+/// 与具体 backend 数据分离的 storage 选择配置。
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageControl {
+    /// 当前活跃的 backend；尚未选择时为空。
+    #[serde(default)]
+    pub active: Option<String>,
+    /// 用户停用的 backend；重启后仍然生效。
+    #[serde(default)]
+    pub disabled: BTreeSet<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct StorageControlFile {
+    #[serde(default)]
+    storage: StorageControl,
+}
+
+struct SelectedBackend {
+    name: String,
+    persist: bool,
+}
 
 /// 启动时一次性读到的配置快照。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -79,9 +107,10 @@ impl StoreSnapshot {
 
 /// CLI 的配置存储句柄。
 ///
-/// 内部持有具体后端（而不是 `Arc<dyn Storage>`），因为落盘用的 `flush` 只由后端提供。
+/// 内部只持有一个当前活跃 storage backend。
 pub struct CliStore {
-    storage: Arc<TursoStorage>,
+    storage: Arc<dyn Storage>,
+    manager: Option<Arc<StorageManager>>,
     handle: Handle,
     /// 尚未完成的写入任务；[`CliStore::flush`] 先等它们入队再落盘，保证「写后 flush」不丢写。
     inflight: Mutex<Vec<JoinHandle<()>>>,
@@ -101,8 +130,56 @@ impl CliStore {
 
     /// 打开指定路径的存储。
     pub fn open_at(runtime: &Runtime, path: impl AsRef<Path>) -> Result<Self, StorageError> {
-        let storage = runtime.block_on(TursoStorage::open(path))?;
-        Ok(Self::from_storage(storage, runtime.handle().clone()))
+        Self::open_for_cli(runtime, path, None, std::io::stdin().is_terminal())
+    }
+
+    /// 按控制配置选择 backend 并打开 CLI 存储。
+    pub fn open_for_cli(
+        runtime: &Runtime,
+        path: impl AsRef<Path>,
+        requested: Option<&str>,
+        interactive: bool,
+    ) -> Result<Self, StorageError> {
+        let backend = runtime.block_on(TursoStorage::open(path))?;
+        Self::open_with_backends(
+            runtime,
+            vec![backend.plugin().registration()],
+            storage_control_path(),
+            requested,
+            interactive,
+        )
+    }
+
+    /// 从宿主发现的一组 backend 中按控制配置选择一个。
+    ///
+    /// 多 backend 且没有既有选择时，交互终端会让用户选择；非交互调用返回
+    /// [`StorageError::Selection`]，其中包含候选列表。
+    pub fn open_with_backends(
+        runtime: &Runtime,
+        backends: Vec<StorageBackendRegistration>,
+        control_path: impl AsRef<Path>,
+        requested: Option<&str>,
+        interactive: bool,
+    ) -> Result<Self, StorageError> {
+        let control_path = control_path.as_ref();
+        let mut control = load_storage_control(control_path)?;
+        let selected = select_backend(&control, &backends, requested, interactive)?;
+        if selected.persist {
+            control.active = Some(selected.name.clone());
+            save_storage_control(control_path, &control)?;
+        }
+        let names = backends
+            .iter()
+            .map(|backend| backend.name.clone())
+            .collect::<BTreeSet<_>>();
+        let manager = Arc::new(StorageManager::new(backends, selected.name)?);
+        runtime.block_on(async {
+            for name in control.disabled.iter().filter(|name| names.contains(*name)) {
+                manager.set_backend_enabled(name, false).await?;
+            }
+            Ok::<_, StorageError>(())
+        })?;
+        Ok(Self::from_manager(manager, runtime.handle().clone()))
     }
 
     /// 打开纯内存存储（测试用）。
@@ -113,12 +190,33 @@ impl CliStore {
 
     /// 用现成的后端与运行时句柄构造（测试也走这个）。
     #[must_use]
-    pub fn from_storage(storage: TursoStorage, handle: Handle) -> Self {
+    pub fn from_storage<T>(storage: T, handle: Handle) -> Self
+    where
+        T: Storage,
+    {
         Self {
             storage: Arc::new(storage),
+            manager: None,
             handle,
             inflight: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Use the single active backend owned by a [`StorageManager`].
+    #[must_use]
+    pub fn from_manager(storage: Arc<StorageManager>, handle: Handle) -> Self {
+        Self {
+            storage: Arc::clone(&storage) as Arc<dyn Storage>,
+            manager: Some(storage),
+            handle,
+            inflight: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// 由多 backend 管理器支撑时返回它，供上层执行排他式迁移切换。
+    #[must_use]
+    pub fn manager(&self) -> Option<&Arc<StorageManager>> {
+        self.manager.as_ref()
     }
 
     /// 读一份启动配置快照：默认项取「项目覆盖用户」的有效值，凭据取全量。
@@ -353,6 +451,230 @@ impl ScriptStore for CliScriptStore {
             self.store.storage.flush().await
         })
     }
+
+    fn list_script_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>> {
+        Box::pin(async move { self.store.storage.list_script_scopes().await })
+    }
+}
+
+/// storage 控制配置路径：`TOWER_AGENT_STORAGE_CONTROL` 优先，否则放在用户配置目录。
+#[must_use]
+pub fn storage_control_path() -> PathBuf {
+    match std::env::var_os(STORAGE_CONTROL_ENV) {
+        Some(path) if !path.is_empty() => PathBuf::from(path),
+        _ => dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("tower-agent")
+            .join("storage.toml"),
+    }
+}
+
+/// 读取 storage 控制配置；文件不存在时返回默认值。
+pub fn load_storage_control(path: impl AsRef<Path>) -> Result<StorageControl, StorageError> {
+    let path = path.as_ref();
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StorageControl::default());
+        }
+        Err(error) => {
+            return Err(StorageError::Backend(format!(
+                "read storage control {}: {error}",
+                path.display()
+            )));
+        }
+    };
+    toml::from_str::<StorageControlFile>(&source)
+        .map(|file| file.storage)
+        .map_err(|error| {
+            StorageError::Serialization(format!(
+                "parse storage control {}: {error}",
+                path.display()
+            ))
+        })
+}
+
+/// 原子写入 storage 控制配置（临时文件 → fsync → rename → 目录 fsync）。
+pub fn save_storage_control(
+    path: impl AsRef<Path>,
+    control: &StorageControl,
+) -> Result<(), StorageError> {
+    let path = path.as_ref();
+    let source = toml::to_string_pretty(&StorageControlFile {
+        storage: control.clone(),
+    })
+    .map_err(|error| StorageError::Serialization(error.to_string()))?;
+    atomic_write(path, source.as_bytes()).map_err(|error| {
+        StorageError::Backend(format!("write storage control {}: {error}", path.display()))
+    })
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let previous = match std::fs::read(path) {
+        Ok(previous) => Some(previous),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    stage_and_rename(path, parent, bytes)?;
+    if let Err(sync_error) = sync_directory(parent) {
+        // The rename already happened but durability could not be confirmed.
+        // Restore the old selection so an aborted switch cannot leave the
+        // control file pointing at a backend that was never committed.
+        let restore = match &previous {
+            Some(previous) => stage_and_rename(path, parent, previous),
+            None => std::fs::remove_file(path),
+        };
+        let _ = sync_directory(parent);
+        return match restore {
+            Ok(()) => Err(sync_error),
+            Err(restore_error) => Err(std::io::Error::other(format!(
+                "directory sync failed ({sync_error}) and selection rollback failed ({restore_error})"
+            ))),
+        };
+    }
+    Ok(())
+}
+
+fn stage_and_rename(path: &Path, parent: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage.toml");
+    let temp = parent.join(format!(
+        ".{file_name}.{}.{}.tmp",
+        process::id(),
+        TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> std::io::Result<()> {
+    std::fs::File::open(path)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn select_backend(
+    control: &StorageControl,
+    backends: &[StorageBackendRegistration],
+    requested: Option<&str>,
+    interactive: bool,
+) -> Result<SelectedBackend, StorageError> {
+    let mut names = BTreeSet::new();
+    for backend in backends {
+        if !names.insert(backend.name.clone()) {
+            return Err(StorageError::Migration(format!(
+                "duplicate storage backend name `{}`",
+                backend.name
+            )));
+        }
+    }
+    let enabled = names
+        .difference(&control.disabled)
+        .cloned()
+        .collect::<Vec<_>>();
+    let candidates = enabled.join(" / ");
+
+    if let Some(active) = &control.active {
+        if control.disabled.contains(active) || !names.contains(active) {
+            return Err(StorageError::Selection(format!(
+                "configured active backend `{active}` is unavailable (enabled candidates: {candidates})"
+            )));
+        }
+        if let Some(requested) = requested
+            && requested != active
+        {
+            return Err(StorageError::Selection(format!(
+                "`--storage {requested}` conflicts with active backend `{active}`; use `tower-agent storage switch {requested}` to migrate"
+            )));
+        }
+        return Ok(SelectedBackend {
+            name: active.clone(),
+            persist: false,
+        });
+    }
+
+    if let Some(requested) = requested {
+        if control.disabled.contains(requested) || !names.contains(requested) {
+            return Err(StorageError::Selection(format!(
+                "storage backend `{requested}` is unavailable (enabled candidates: {candidates})"
+            )));
+        }
+        return Ok(SelectedBackend {
+            name: requested.to_owned(),
+            persist: enabled.len() > 1,
+        });
+    }
+
+    match enabled.as_slice() {
+        [only] => Ok(SelectedBackend {
+            name: only.clone(),
+            persist: true,
+        }),
+        [] => Err(StorageError::Selection(
+            "no enabled storage backend is available".to_owned(),
+        )),
+        _ if interactive => Ok(SelectedBackend {
+            name: prompt_backend(&enabled)?,
+            persist: true,
+        }),
+        _ => Err(StorageError::Selection(format!(
+            "multiple storage backends are available ({candidates}); pass `--storage <name>`"
+        ))),
+    }
+}
+
+fn prompt_backend(candidates: &[String]) -> Result<String, StorageError> {
+    eprintln!("发现多个 storage backend，请选择一个：");
+    for (index, candidate) in candidates.iter().enumerate() {
+        eprintln!("  {}. {candidate}", index + 1);
+    }
+    let stdin = std::io::stdin();
+    loop {
+        eprint!("输入序号：");
+        let _ = std::io::stderr().flush();
+        let mut input = String::new();
+        if stdin
+            .lock()
+            .read_line(&mut input)
+            .map_err(|error| StorageError::Backend(format!("read selection: {error}")))?
+            == 0
+        {
+            return Err(StorageError::Selection(
+                "storage selection was cancelled".to_owned(),
+            ));
+        }
+        if let Ok(index) = input.trim().parse::<usize>()
+            && let Some(candidate) = candidates.get(index.saturating_sub(1))
+            && index > 0
+        {
+            return Ok(candidate.clone());
+        }
+        eprintln!("无效序号，请输入 1..={}。", candidates.len());
+    }
 }
 
 /// 存储数据库路径：`TOWER_AGENT_STORAGE` 优先，否则 Turso 的默认位置。
@@ -501,7 +823,130 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use semver::Version;
+    use tempfile::TempDir;
+    use tower_agent_plugin_sdk::storage::StoragePlugin;
     use tower_agent_provider::UserMessage;
+
+    fn backend(name: &str, storage: Arc<dyn Storage>) -> StorageBackendRegistration {
+        StoragePlugin::new(name, Version::new(1, 0, 0), storage).registration()
+    }
+
+    fn open_backend(runtime: &Runtime) -> Arc<dyn Storage> {
+        let storage = runtime
+            .block_on(TursoStorage::in_memory())
+            .expect("open in-memory backend");
+        Arc::new(storage)
+    }
+
+    #[test]
+    fn single_backend_is_selected_without_configuration() {
+        let runtime = Runtime::new().expect("runtime");
+        let dir = TempDir::new().expect("temp dir");
+        let store = CliStore::open_with_backends(
+            &runtime,
+            vec![backend("only", open_backend(&runtime))],
+            dir.path().join("storage.toml"),
+            None,
+            false,
+        )
+        .expect("single backend");
+        assert_eq!(
+            runtime.block_on(store.manager().expect("manager").active_backend()),
+            "only"
+        );
+        assert_eq!(
+            load_storage_control(dir.path().join("storage.toml"))
+                .expect("load control")
+                .active
+                .as_deref(),
+            Some("only")
+        );
+    }
+
+    #[test]
+    fn multiple_backends_require_an_explicit_noninteractive_choice() {
+        let runtime = Runtime::new().expect("runtime");
+        let dir = TempDir::new().expect("temp dir");
+        let error = CliStore::open_with_backends(
+            &runtime,
+            vec![
+                backend("alpha", open_backend(&runtime)),
+                backend("beta", open_backend(&runtime)),
+            ],
+            dir.path().join("storage.toml"),
+            None,
+            false,
+        )
+        .expect_err("ambiguous selection");
+        assert!(matches!(error, StorageError::Selection(_)));
+        assert!(error.to_string().contains("alpha"));
+        assert!(error.to_string().contains("beta"));
+    }
+
+    #[test]
+    fn explicit_multiple_backend_choice_is_persisted_atomically() {
+        let runtime = Runtime::new().expect("runtime");
+        let dir = TempDir::new().expect("temp dir");
+        let control_path = dir.path().join("storage.toml");
+        let store = CliStore::open_with_backends(
+            &runtime,
+            vec![
+                backend("alpha", open_backend(&runtime)),
+                backend("beta", open_backend(&runtime)),
+            ],
+            &control_path,
+            Some("beta"),
+            false,
+        )
+        .expect("explicit selection");
+        assert_eq!(
+            runtime.block_on(store.manager().expect("manager").active_backend()),
+            "beta"
+        );
+        assert_eq!(
+            load_storage_control(&control_path)
+                .expect("load control")
+                .active
+                .as_deref(),
+            Some("beta")
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path())
+                .expect("read control dir")
+                .count(),
+            1,
+            "temporary control file must be removed after rename"
+        );
+    }
+
+    #[test]
+    fn switching_backend_requires_the_switch_command() {
+        let runtime = Runtime::new().expect("runtime");
+        let dir = TempDir::new().expect("temp dir");
+        let control_path = dir.path().join("storage.toml");
+        save_storage_control(
+            &control_path,
+            &StorageControl {
+                active: Some("alpha".to_owned()),
+                ..StorageControl::default()
+            },
+        )
+        .expect("save control");
+        let error = CliStore::open_with_backends(
+            &runtime,
+            vec![
+                backend("alpha", open_backend(&runtime)),
+                backend("beta", open_backend(&runtime)),
+            ],
+            control_path,
+            Some("beta"),
+            false,
+        )
+        .expect_err("must migrate, not silently switch");
+        assert!(matches!(error, StorageError::Selection(_)));
+        assert!(error.to_string().contains("storage switch beta"));
+    }
 
     #[test]
     fn snapshot_finds_credentials_by_provider() {

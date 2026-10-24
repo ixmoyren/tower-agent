@@ -25,9 +25,10 @@ pub mod codemode_transfer;
 pub mod provider;
 pub mod session;
 pub mod stack;
+pub mod storage_admin;
 pub mod store;
 
-use args::{CliArgs, ConfigScopeArg, parse};
+use args::{CliArgs, CliCommand, ConfigScopeArg, parse};
 use provider::ProviderStackOptions;
 use session::{Session, run_print, run_tui};
 use std::{
@@ -37,7 +38,7 @@ use std::{
     sync::Arc,
 };
 use tower_agent_codemode_core::{EngineSelection, ScriptLanguage};
-use tower_agent_plugin_sdk::storage::ConfigScope;
+use tower_agent_plugin_sdk::storage::{ConfigScope, StorageError};
 
 fn main() -> ExitCode {
     let args = match parse(std::env::args().skip(1)) {
@@ -58,6 +59,10 @@ fn main() -> ExitCode {
     if args.list_tools {
         print_tools(args.codemode);
         return ExitCode::SUCCESS;
+    }
+
+    if let Some(CliCommand::Storage { action }) = args.command.as_ref() {
+        return run_storage_command(action);
     }
 
     // 会话管理与 agent 无关，`.arg` 一出现就干完退出。
@@ -114,8 +119,17 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let store = match store::CliStore::open(&runtime) {
+    let store = match store::CliStore::open_for_cli(
+        &runtime,
+        store::storage_path(),
+        args.storage.as_deref(),
+        interactive,
+    ) {
         Ok(store) => Some(Arc::new(store)),
+        Err(error @ StorageError::Selection(_)) => {
+            eprintln!("配置存储未选择：{error}");
+            return ExitCode::FAILURE;
+        }
         Err(error) => {
             eprintln!("配置存储不可用（{error}）；本次会话的配置不会持久化。");
             None
@@ -438,7 +452,13 @@ fn run_config_command(args: &CliArgs, cwd: &Path) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let store = match store::CliStore::open(&runtime) {
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let store = match store::CliStore::open_for_cli(
+        &runtime,
+        store::storage_path(),
+        args.storage.as_deref(),
+        interactive,
+    ) {
         Ok(store) => store,
         Err(error) => {
             eprintln!("配置存储不可用：{error}");
@@ -465,7 +485,13 @@ fn run_codemode_transfer_command(args: &CliArgs, cwd: &Path) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let store = match store::CliStore::open(&runtime) {
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let store = match store::CliStore::open_for_cli(
+        &runtime,
+        store::storage_path(),
+        args.storage.as_deref(),
+        interactive,
+    ) {
         Ok(store) => Arc::new(store),
         Err(error) => {
             eprintln!("脚本存储不可用：{error}");
@@ -504,6 +530,27 @@ fn run_codemode_transfer_command(args: &CliArgs, cwd: &Path) -> ExitCode {
         }
         Err(error) => {
             eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `tower-agent storage ...`：选择控制面与排他式迁移入口。
+fn run_storage_command(action: &args::StorageAction) -> ExitCode {
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("无法启动运行时：{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match storage_admin::run(&runtime, action) {
+        Ok(output) => {
+            println!("{output}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("storage 操作失败：{error}");
             ExitCode::FAILURE
         }
     }

@@ -16,8 +16,13 @@ fn cli() -> Command {
         "tower-agent-cli-test-{}-{seq}.db",
         std::process::id()
     ));
+    let control = std::env::temp_dir().join(format!(
+        "tower-agent-cli-test-{}-{seq}.storage.toml",
+        std::process::id()
+    ));
     let mut command = Command::new(env!("CARGO_BIN_EXE_tower-agent"));
     command.env("TOWER_AGENT_STORAGE", storage);
+    command.env("TOWER_AGENT_STORAGE_CONTROL", control);
     command
 }
 
@@ -25,6 +30,10 @@ fn cli() -> Command {
 fn cli_at(storage: &str, cwd: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tower-agent"));
     command.env("TOWER_AGENT_STORAGE", storage);
+    command.env(
+        "TOWER_AGENT_STORAGE_CONTROL",
+        Path::new(storage).with_extension("storage.toml"),
+    );
     command.arg("-C").arg(cwd);
     command
 }
@@ -52,6 +61,7 @@ fn help_and_version_exit_successfully() {
         "--codemode-export",
         "--codemode-import",
         "--codemode-script-scope",
+        "--storage",
     ] {
         assert!(help.contains(flag), "help is missing `{flag}`:\n{help}");
     }
@@ -68,6 +78,25 @@ fn help_and_version_exit_successfully() {
     let output = cli().arg("-v").output().expect("run cli");
     assert!(output.status.success());
     assert!(stdout(&output).starts_with("tower-agent "));
+}
+
+#[test]
+fn storage_management_commands_list_the_default_backend() {
+    let output = cli()
+        .args(["storage", "list"])
+        .output()
+        .expect("run storage list");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("NAME\tSTATUS"), "got:\n{text}");
+    assert!(text.contains("turso\tenabled"), "got:\n{text}");
+
+    let output = cli()
+        .args(["storage", "status"])
+        .output()
+        .expect("run storage status");
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    assert!(stdout(&output).contains("active\tturso (implicit)"));
 }
 
 #[tokio::test]

@@ -139,7 +139,22 @@ echo "解释一下 crates/tower-agent-runtime 的编排循环" \
 | `--codemode-engine <monty\|js>`      | 设置 codemode 默认引擎（脚本 language 可覆盖）              |
 | `--codemode-session <name>`          | 使用持久化 codemode 会话                                    |
 | `--codemode-mount <spec>`            | 额外 codemode 挂载（可重复）                                 |
+| `--storage <name>`                   | 首次有多个 storage backend 时选择默认项                      |
 | `-h`, `--help` · `-v`, `--version`  | 帮助 / 版本                                                 |
+
+多 storage backend 的查看、迁移切换与停用：
+
+```sh
+tower-agent storage list
+tower-agent storage status
+tower-agent storage switch <name>
+tower-agent storage disable <name>
+tower-agent storage enable <name>
+```
+
+运行时只路由到一个活跃 backend；切换会做完整快照复制和校验，失败时保持
+原 backend。选择状态独立保存在 `~/.config/tower-agent/storage.toml`，
+详见 [`docs/storage.md`](docs/storage.md)。
 
 **环境变量**
 
@@ -147,6 +162,8 @@ echo "解释一下 crates/tower-agent-runtime 的编排循环" \
 |---------------|---------------------------------------------------|
 | `TPA_WORKERS` | runtime worker 数（默认 `available_parallelism`） |
 | `TOWER_AGENT_PROVIDERS` | 覆盖 CLI 的用户 provider 配置文件路径 |
+| `TOWER_AGENT_STORAGE` | 覆盖默认 Turso 数据文件路径 |
+| `TOWER_AGENT_STORAGE_CONTROL` | 覆盖 storage 选择控制文件路径 |
 
 ### 仓库结构
 
@@ -166,6 +183,7 @@ tower-agent/
 - [`docs/design.md`](docs/design.md)：整体设计、agent 能力模型与关键契约。
 - [`docs/tower-agent-architecture.md`](docs/tower-agent-architecture.md)：crate 分层、扩展模型与演进方向。
 - [`docs/plugins.md`](docs/plugins.md)：插件 / 扩展体系（静态 / 动态 / JIT 脚本）。
+- [`docs/storage.md`](docs/storage.md)：多 storage 插件、单活跃 backend 与迁移切换。
 - [`docs/codemode.md`](docs/codemode.md)：codemode —— **agent 可以编程**（LLM 生成脚本、沙箱执行；解释器可选 monty/Python 或 rquickjs/JS）。§0 是 v2 统一提案，§1–§11 是 JS 引擎细节。
 - [`docs/sdk.md`](docs/sdk.md)：插件作者 SDK 与扩展点设计；Rust 插件和沙箱脚本共享能力、Hook 与注册语义。
 - [`docs/roadmap.md`](docs/roadmap.md)：**未完成事项**的单一入口（以及建议顺序）。

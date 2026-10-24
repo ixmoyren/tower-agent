@@ -6,7 +6,7 @@
 
 use std::{ffi::OsString, path::PathBuf};
 
-use clap::{Parser, builder::NonEmptyStringValueParser};
+use clap::{Parser, Subcommand, builder::NonEmptyStringValueParser};
 use tower_agent_codemode_core::ScriptLanguage;
 
 /// 配置作用域（对应 storage 的 `ConfigScope`）。
@@ -36,6 +36,44 @@ impl From<CodemodeEngineArg> for ScriptLanguage {
     }
 }
 
+/// 不启动 agent 会话的顶层管理命令。
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum CliCommand {
+    /// 查看、切换或停用 storage backend。
+    Storage {
+        /// 要执行的 storage 管理操作。
+        #[command(subcommand)]
+        action: StorageAction,
+    },
+}
+
+/// storage backend 管理操作。
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum StorageAction {
+    /// 列出已注册的 backend 及其状态。
+    List,
+    /// 显示当前选中的 backend。
+    Status,
+    /// 在进程内迁移并切换到一个空闲 backend。
+    Switch {
+        /// 目标 backend 名。
+        #[arg(value_name = "name", value_parser = NonEmptyStringValueParser::new())]
+        name: String,
+    },
+    /// 停用一个非活跃 backend。
+    Disable {
+        /// 要停用的 backend 名。
+        #[arg(value_name = "name", value_parser = NonEmptyStringValueParser::new())]
+        name: String,
+    },
+    /// 重新启用一个已停用的 backend。
+    Enable {
+        /// 要启用的 backend 名。
+        #[arg(value_name = "name", value_parser = NonEmptyStringValueParser::new())]
+        name: String,
+    },
+}
+
 /// 解析后的命令行参数。
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 #[command(
@@ -47,6 +85,10 @@ impl From<CodemodeEngineArg> for ScriptLanguage {
     help_template = "{about-with-newline}\nUsage: {usage}\n\nArguments:\n{positionals}\n\nOptions:\n{options}"
 )]
 pub struct CliArgs {
+    /// 不启动会话的顶层管理命令。
+    #[command(subcommand)]
+    pub command: Option<CliCommand>,
+
     /// 一次性提示词；缺省时从 stdin 读取全部内容。
     #[arg(
         value_name = "prompt",
@@ -171,6 +213,15 @@ pub struct CliArgs {
                 (defaults to the first one with credentials in the environment)."
     )]
     pub provider: Option<String>,
+
+    /// 选择 storage backend；只在尚无已保存选择或与已保存选择一致时可使用。
+    #[arg(
+        long = "storage",
+        value_name = "name",
+        value_parser = NonEmptyStringValueParser::new(),
+        help = "Select the storage backend when no backend has been chosen yet."
+    )]
+    pub storage: Option<String>,
 
     /// 一次性 API key（覆盖环境变量；对应 pi `--api-key`）。
     #[arg(
@@ -370,6 +421,8 @@ mod tests {
         assert_eq!(args.api_key, None);
         assert_eq!(args.model, None);
         assert_eq!(args.thinking, None);
+        assert_eq!(args.storage, None);
+        assert_eq!(args.command, None);
         assert!(args.tools.is_empty());
         assert!(args.exclude_tools.is_empty());
         assert!(!args.no_tools);
@@ -577,6 +630,37 @@ mod tests {
 
         let args = parse_ok(&["--no-session"]);
         assert!(args.no_session);
+    }
+
+    #[test]
+    fn storage_selection_and_management_commands_parse() {
+        let args = parse_ok(&["--storage", "turso", "hi"]);
+        assert_eq!(args.storage.as_deref(), Some("turso"));
+        assert_eq!(args.prompt_text().as_deref(), Some("hi"));
+
+        assert_eq!(
+            parse_ok(&["storage", "list"]).command,
+            Some(CliCommand::Storage {
+                action: StorageAction::List
+            })
+        );
+        assert_eq!(
+            parse_ok(&["storage", "switch", "remote"]).command,
+            Some(CliCommand::Storage {
+                action: StorageAction::Switch {
+                    name: "remote".to_owned()
+                }
+            })
+        );
+        assert_eq!(
+            parse_ok(&["storage", "disable", "local"]).command,
+            Some(CliCommand::Storage {
+                action: StorageAction::Disable {
+                    name: "local".to_owned()
+                }
+            })
+        );
+        assert!(parse(["storage", "switch"]).is_err());
     }
 
     #[test]

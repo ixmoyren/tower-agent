@@ -33,7 +33,12 @@ provider = [
     "dep:tokio",
     "dep:tower",
 ]
-storage = ["dep:tower-agent-core", "dep:futures-util", "dep:thiserror"]
+storage = [
+    "dep:tower-agent-core",
+    "dep:futures-util",
+    "dep:thiserror",
+    "dep:tokio",
+]
 
 [dev-dependencies]
 futures-util.workspace = true

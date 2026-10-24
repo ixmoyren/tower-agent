@@ -147,6 +147,21 @@ mod tests {
                 Ok(())
             })
         }
+
+        fn list_script_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>> {
+            Box::pin(async move {
+                let mut scopes = self
+                    .records
+                    .lock()
+                    .expect("script records poisoned")
+                    .values()
+                    .map(|record| record.scope.clone())
+                    .collect::<Vec<_>>();
+                scopes.sort();
+                scopes.dedup();
+                Ok(scopes)
+            })
+        }
     }
 
     /// 通过 ToolRouter 调用一个 mod 工具，返回模型可见文本。

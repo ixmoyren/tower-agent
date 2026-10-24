@@ -52,7 +52,7 @@ use tower_agent_core::AgentMessage;
 use tower_agent_plugin_sdk::storage::{
     ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
     ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionStore, StorageError,
-    StorageFuture, StoragePlugin, StorageResult,
+    StorageFuture, StorageMaintenance, StoragePlugin, StorageResult,
 };
 use turso::{Connection, Row, Value as TursoValue};
 
@@ -140,6 +140,8 @@ const SQL_DELETE_CONFIG: &str = "DELETE FROM config \
      WHERE scope_kind = ?1 AND scope_id = ?2 AND key = ?3";
 const SQL_LIST_CONFIG: &str = "SELECT key FROM config \
      WHERE scope_kind = ?1 AND scope_id = ?2 ORDER BY key";
+const SQL_LIST_CONFIG_SCOPES: &str = "SELECT DISTINCT scope_kind, scope_id FROM config \
+     ORDER BY scope_kind, scope_id";
 
 const SQL_PUT_PROVIDER: &str = "INSERT OR REPLACE INTO provider \
      (provider, api_key, model, base_url, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)";
@@ -168,6 +170,8 @@ const SQL_LIST_SCRIPTS: &str = "SELECT id, scope_kind, scope_id, name, language,
      permissions, metadata, created_at, updated_at, source_hash \
      FROM script WHERE scope_kind = ?1 AND scope_id = ?2 \
      ORDER BY updated_at DESC, name ASC";
+const SQL_LIST_SCRIPT_SCOPES: &str = "SELECT DISTINCT scope_kind, scope_id FROM script \
+     ORDER BY scope_kind, scope_id";
 const SQL_DELETE_SCRIPT: &str =
     "DELETE FROM script WHERE scope_kind = ?1 AND scope_id = ?2 AND name = ?3";
 
@@ -417,6 +421,21 @@ impl ConfigStore for TursoStorage {
             Ok(keys)
         })
     }
+
+    fn list_config_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>> {
+        Box::pin(async move {
+            let mut rows = self
+                .read
+                .query(SQL_LIST_CONFIG_SCOPES, Vec::<TursoValue>::new())
+                .await
+                .map_err(backend)?;
+            let mut scopes = Vec::new();
+            while let Some(row) = rows.next().await.map_err(backend)? {
+                scopes.push(scope_from_row(&row)?);
+            }
+            Ok(scopes)
+        })
+    }
 }
 
 impl ProviderStore for TursoStorage {
@@ -616,6 +635,21 @@ impl ScriptStore for TursoStorage {
             })
         })
     }
+
+    fn list_script_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>> {
+        Box::pin(async move {
+            let mut rows = self
+                .read
+                .query(SQL_LIST_SCRIPT_SCOPES, Vec::<TursoValue>::new())
+                .await
+                .map_err(backend)?;
+            let mut scopes = Vec::new();
+            while let Some(row) = rows.next().await.map_err(backend)? {
+                scopes.push(scope_from_row(&row)?);
+            }
+            Ok(scopes)
+        })
+    }
 }
 
 impl HistoryStore for TursoStorage {
@@ -746,6 +780,12 @@ impl MemoryStore for TursoStorage {
     }
 }
 
+impl StorageMaintenance for TursoStorage {
+    fn flush(&self) -> StorageFuture<'_, ()> {
+        TursoStorage::flush(self)
+    }
+}
+
 /// 把一个 `turso::Error` 包成后端错误。
 fn backend(error: turso::Error) -> StorageError {
     StorageError::Backend(error.to_string())
@@ -832,6 +872,18 @@ fn session_from_row(row: &Row) -> StorageResult<SessionRecord> {
         updated_at: column_i64(row, 4)?,
         metadata,
     })
+}
+
+fn scope_from_row(row: &Row) -> StorageResult<ConfigScope> {
+    let kind = column_text(row, 0)?;
+    let id = column_text(row, 1)?;
+    match (kind.as_str(), id.as_str()) {
+        ("user", "") => Ok(ConfigScope::User),
+        ("project", id) => Ok(ConfigScope::Project(id.to_owned())),
+        _ => Err(StorageError::Serialization(format!(
+            "invalid storage scope ({kind}, {id})"
+        ))),
+    }
 }
 
 /// `script` 表一行 → 脚本记录。

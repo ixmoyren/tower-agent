@@ -9,8 +9,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-tower-agent-runtime = { workspace = true }
-tower-agent-provider = { workspace = true }
 base64 = "0.23"
 dirs = { workspace = true }
 futures-util = { workspace = true }
@@ -19,10 +17,12 @@ ignore = "0.4"
 regex = "1.13"
 serde_json = { workspace = true }
 similar = "3.2"
+semver.workspace = true
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tower = { workspace = true }
-unicode-normalization = "0.1"
+tower-agent-runtime = { workspace = true }
+tower-agent-provider = { workspace = true }
 tower-agent-plugin.workspace = true
-semver.workspace = true
+unicode-normalization = "0.1"

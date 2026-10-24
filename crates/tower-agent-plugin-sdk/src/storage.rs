@@ -18,7 +18,11 @@
 //! - [`HistoryStore`]：会话的**原始对话历史**（逐条 [`AgentMessage`]，按序可重放）；
 //! - [`MemoryStore`]：跨会话的长期记忆条目。
 
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Arc,
+};
 
 use futures_util::future::BoxFuture;
 use semver::Version;
@@ -47,6 +51,15 @@ pub enum StorageError {
     /// 目标不存在。
     #[error("storage record not found: {0}")]
     NotFound(String),
+    /// 后端不存在或未启用。
+    #[error("storage backend unavailable: {0}")]
+    Unavailable(String),
+    /// 迁移失败。
+    #[error("storage migration failed: {0}")]
+    Migration(String),
+    /// 宿主需要用户选择一个 backend。
+    #[error("storage backend selection required: {0}")]
+    Selection(String),
 }
 
 impl StorageError {
@@ -60,7 +73,7 @@ impl StorageError {
 ///
 /// 作用域是接口的一部分（不是某个后端的私事）：CLI、axum、webui 等任何消费端都通过
 /// [`ConfigStore`] + [`resolve_config`] 读写同一套语义，后端只决定「一个库还是多个库」。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ConfigScope {
     /// 用户级：跨项目共享（对应 pi 的 agent 目录设置）。
     User,
@@ -132,6 +145,9 @@ pub trait ConfigStore: Send + Sync + 'static {
 
     /// 列出某个作用域下的所有配置 key。
     fn list_config(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<String>>;
+
+    /// 列出包含配置记录的全部作用域。
+    fn list_config_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>>;
 }
 
 /// 读取某个 key 的**有效值**：项目级覆盖用户级，都没有则返回 `None`。
@@ -282,6 +298,9 @@ pub trait ScriptStore: Send + Sync + 'static {
 
     /// 通过范围和名称删除脚本。
     fn delete_script(&self, scope: &ConfigScope, name: &str) -> StorageFuture<'_, ()>;
+
+    /// 列出包含脚本记录的全部作用域。
+    fn list_script_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>>;
 }
 
 /// 原始对话历史：会话 transcript 的追加 / 读回 / 替换 / 清空。
@@ -334,22 +353,193 @@ pub trait MemoryStore: Send + Sync + 'static {
     fn forget(&self, id: &str) -> StorageFuture<'_, ()>;
 }
 
-/// 一个完整存储后端 = 上面六个子接口。
-///
-/// 宿主用 `Arc<dyn Storage>` 拿到一个后端；具体实现（Turso / 未来别的）只需实现这六个。
-pub trait Storage:
-    ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
-{
+/// One scoped configuration value in a storage snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigRecord {
+    /// Configuration scope.
+    pub scope: ConfigScope,
+    /// Configuration key.
+    pub key: String,
+    /// JSON value.
+    pub value: Value,
 }
 
-impl<T> Storage for T where
-    T: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
-{
+/// A session and its complete transcript.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionSnapshot {
+    /// Session metadata.
+    pub record: SessionRecord,
+    /// Ordered transcript.
+    pub messages: Vec<AgentMessage>,
 }
+
+/// Complete engine-independent storage snapshot used for backend migration.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StorageSnapshot {
+    /// Format version, currently `1`.
+    #[serde(default = "snapshot_format_version")]
+    pub format_version: u32,
+    /// Configuration values.
+    #[serde(default)]
+    pub config: Vec<ConfigRecord>,
+    /// Provider credentials.
+    #[serde(default)]
+    pub credentials: Vec<ProviderCredential>,
+    /// Sessions with transcripts.
+    #[serde(default)]
+    pub sessions: Vec<SessionSnapshot>,
+    /// Long-term memories.
+    #[serde(default)]
+    pub memories: Vec<MemoryRecord>,
+    /// Codemode scripts.
+    #[serde(default)]
+    pub scripts: Vec<ScriptRecord>,
+}
+
+const fn snapshot_format_version() -> u32 {
+    1
+}
+
+impl StorageSnapshot {
+    /// Whether every data domain is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.config.is_empty()
+            && self.credentials.is_empty()
+            && self.sessions.is_empty()
+            && self.memories.is_empty()
+            && self.scripts.is_empty()
+    }
+
+    /// Sort all collections into a stable order for equality checks.
+    pub fn normalize(&mut self) {
+        self.format_version = snapshot_format_version();
+        self.config
+            .sort_by(|left, right| (&left.scope, &left.key).cmp(&(&right.scope, &right.key)));
+        self.credentials
+            .sort_by(|left, right| left.provider.cmp(&right.provider));
+        self.sessions
+            .sort_by(|left, right| left.record.id.cmp(&right.record.id));
+        self.memories.sort_by(|left, right| left.id.cmp(&right.id));
+        self.scripts.sort_by(|left, right| {
+            (&left.scope, &left.name, &left.id).cmp(&(&right.scope, &right.name, &right.id))
+        });
+    }
+}
+
+/// Maintenance operations required for a switchable storage backend.
+pub trait StorageMaintenance:
+    ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
+{
+    /// Wait until all currently accepted writes are durable.
+    fn flush(&self) -> StorageFuture<'_, ()>;
+
+    /// Export a complete consistent snapshot.
+    fn export_snapshot(&self) -> StorageFuture<'_, StorageSnapshot> {
+        Box::pin(async move {
+            let mut config = Vec::new();
+            for scope in self.list_config_scopes().await? {
+                for key in self.list_config(&scope).await? {
+                    if let Some(value) = self.get_config(&scope, &key).await? {
+                        config.push(ConfigRecord {
+                            scope: scope.clone(),
+                            key,
+                            value,
+                        });
+                    }
+                }
+            }
+
+            let mut sessions = Vec::new();
+            for record in self.list_sessions().await? {
+                let messages = self.load_messages(&record.id).await?;
+                sessions.push(SessionSnapshot { record, messages });
+            }
+
+            let mut scripts = Vec::new();
+            for scope in self.list_script_scopes().await? {
+                scripts.extend(self.list_scripts(&scope).await?);
+            }
+
+            let mut snapshot = StorageSnapshot {
+                format_version: snapshot_format_version(),
+                config,
+                credentials: self.list_providers().await?,
+                sessions,
+                memories: self.list_memories(i64::MAX as usize).await?,
+                scripts,
+            };
+            snapshot.normalize();
+            Ok(snapshot)
+        })
+    }
+
+    /// Import a snapshot and flush the target before returning.
+    fn import_snapshot(&self, snapshot: StorageSnapshot) -> StorageFuture<'_, ()> {
+        Box::pin(async move {
+            if snapshot.format_version != snapshot_format_version() {
+                return Err(StorageError::Migration(format!(
+                    "unsupported storage snapshot version {}",
+                    snapshot.format_version
+                )));
+            }
+            for record in snapshot.config {
+                self.set_config(&record.scope, &record.key, record.value)
+                    .await?;
+            }
+            for credential in snapshot.credentials {
+                self.put_provider(credential).await?;
+            }
+            for session in snapshot.sessions {
+                let id = session.record.id.clone();
+                self.upsert_session(session.record).await?;
+                self.replace_messages(&id, session.messages).await?;
+            }
+            for memory in snapshot.memories {
+                self.remember(memory).await?;
+            }
+            for script in snapshot.scripts {
+                self.upsert_script(script).await?;
+            }
+            self.flush().await
+        })
+    }
+
+    /// Remove all records from this backend.
+    fn clear_all(&self) -> StorageFuture<'_, ()> {
+        Box::pin(async move {
+            for scope in self.list_config_scopes().await? {
+                for key in self.list_config(&scope).await? {
+                    self.delete_config(&scope, &key).await?;
+                }
+            }
+            for credential in self.list_providers().await? {
+                self.remove_provider(&credential.provider).await?;
+            }
+            for session in self.list_sessions().await? {
+                self.delete_session(&session.id).await?;
+            }
+            for memory in self.list_memories(i64::MAX as usize).await? {
+                self.forget(&memory.id).await?;
+            }
+            for scope in self.list_script_scopes().await? {
+                for script in self.list_scripts(&scope).await? {
+                    self.delete_script(&scope, &script.name).await?;
+                }
+            }
+            self.flush().await
+        })
+    }
+}
+
+/// 一个完整、可切换的存储后端。
+pub trait Storage: StorageMaintenance {}
+
+impl<T> Storage for T where T: StorageMaintenance {}
 
 /// 把任意 [`Storage`] 后端包装成**静态存储插件**。
 ///
-/// 清单提供 `persist.<name>` 与 `memory.<name>` 两项能力，且**不标 `protected`**：
+/// 清单提供 `storage.<name>` 能力，且**不标 `protected`**：
 /// 同名动态插件 / JIT 插件按注册表的覆盖规则（`静态 < 动态 < JIT`）顶替它，
 /// 这正是「Turso 只是默认实现、可被替换」的机制保证。
 ///
@@ -383,20 +573,433 @@ impl StoragePlugin {
     pub fn storage(&self) -> Arc<dyn Storage> {
         Arc::clone(&self.backend)
     }
+
+    /// Backend descriptor registered into the host context.
+    #[must_use]
+    pub fn registration(&self) -> StorageBackendRegistration {
+        StorageBackendRegistration {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            storage: Arc::clone(&self.backend),
+        }
+    }
 }
 
 impl StaticPlugin for StoragePlugin {
     fn manifest(&self) -> PluginManifest {
         let version = self.version.clone();
-        PluginManifest::new(self.name.clone(), version.clone(), PluginKind::Static)
-            .providing(
-                CapabilityId::new("persist", self.name.clone()),
-                version.clone(),
-            )
-            .providing(CapabilityId::new("memory", self.name.clone()), version)
+        PluginManifest::new(self.name.clone(), version.clone(), PluginKind::Static).providing(
+            CapabilityId::new("storage", self.name.clone()),
+            version.clone(),
+        )
     }
 
-    fn install(&self, _context: &mut PluginContext) -> Result<(), PluginError> {
+    fn install(&self, context: &mut PluginContext) -> Result<(), PluginError> {
+        context.register_extension(self.registration());
         Ok(())
+    }
+}
+
+/// A storage implementation contributed by a plugin.
+#[derive(Clone)]
+pub struct StorageBackendRegistration {
+    /// Stable backend/plugin name.
+    pub name: String,
+    /// Backend version.
+    pub version: Version,
+    /// Storage implementation.
+    pub storage: Arc<dyn Storage>,
+}
+
+struct StorageManagerState {
+    active: String,
+    switching: Option<String>,
+    enabled: BTreeSet<String>,
+}
+
+/// Runtime owner of multiple registered storage backends.
+///
+/// Exactly one backend receives all storage operations. Switching takes an
+/// exclusive lock, so no operation can read or write while the snapshot is
+/// copied. The active pointer changes only after target import and verification
+/// succeed, which provides automatic rollback on failure.
+pub struct StorageManager {
+    backends: BTreeMap<String, StorageBackendRegistration>,
+    state: tokio::sync::RwLock<StorageManagerState>,
+}
+
+impl StorageManager {
+    /// Build a manager and select one active backend.
+    pub fn new(
+        backends: impl IntoIterator<Item = StorageBackendRegistration>,
+        active: impl Into<String>,
+    ) -> StorageResult<Self> {
+        let mut map = BTreeMap::new();
+        for backend in backends {
+            if map.insert(backend.name.clone(), backend).is_some() {
+                return Err(StorageError::Migration(
+                    "duplicate storage backend name".to_owned(),
+                ));
+            }
+        }
+        let active = active.into();
+        if !map.contains_key(&active) {
+            return Err(StorageError::Unavailable(active));
+        }
+        let enabled = map.keys().cloned().collect();
+        Ok(Self {
+            backends: map,
+            state: tokio::sync::RwLock::new(StorageManagerState {
+                active,
+                switching: None,
+                enabled,
+            }),
+        })
+    }
+
+    /// Registered backend names in stable order.
+    pub async fn backend_names(&self) -> Vec<String> {
+        let state = self.state.read().await;
+        state.enabled.iter().cloned().collect()
+    }
+
+    /// Current active backend.
+    pub async fn active_backend(&self) -> String {
+        self.state.read().await.active.clone()
+    }
+
+    /// Export the complete active backend snapshot.
+    pub async fn snapshot(&self) -> StorageResult<StorageSnapshot> {
+        let state = self.state.read().await;
+        let backend = self.backend(&state, &state.active)?;
+        backend.export_snapshot().await
+    }
+
+    /// Mark a backend enabled or disabled.
+    pub async fn set_backend_enabled(&self, name: &str, enabled: bool) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        if !self.backends.contains_key(name) {
+            return Err(StorageError::Unavailable(name.to_owned()));
+        }
+        if !enabled && state.active == name {
+            return Err(StorageError::Unavailable(format!(
+                "backend `{name}` is active; switch to another backend first"
+            )));
+        }
+        if enabled {
+            state.enabled.insert(name.to_owned());
+        } else {
+            state.enabled.remove(name);
+        }
+        Ok(())
+    }
+
+    /// Switch to another backend through a full snapshot copy and verification.
+    ///
+    /// `persist_selection` is called only after the target has been populated
+    /// and verified. If it fails, the active backend remains unchanged.
+    pub async fn switch_to_with<F>(&self, target: &str, persist_selection: F) -> StorageResult<()>
+    where
+        F: FnOnce(&str) -> StorageResult<()> + Send,
+    {
+        let mut state = self.state.write().await;
+        if state.active == target {
+            return Ok(());
+        }
+        if !state.enabled.contains(target) {
+            return Err(StorageError::Unavailable(target.to_owned()));
+        }
+        let source_name = state.active.clone();
+        let source = self.backend(&state, &source_name)?.clone();
+        let target_backend = self.backend(&state, target)?.clone();
+        state.switching = Some(target.to_owned());
+
+        let mut staging_started = false;
+        let result = async {
+            source.flush().await?;
+            let existing = target_backend.export_snapshot().await?;
+            if !existing.is_empty() {
+                return Err(StorageError::Migration(format!(
+                    "target backend `{target}` is not empty"
+                )));
+            }
+            staging_started = true;
+            let mut expected = source.export_snapshot().await?;
+            expected.normalize();
+            target_backend.import_snapshot(expected.clone()).await?;
+            let mut actual = target_backend.export_snapshot().await?;
+            actual.normalize();
+            if actual != expected {
+                return Err(StorageError::Migration(format!(
+                    "target backend `{target}` failed verification"
+                )));
+            }
+            persist_selection(target)?;
+            Ok(())
+        }
+        .await;
+
+        state.switching = None;
+        if result.is_err() && staging_started {
+            // Best effort: the active route has already rolled back; cleaning
+            // staging prevents a failed target from blocking a later retry.
+            let _ = target_backend.clear_all().await;
+        }
+        match result {
+            Ok(()) => {
+                state.active = target.to_owned();
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Switch without persisting an external selection file.
+    pub async fn switch_to(&self, target: &str) -> StorageResult<()> {
+        self.switch_to_with(target, |_| Ok(())).await
+    }
+
+    fn backend<'a>(
+        &'a self,
+        state: &StorageManagerState,
+        name: &str,
+    ) -> StorageResult<&'a Arc<dyn Storage>> {
+        if !state.enabled.contains(name) {
+            return Err(StorageError::Unavailable(name.to_owned()));
+        }
+        self.backends
+            .get(name)
+            .map(|backend| &backend.storage)
+            .ok_or_else(|| StorageError::Unavailable(name.to_owned()))
+    }
+}
+
+macro_rules! manager_read {
+    ($self:ident, $state:ident, |$backend:ident| $body:expr) => {{
+        let $state = $self.state.read().await;
+        let $backend = $self.backend(&$state, &$state.active)?.clone();
+        $body
+    }};
+}
+
+impl ConfigStore for StorageManager {
+    fn get_config(&self, scope: &ConfigScope, key: &str) -> StorageFuture<'_, Option<Value>> {
+        let scope = scope.clone();
+        let key = key.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .get_config(&scope, &key)
+                .await)
+        })
+    }
+
+    fn set_config(&self, scope: &ConfigScope, key: &str, value: Value) -> StorageFuture<'_, ()> {
+        let scope = scope.clone();
+        let key = key.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .set_config(&scope, &key, value)
+                .await)
+        })
+    }
+
+    fn delete_config(&self, scope: &ConfigScope, key: &str) -> StorageFuture<'_, ()> {
+        let scope = scope.clone();
+        let key = key.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .delete_config(&scope, &key)
+                .await)
+        })
+    }
+
+    fn list_config(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<String>> {
+        let scope = scope.clone();
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.list_config(&scope).await) },
+        )
+    }
+
+    fn list_config_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>> {
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.list_config_scopes().await) },
+        )
+    }
+}
+
+impl ProviderStore for StorageManager {
+    fn put_provider(&self, credential: ProviderCredential) -> StorageFuture<'_, ()> {
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .put_provider(credential)
+                .await)
+        })
+    }
+
+    fn get_provider(&self, provider: &str) -> StorageFuture<'_, Option<ProviderCredential>> {
+        let provider = provider.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend.get_provider(&provider).await)
+        })
+    }
+
+    fn list_providers(&self) -> StorageFuture<'_, Vec<ProviderCredential>> {
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.list_providers().await) },
+        )
+    }
+
+    fn remove_provider(&self, provider: &str) -> StorageFuture<'_, ()> {
+        let provider = provider.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .remove_provider(&provider)
+                .await)
+        })
+    }
+}
+
+impl SessionStore for StorageManager {
+    fn upsert_session(&self, session: SessionRecord) -> StorageFuture<'_, ()> {
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend.upsert_session(session).await)
+        })
+    }
+
+    fn get_session(&self, id: &str) -> StorageFuture<'_, Option<SessionRecord>> {
+        let id = id.to_owned();
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.get_session(&id).await) },
+        )
+    }
+
+    fn list_sessions(&self) -> StorageFuture<'_, Vec<SessionRecord>> {
+        Box::pin(async move { manager_read!(self, state, |backend| backend.list_sessions().await) })
+    }
+
+    fn delete_session(&self, id: &str) -> StorageFuture<'_, ()> {
+        let id = id.to_owned();
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.delete_session(&id).await) },
+        )
+    }
+}
+
+impl HistoryStore for StorageManager {
+    fn append_message(&self, session_id: &str, message: AgentMessage) -> StorageFuture<'_, ()> {
+        let session_id = session_id.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .append_message(&session_id, message)
+                .await)
+        })
+    }
+
+    fn load_messages(&self, session_id: &str) -> StorageFuture<'_, Vec<AgentMessage>> {
+        let session_id = session_id.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .load_messages(&session_id)
+                .await)
+        })
+    }
+
+    fn replace_messages(
+        &self,
+        session_id: &str,
+        messages: Vec<AgentMessage>,
+    ) -> StorageFuture<'_, ()> {
+        let session_id = session_id.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .replace_messages(&session_id, messages)
+                .await)
+        })
+    }
+
+    fn clear_messages(&self, session_id: &str) -> StorageFuture<'_, ()> {
+        let session_id = session_id.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .clear_messages(&session_id)
+                .await)
+        })
+    }
+}
+
+impl MemoryStore for StorageManager {
+    fn remember(&self, record: MemoryRecord) -> StorageFuture<'_, ()> {
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.remember(record).await) },
+        )
+    }
+
+    fn recall(&self, query: &str, limit: usize) -> StorageFuture<'_, Vec<MemoryRecord>> {
+        let query = query.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend.recall(&query, limit).await)
+        })
+    }
+
+    fn list_memories(&self, limit: usize) -> StorageFuture<'_, Vec<MemoryRecord>> {
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.list_memories(limit).await) },
+        )
+    }
+
+    fn forget(&self, id: &str) -> StorageFuture<'_, ()> {
+        let id = id.to_owned();
+        Box::pin(async move { manager_read!(self, state, |backend| backend.forget(&id).await) })
+    }
+}
+
+impl ScriptStore for StorageManager {
+    fn upsert_script(&self, script: ScriptRecord) -> StorageFuture<'_, ()> {
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend.upsert_script(script).await)
+        })
+    }
+
+    fn get_script(
+        &self,
+        scope: &ConfigScope,
+        name: &str,
+    ) -> StorageFuture<'_, Option<ScriptRecord>> {
+        let scope = scope.clone();
+        let name = name.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .get_script(&scope, &name)
+                .await)
+        })
+    }
+
+    fn list_scripts(&self, scope: &ConfigScope) -> StorageFuture<'_, Vec<ScriptRecord>> {
+        let scope = scope.clone();
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.list_scripts(&scope).await) },
+        )
+    }
+
+    fn delete_script(&self, scope: &ConfigScope, name: &str) -> StorageFuture<'_, ()> {
+        let scope = scope.clone();
+        let name = name.to_owned();
+        Box::pin(async move {
+            manager_read!(self, state, |backend| backend
+                .delete_script(&scope, &name)
+                .await)
+        })
+    }
+
+    fn list_script_scopes(&self) -> StorageFuture<'_, Vec<ConfigScope>> {
+        Box::pin(
+            async move { manager_read!(self, state, |backend| backend.list_script_scopes().await) },
+        )
+    }
+}
+
+impl StorageMaintenance for StorageManager {
+    fn flush(&self) -> StorageFuture<'_, ()> {
+        Box::pin(async move { manager_read!(self, state, |backend| backend.flush().await) })
     }
 }

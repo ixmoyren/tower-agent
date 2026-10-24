@@ -46,7 +46,9 @@ tower-agent-codemode-core.workspace = true
 tower-agent-ui.workspace = true
 tower-agent = { workspace = true, default-features = false }
 dirs.workspace = true
+toml = "1.1.8"
 
 [dev-dependencies]
+semver.workspace = true
 tempfile = { workspace = true }
 tower-agent-provider-builtin = { workspace = true, features = ["test-util"] }
