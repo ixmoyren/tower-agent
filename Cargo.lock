@@ -5244,11 +5244,11 @@ dependencies = [
  "tower-agent-plugin",
  "tower-agent-plugin-providers",
  "tower-agent-plugin-sdk",
+ "tower-agent-plugin-tools",
  "tower-agent-plugin-turso",
  "tower-agent-protocol",
  "tower-agent-provider",
  "tower-agent-runtime",
- "tower-agent-tools",
  "tower-agent-ui",
  "tower-agent-wasmtime",
 ]
@@ -5298,8 +5298,8 @@ dependencies = [
  "tower-agent-codemode-core",
  "tower-agent-core",
  "tower-agent-plugin",
+ "tower-agent-plugin-tools",
  "tower-agent-provider",
- "tower-agent-tools",
  "tower-agent-wasmtime",
  "wasmtime",
  "wasmtime-wasi",
@@ -5427,9 +5427,32 @@ dependencies = [
  "tokio-util",
  "tower",
  "tower-agent-plugin-sdk",
+ "tower-agent-plugin-tools",
  "tower-agent-provider",
  "tower-agent-runtime",
- "tower-agent-tools",
+]
+
+[[package]]
+name = "tower-agent-plugin-tools"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "dirs",
+ "futures-util",
+ "globset",
+ "ignore",
+ "regex",
+ "semver",
+ "serde_json",
+ "similar",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tower-agent-plugin",
+ "tower-agent-provider",
+ "tower-agent-runtime",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -5493,29 +5516,6 @@ dependencies = [
  "tower",
  "tower-agent-core",
  "tower-agent-provider",
-]
-
-[[package]]
-name = "tower-agent-tools"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "dirs",
- "futures-util",
- "globset",
- "ignore",
- "regex",
- "semver",
- "serde_json",
- "similar",
- "tempfile",
- "tokio",
- "tokio-util",
- "tower",
- "tower-agent-plugin",
- "tower-agent-provider",
- "tower-agent-runtime",
- "unicode-normalization",
 ]
 
 [[package]]

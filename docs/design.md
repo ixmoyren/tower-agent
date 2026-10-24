@@ -239,7 +239,7 @@ Provider 协议层（`tower-agent-provider`）与具体实现层（`tower-agent-
 
 尚未移植（后续步骤）：`prepareRequest` / `prepareNextTurn` 钩子、`getApiKey`、`validateToolArguments`（离线环境缺 JSON Schema 校验器）、`onPayload` / `onResponse` 观测 Layer、`normalizeContext` 的完整实现。
 
-`tools` crate 已落地的静态内置工具（`crates/tower-agent-tools`）：`read` / `edit` / `write` / `grep` / `find` / `ls`，以及共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。`shell` 位于独立动态插件 `crates/tower-agent-plugin-shell`，内嵌 [brush](https://github.com/reubeno/brush)（`brush-core` + `brush-builtins`，bash 兼容的 Rust shell）。静态插件登记与解析由 `tower-agent::assembly` 完成，动态 shell 由插件加载器登记进同一注册表。
+`tower-agent-plugin-tools` 已落地的静态工具插件（`crates/tower-agent-plugin-tools`）：`read` / `edit` / `write` / `grep` / `find` / `ls`，以及共享的 `truncate`（2000 行 / 50KB 双重限制）、`path_utils`（`~` 展开、Unicode 空格、macOS 变体）、`file_mutation_queue`（同文件写操作串行化）与 `edit_diff`（精确 + 模糊匹配、重叠检测、unified patch）。`shell` 位于独立动态插件 `crates/tower-agent-plugin-shell`，内嵌 [brush](https://github.com/reubeno/brush)（`brush-core` + `brush-builtins`，bash 兼容的 Rust shell）。静态插件登记与解析由 `tower-agent::assembly` 完成，动态 shell 由插件加载器登记进同一注册表。
 
 与 pi 的实现差异（都是"进程内实现替代外部二进制"或环境能力所限）：
 
@@ -337,7 +337,7 @@ Provider 协议层（`tower-agent-provider`）与具体实现层（`tower-agent-
 3. ~~建 conformance 测试骨架：用 faux provider 固定一组事件序列作为金标准。~~ 已完成，落在 `crates/tower-agent-provider/tests/conformance.rs` + `crates/tower-agent-provider/tests/support`：覆盖文本流精确金标准、thinking+text 与 tool call 的结构金标准、setup failure、pre-abort，以及共享的事件协议不变量与 `StopReason` wire 字符串。
 4. 再按 `agent` → `tools` → `tui` → `tower-agent-cli` 的顺序推进，每步单独跑通 `cargo fmt` / `clippy` / `test`。
     1. ~~`agent`：编排循环、事件流、工具执行（顺序/并行 + 钩子）、steer / follow-up 队列。~~ 已完成，落在 `crates/tower-agent-runtime`（`agent_loop` / `agent` / `event_bus` / `tool` / `router` / `event`），共 30 个测试，覆盖第 7 节清单的第 4、5、6 条：并行 `tool_execution_end` 完成顺序 vs 工具结果消息源顺序、`terminate` 批次提前结束、steer 队列 `one-at-a-time` 与 `all` 的 drain 差异、只有被 await 的 listener 结算完 agent 才 idle。`cargo fmt` / `clippy --all --workspace --all-targets` / `test --all --workspace` 全绿。
-    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成：六个静态工具落在 `crates/tower-agent-tools`，`shell` 迁到 `crates/tower-agent-plugin-shell` 动态 `cdylib`，继续使用 brush（`brush-core` + `brush-builtins`）解释 bash 兼容语法。
+    2. ~~`tools`：内置工具（bash/read/write/edit…，对应 pi `coding-agent`）。~~ 已完成：六个静态工具落在 `crates/tower-agent-plugin-tools`，`shell` 迁到 `crates/tower-agent-plugin-shell` 动态 `cdylib`，继续使用 brush（`brush-core` + `brush-builtins`）解释 bash 兼容语法。
     3. ~~`ui` / `tui`：前端无关 UI 后端 + 差分终端渲染。~~ 已完成：`tower-agent-ui` 负责 `AgentEvent` 归约、斜杠命令、可序列化 `UiModel` 与静态插件；`tower-agent-tui` 负责 `ratatui` 0.30 + **termina** 页面、`ratatui-textarea`（git 引入）+ vim 键位编辑器、`Tui<B: Backend>` 宿主与 `run_tui` / `run_agent_tui` 事件循环。 **两份 crate 都是纯库、无二进制**；可运行的 TUI 入口在 `tower-agent-cli`。测试：UI 16 个单元测试；TUI 39 个 lib 单元 + 9 个
        `TestBackend`
        端到端渲染测试。后端说明：ratatui 0.30 把后端拆成独立 crate，termina 由 `ratatui-termina` 提供（manifest 的 `termina` feature），切换点集中在 `backend.rs`。

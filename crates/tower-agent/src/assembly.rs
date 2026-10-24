@@ -6,7 +6,7 @@
 //!
 //! 产出的 [`PluginRegistry`] 固定包含：
 //!
-//! - 六个内置工具插件（`read` / `edit` / …，来自 [`tower_agent_tools::builtin_plugins`]）；
+//! - 六个内置工具插件（`read` / `edit` / …，来自 [`tower_agent_plugin_tools::builtin_plugins`]）；
 //!   `shell` 由独立的动态插件 `tower-agent-plugin-shell` 提供；
 //! - 五个内置 provider 插件（Anthropic / OpenAI / OpenAI Responses / Google / DeepSeek）；
 //! - `wasmtime`（feature `sandbox-wasmtime`）：把名字与 `sandbox.wasmtime` 能力占成 `protected`；
@@ -110,7 +110,7 @@ impl HostPlugins {
     #[must_use]
     pub fn registry(self) -> PluginRegistry {
         let mut registry = PluginRegistry::new();
-        for plugin in tower_agent_tools::builtin_plugins(&self.cwd) {
+        for plugin in tower_agent_plugin_tools::builtin_plugins(&self.cwd) {
             registry
                 .register_plugin(plugin)
                 .expect("内置工具插件清单固定且自洽");

@@ -31,7 +31,7 @@ examples/
 ### 1.2 tower 骨架现状
 
 - **Provider**：`tower_agent_provider::StreamService` = `Service<StreamRequest, Response = AssistantEventStream>`，错误 `PiError`；「错误编码进流」是硬契约。传输/服务中间件是 `tower_agent_provider::provider::layers`（`HeaderTransport` / `RetryTransport` / `ObserveTransport` / `TimeoutService`）。
-- **Tool**：`tower_agent_runtime::AgentToolService` = `Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>`；每个内置工具实现 `Service` **且**实现 `tower::Layer`（`crates/tower-agent-tools/src/layer.rs`），`create_*_tool` 把工具层叠到 `ToolNotFound` 上。
+- **Tool**：`tower_agent_runtime::AgentToolService` = `Service<ToolCallRequest, Response = ToolResultStream, Error = AgentError>`；每个内置工具实现 `Service` **且**实现 `tower::Layer`（`crates/tower-agent-plugin-tools/src/layer.rs`），`create_*_tool` 把工具层叠到 `ToolNotFound` 上。
 - **Agent**：`Agent`（`crates/tower-agent-runtime/src/agent.rs:280`）实现 `Service<AgentRequest, Response = AgentResponse, Error = AgentError>`（`:775`），并有 `BoxAgentService = BoxCloneService<...>`（`:317`）与 `AgentServiceExt::boxed_agent`。
 - **钩子**：`tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`（`tool_call` / `tool_result` 的 Layer 形态）。
 - **typed 工具**：`tower_agent_runtime::ToolRegistration`（schemars + serde）。

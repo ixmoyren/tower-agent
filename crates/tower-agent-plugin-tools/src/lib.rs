@@ -1,4 +1,4 @@
-//! 内置工具（对应 pi `coding-agent` 的 `src/core/tools`）。
+//! 内置工具插件集合（对应 pi `coding-agent` 的 `src/core/tools`）。
 //!
 //! 每个工具都是 [`tower_agent_runtime::AgentTool`]：元数据 + 一个 `Service<ToolCallRequest, Response =
 //! ToolResultStream>`，因此可以直接注册进 `tower_agent_runtime::Agent`，并复用 agent 循环的顺序/并行

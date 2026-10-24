@@ -1,6 +1,6 @@
 [package]
-name = "tower-agent-tools"
-description = "tower-agent built-in tools and their independent static plugin declarations."
+name = "tower-agent-plugin-tools"
+description = "Independent tool plugins and their reusable tool implementations."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

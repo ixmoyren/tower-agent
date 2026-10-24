@@ -29,7 +29,7 @@ tower-agent-core = { path = "crates/tower-agent-core" }
 tower-agent-runtime = { path = "crates/tower-agent-runtime" }
 tower-agent-provider = { path = "crates/tower-agent-provider" }
 tower-agent-plugin-providers = { path = "crates/tower-agent-plugin-providers" }
-tower-agent-tools = { path = "crates/tower-agent-tools" }
+tower-agent-plugin-tools = { path = "crates/tower-agent-plugin-tools" }
 tower-agent-plugin = { path = "crates/tower-agent-plugin" }
 tower-agent-plugin-sdk = { path = "crates/tower-agent-plugin-sdk" }
 tower-agent-ui = { path = "crates/tower-agent-ui" }

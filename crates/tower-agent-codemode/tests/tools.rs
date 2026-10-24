@@ -12,8 +12,8 @@ use tower_agent_core::{AgentTool, ToolCallRequest};
 use tower_agent_plugin::{
     CapabilityId, HostApi, Permission, PermissionDecision, PermissionPolicy, PermissionPrompter,
 };
+use tower_agent_plugin_tools::create_read_tool;
 use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
-use tower_agent_tools::create_read_tool;
 
 struct AllowOncePrompter {
     calls: AtomicUsize,

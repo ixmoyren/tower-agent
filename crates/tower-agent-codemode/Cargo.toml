@@ -29,4 +29,4 @@ tower-agent-provider.workspace = true
 [dev-dependencies]
 tower-agent-provider = { workspace = true }
 tempfile = { workspace = true }
-tower-agent-tools.workspace = true
+tower-agent-plugin-tools.workspace = true

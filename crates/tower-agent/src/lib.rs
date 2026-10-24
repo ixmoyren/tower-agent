@@ -6,7 +6,7 @@
 //!   工具边界、钩子层、typed 工具注册）；
 //! - [`runtime`]：有状态运行时（`Agent`、编排循环、事件总线）；
 //! - [`provider`]：provider Services 与 Models 路由；
-//! - [`tools`]：内置工具；
+//! - [`tools`]：六个内置工具插件；
 //! - [`plugins`]：插件宿主（静态 / 动态 / 热重载）；`plugin-sdk` feature 打开作者 SDK；
 //!   `ui` feature 打开前端无关的 `tower-agent-ui` 会话插件。
 //!
@@ -16,9 +16,9 @@
 pub use tower_agent_core as core;
 pub use tower_agent_plugin as plugin;
 pub use tower_agent_plugin_providers as providers;
+pub use tower_agent_plugin_tools as tools;
 pub use tower_agent_provider as provider;
 pub use tower_agent_runtime as runtime;
-pub use tower_agent_tools as tools;
 
 pub mod assembly;
 

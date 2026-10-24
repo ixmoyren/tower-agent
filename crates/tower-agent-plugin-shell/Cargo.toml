@@ -25,5 +25,5 @@ tower.workspace = true
 tower-agent-plugin-sdk = { workspace = true, features = ["dynamic"] }
 tower-agent-provider.workspace = true
 tower-agent-runtime.workspace = true
-tower-agent-tools.workspace = true
+tower-agent-plugin-tools.workspace = true
 

@@ -260,7 +260,7 @@ codemode：让 LLM 用 **一段 JavaScript** 在一次工具调用里完成多�
 - 不做完整 Node 运行时：不做网络（`net`/`tls`/`http`/`fetch`/`dns`）、不做 `worker_threads`、不做 npm 生态。
 - 不做 bash 兼容、不解析 shell 语法（是否要 `sh()` 见 §8 Q4）。
 - 不做 guest 内并发（`Promise.all` 式的并行命令；受 p2 限制，见 §6）。
-- 不替换 `tower-agent-tools` 的 `shell` 工具（它仍是宿主直连、面向交互）。
+- 不替换 `tower-agent-plugin-tools` 的静态工具插件；`shell` 由独立的 `tower-agent-plugin-shell` 动态插件提供。
 
 ## 2. 架构
 

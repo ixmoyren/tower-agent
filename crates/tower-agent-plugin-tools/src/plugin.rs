@@ -157,7 +157,7 @@ mod tests {
                 .iter()
                 .filter(|plugin| plugin.id.name != "read")
                 .count(),
-            6,
+            DEFAULT_TOOL_NAMES.len() - 1,
             "other built-in plugins remain active"
         );
     }

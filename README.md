@@ -56,7 +56,7 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
 | `tower-agent-provider`   | **Provider 协议**：消息/模型/请求/事件、Stream Service、Models、HTTP/SSE、插件契约；不含具体厂商实现 |
 | `tower-agent-plugin-providers` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar，通过 SDK 注册 Provider 能力 |
-| `tower-agent-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
+| `tower-agent-plugin-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
 | `tower-agent-plugin-shell` | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                    |
 | `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；不依赖 Provider 领域 |
 | `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider、可选 `storage` 契约 |

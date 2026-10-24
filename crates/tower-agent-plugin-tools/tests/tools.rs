@@ -39,12 +39,12 @@ fn request(name: &str, args: JsonValue) -> ToolCallRequest {
 fn default_tools(cwd: impl AsRef<std::path::Path>) -> Vec<AgentTool> {
     let cwd = cwd.as_ref();
     vec![
-        tower_agent_tools::create_read_tool(cwd),
-        tower_agent_tools::create_edit_tool(cwd),
-        tower_agent_tools::create_write_tool(cwd),
-        tower_agent_tools::create_grep_tool(cwd),
-        tower_agent_tools::create_find_tool(cwd),
-        tower_agent_tools::create_ls_tool(cwd),
+        tower_agent_plugin_tools::create_read_tool(cwd),
+        tower_agent_plugin_tools::create_edit_tool(cwd),
+        tower_agent_plugin_tools::create_write_tool(cwd),
+        tower_agent_plugin_tools::create_grep_tool(cwd),
+        tower_agent_plugin_tools::create_find_tool(cwd),
+        tower_agent_plugin_tools::create_ls_tool(cwd),
     ]
 }
 
@@ -96,7 +96,7 @@ async fn ls_sorts_marks_directories_and_reports_limits() {
     std::fs::write(dir.path().join("beta.txt"), "x").unwrap();
     std::fs::write(dir.path().join(".hidden"), "x").unwrap();
     std::fs::create_dir(dir.path().join("empty")).unwrap();
-    let ls = tower_agent_tools::create_ls_tool(dir.path());
+    let ls = tower_agent_plugin_tools::create_ls_tool(dir.path());
 
     let results = run_tool(&ls, serde_json::json!({})).await;
     let text = first_text(&results[0]);
@@ -136,7 +136,7 @@ async fn find_matches_globs_and_respects_gitignore() {
     std::fs::write(dir.path().join("kept.txt"), "x").unwrap();
     std::fs::write(dir.path().join("ignored.txt"), "x").unwrap();
     std::fs::write(dir.path().join("build/out.txt"), "x").unwrap();
-    let find = tower_agent_tools::create_find_tool(dir.path());
+    let find = tower_agent_plugin_tools::create_find_tool(dir.path());
 
     let results = run_tool(&find, serde_json::json!({ "pattern": "*.txt" })).await;
     let text = first_text(&results[0]);
@@ -162,7 +162,7 @@ async fn grep_reports_matches_options_and_context() {
     let dir = tempfile::tempdir().expect("temp dir");
     std::fs::write(dir.path().join("a.txt"), "Hello\nthere\nHELLO again\n").unwrap();
     std::fs::write(dir.path().join("b.rs"), "hello from rust\n").unwrap();
-    let grep = tower_agent_tools::create_grep_tool(dir.path());
+    let grep = tower_agent_plugin_tools::create_grep_tool(dir.path());
 
     let results = run_tool(&grep, serde_json::json!({ "pattern": "Hello" })).await;
     assert_eq!(first_text(&results[0]), "a.txt:1: Hello");
@@ -217,7 +217,7 @@ async fn grep_truncates_long_lines() {
     let dir = tempfile::tempdir().expect("temp dir");
     let long = "x".repeat(600);
     std::fs::write(dir.path().join("long.txt"), format!("{long}needle\n")).unwrap();
-    let grep = tower_agent_tools::create_grep_tool(dir.path());
+    let grep = tower_agent_plugin_tools::create_grep_tool(dir.path());
 
     let results = run_tool(&grep, serde_json::json!({ "pattern": "needle" })).await;
     let text = first_text(&results[0]);
@@ -274,7 +274,7 @@ async fn read_attaches_images_with_base64_data() {
     png.extend_from_slice(&[0u8; 13]);
     png.extend_from_slice(&[0u8; 4]);
     std::fs::write(dir.path().join("pixel.png"), &png).unwrap();
-    let read = tower_agent_tools::create_read_tool(dir.path());
+    let read = tower_agent_plugin_tools::create_read_tool(dir.path());
 
     let results = run_tool(&read, serde_json::json!({ "path": "pixel.png" })).await;
     let result = &results[0];
@@ -307,7 +307,7 @@ async fn read_reports_continuation_for_partial_reads() {
         (1..=10).map(|i| format!("line {i}\n")).collect::<String>(),
     )
     .unwrap();
-    let read = tower_agent_tools::create_read_tool(dir.path());
+    let read = tower_agent_plugin_tools::create_read_tool(dir.path());
 
     let results = run_tool(
         &read,
@@ -333,7 +333,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
         "fn main() {\n    let x = 1;\n}\n",
     )
     .unwrap();
-    let edit = tower_agent_tools::create_edit_tool(dir.path());
+    let edit = tower_agent_plugin_tools::create_edit_tool(dir.path());
 
     let results = run_tool(
         &edit,
@@ -365,7 +365,7 @@ async fn edit_replaces_text_and_reports_a_diff() {
 async fn edit_reports_a_not_found_error_without_touching_the_file() {
     let dir = tempfile::tempdir().expect("temp dir");
     std::fs::write(dir.path().join("code.rs"), "unchanged\n").unwrap();
-    let edit = tower_agent_tools::create_edit_tool(dir.path());
+    let edit = tower_agent_plugin_tools::create_edit_tool(dir.path());
 
     let results = run_tool(
         &edit,

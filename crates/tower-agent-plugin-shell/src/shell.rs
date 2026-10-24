@@ -36,12 +36,12 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tower::Service;
-use tower_agent_provider::Arguments;
-use tower_agent_runtime::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
-use tower_agent_tools::truncate::{
+use tower_agent_plugin_tools::truncate::{
     DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size,
     truncate_tail,
 };
+use tower_agent_provider::Arguments;
+use tower_agent_runtime::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
 
 /// pi 的 `BASH_UPDATE_THROTTLE_MS`。
 const UPDATE_THROTTLE: Duration = Duration::from_millis(100);

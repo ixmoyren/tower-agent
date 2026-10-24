@@ -151,7 +151,7 @@ async fn javascript_engine_capability_matrix() {
     let workspace = tempfile::tempdir().expect("workspace");
     let note = workspace.path().join("note.txt");
     std::fs::write(&note, "matrix-note\n").expect("write note");
-    let host = HostApi::from_tools([tower_agent_tools::create_read_tool(workspace.path())]);
+    let host = HostApi::from_tools([tower_agent_plugin_tools::create_read_tool(workspace.path())]);
     let session = tempfile::tempdir().expect("session");
     let ui = UiState::new();
     let codemode = CodemodeHost::new_with_host_and_ui(

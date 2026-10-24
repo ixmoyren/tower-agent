@@ -1,7 +1,7 @@
 # tower-agent-plugin-shell
 
 `shell` 工具现在作为独立动态插件（`cdylib`）发布，不再编译进
-`tower-agent-tools`。插件内部继续使用 brush，保持 bash 兼容和跨命令的
+`tower-agent-plugin-tools`。插件内部继续使用 brush，保持 bash 兼容和跨命令的
 shell 状态。
 
 ## 构建

@@ -268,10 +268,10 @@ stabby::export! {
 ## 9. 内置工具插件化
 
 1. **静态内置工具各自是一个插件**：`read` / `edit` / `write` / `grep` / `find` / `ls` 分别注册为独立静态插件；`shell` 通过动态插件 `tower-agent-plugin-shell` 提供 `tool.shell`。
-2. **静态 tool 都是 tower 中的 layer**：`tools` crate 里六个静态工具除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tower_agent_tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上。动态 `shell` 通过 `AbiToolCall` / `AbiToolResult` 边界接入同一工具服务契约。
+2. **静态 tool 都是 tower 中的 layer**：`tower-agent-plugin-tools` 里的六个静态工具插件除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tower_agent_plugin_tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上。动态 `shell` 通过 `AbiToolCall` / `AbiToolResult` 边界接入同一工具服务契约。
 3. **工具钩子也是 layer**：`tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`，分别对应 pi 的 `tool_call`（可放行/改写/拦截）与 `tool_result`（逐条改写结果）钩子。
 4. **typed 工具注册**：`tower_agent_runtime::ToolRegistration::new::<P, _, _>(...)` 用 schemars 生成参数 schema、用 serde 反序列化入参，校验失败编码为 `is_error` 工具结果。
-5. `tower-agent-tools` 导出六个独立静态插件和 `builtin_plugins(cwd)` 插件集合，但**不创建注册表、不解析、不安装**；`shell` 由 `tower-agent-plugin-shell` 以动态 `cdylib` 提供。`tower-agent::assembly::HostPlugins` 负责登记静态插件，运行时动态插件由宿主加载器登记到同一 `PluginRegistry` 并解析安装。`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在装配后的解析结果上过滤。
+5. `tower-agent-plugin-tools` 导出六个独立静态插件和 `builtin_plugins(cwd)` 插件集合，但**不创建注册表、不解析、不安装**；`shell` 由 `tower-agent-plugin-shell` 以动态 `cdylib` 提供。`tower-agent::assembly::HostPlugins` 负责登记静态插件，运行时动态插件由宿主加载器登记到同一 `PluginRegistry` 并解析安装。`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在装配后的解析结果上过滤。
 6. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为工具的实现细节，不对外暴露成能力。
 7. 内置工具覆盖以**插件名**为单位：替换 `read` 就注册另一个名为 `read` 的高优先级插件，只影响 `read`；`tool.read` 仅作为能力/依赖标识，不作为工具插件覆盖入口。
 8. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `tower-agent-cli::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
