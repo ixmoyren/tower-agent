@@ -39,7 +39,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 | crate                    | 现在负责                                                                                   | 问题                                       |
 |--------------------------|--------------------------------------------------------------------------------------------|--------------------------------------------|
 | `tower-agent-plugin`    | 通用插件宿主：三形态、能力注册表、依赖/版本、生命周期、权限、`HostApi`                     | 面向"插件系统"，不是"扩展点"               |
-| `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / tool 注册 / Provider 能力 / 动态入口 | 扩展能力与打包/ABI                         |
+| `tower-agent-plugin-sdk` | 插件作者：`declare_plugin!` / `DeclaredPlugin` / `HostApi` / tool 注册 / Provider 能力 / 动态入口 / 可选 storage 与 wasmtime | 扩展能力、打包/ABI 与可选沙箱基础设施 |
 | `tower-agent-runtime`    | `BeforeToolCallLayer` / `AfterToolResultLayer` / `Compactor` / `AgentOptions`              | 有钩子，但很薄、且不统一                   |
 | `tower-agent-monty` / `tower-agent-codemode` | 脚本宿主能力（`tool_call` / `tool_register` / `state_*` / `log` / `ui_*`） | 两个引擎已共享工具、状态、日志与 UI 语义；钩子仍有缺口 |
 
@@ -56,6 +56,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 - `host`：`HostApi` / 能力调用（ **已有**，保留）
 - `packaging`：manifest 宏、stabby 动态入口、动态工具描述与 ABI 类型（ **已有**，保留）
 - `storage`（feature）：配置、凭据、会话、历史、记忆与 codemode 脚本的持久化契约；默认关闭，由存储插件和需要持久化能力的宿主启用。
+- `wasmtime`（feature）：组件沙箱、WASI、资源限制、JIT 缓存与实例池；默认关闭，由 codemode、monty 或其他 wasm 解释器插件启用。它是编译期基础设施，不是插件能力。
 
 也就是说：plugin-sdk 从"只有打包 + HostApi"扩成"打包 + HostApi + 扩展点"。好处是脚本侧（codemode host function）与 Rust 侧天然同一套定义，不再有第三个 crate。
 

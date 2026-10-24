@@ -12,7 +12,7 @@ use std::{
 use semver::Version;
 use tower_agent_codemode_core::{ScriptHookRegistry, ScriptPermissions};
 use tower_agent_core::AgentTool;
-use tower_agent_plugin::{
+use tower_agent_plugin_sdk::{
     CapabilityId, HostApi, PermissionPolicy, PluginContext, PluginError, PluginKind,
     PluginManifest, StaticPlugin,
 };

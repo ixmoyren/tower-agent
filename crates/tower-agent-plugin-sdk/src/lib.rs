@@ -6,6 +6,8 @@
 //!   暴露成 `tool.<name>` 能力。
 //! - `provider` feature 提供 Provider 能力适配；Provider 本身仍是普通 Static / Dynamic / JIT
 //!   插件，通过通用 [`PluginContext`] registration slot 注册 `ProviderPlugin`。
+//! - `wasmtime` feature 提供与具体解释器无关的 Wasmtime 组件沙箱、资源限制、
+//!   JIT 缓存和实例池。
 //!
 //! 依赖方向：`plugin-sdk → plugin`（共享类型与宿主句柄），插件 crate 依赖本 SDK。
 //! 动态插件的 stabby 入口（`declare_plugin!` 的动态形态）随 `plugin` 的 `dynamic`
@@ -17,6 +19,8 @@ pub mod provider;
 #[cfg(feature = "storage")]
 pub mod storage;
 pub mod tool;
+#[cfg(feature = "wasmtime")]
+pub mod wasmtime;
 
 #[cfg(all(feature = "provider", feature = "dynamic"))]
 pub use provider::DynamicProviderPlugin;
@@ -24,11 +28,12 @@ pub use provider::DynamicProviderPlugin;
 pub use provider::ProviderPluginRegistration;
 pub use tool::{AgentToolMetadataExt, ToolMetadata};
 pub use tower_agent_plugin::{
-    AgentLayer, CapabilityId, EventHandler, HostApi, InflightGuard, Lifecycle, Permission,
-    PermissionDecision, PermissionPolicy, PermissionPrompter, PluginAccess, PluginContext,
-    PluginError, PluginId, PluginKind, PluginManifest, PluginState, ProvidedCapability,
-    StaticPlugin, ToolLayer, agent_layer, event_handler, tool_layer, tower_agent_layer,
-    tower_tool_layer,
+    AgentLayer, Binding, CapabilityId, CapabilityOverride, Dependency, EventHandler, HOST_ABI,
+    HostApi, InflightGuard, Lifecycle, Permission, PermissionDecision, PermissionPolicy,
+    PermissionPrompter, PluginAccess, PluginContext, PluginError, PluginId, PluginKind,
+    PluginManifest, PluginRegistry, PluginState, ProvidedCapability, Resolution, ResolvedPlugin,
+    ShadowedPlugin, StaticPlugin, ToolDescriptor, ToolLayer, agent_layer, event_handler,
+    tool_layer, tower_agent_layer, tower_tool_layer,
 };
 #[cfg(feature = "provider")]
 pub use tower_agent_provider::{
@@ -54,9 +59,9 @@ pub use tower_agent_plugin::dynamic;
 #[cfg(feature = "dynamic")]
 pub use tower_agent_plugin::dynamic::{
     AbiBuffer, AbiCapability, AbiHostCall, AbiHostResult, AbiKind, AbiManifest, AbiNode,
-    AbiToolCall, AbiToolDescriptor, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiHostResult,
-    ArchivedAbiToolCall, ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, HostVTable,
-    LoadedPlugin, PluginVTable,
+    AbiToolCall, AbiToolDescriptor, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiHostCall,
+    ArchivedAbiHostResult, ArchivedAbiKind, ArchivedAbiNode, ArchivedAbiToolCall,
+    ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, HostVTable, LoadedPlugin, PluginVTable,
 };
 
 /// 导出动态插件的 `__tpa_plugin_entry`（`docs/plugins.md` 第 8.2 节）。

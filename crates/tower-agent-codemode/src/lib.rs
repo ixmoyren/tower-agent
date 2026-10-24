@@ -5,7 +5,8 @@
 //! - **JS 在 guest**（rquickjs 编到 `wasm32-wasip2`），脚本的内存/栈/时间上限在组件内强制；
 //! - **命令在宿主**：本 crate 实现 `exec`，把每个命令跑成一份新的 coreutils 组件实例
 //!   （内存 stdio，会话根映射成 guest 的 `/`）；
-//! - 引擎、WASI、内存上限、JIT 缓存复用 [`tower_agent_wasmtime`]。
+//! - 引擎、WASI、内存上限、JIT 缓存复用
+//!   [`tower_agent_plugin_sdk::wasmtime`].
 //!
 //! 每次 `run` 都新建 `Store`：组件只编译一次（JIT 缓存），实例用完即丢——所以 guest trap
 //! （例如 JS 深递归、脚本超时）只影响那一次调用，不需要额外的「丢弃实例」逻辑。
@@ -34,9 +35,9 @@ use tower_agent_core::{
     AgentError, AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolCallRequest,
     ToolRenderer, ToolResultStream, UiState,
 };
-use tower_agent_plugin::{CapabilityId, HostApi, Permission, PermissionPolicy};
+use tower_agent_plugin_sdk::wasmtime::{HostState, SandboxEngine, SandboxError, SandboxOptions};
+use tower_agent_plugin_sdk::{CapabilityId, HostApi, Permission, PermissionPolicy};
 use tower_agent_provider::{Arguments, ContentBlock, ToolCall};
-use tower_agent_wasmtime::{HostState, SandboxEngine, SandboxError, SandboxOptions};
 use wasmtime::{Store, StoreLimitsBuilder};
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtxBuilder};
 

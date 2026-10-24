@@ -73,10 +73,9 @@ dependencies are declared once through workspace dependencies.
 | `tower-agent-plugin-providers` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, and sidecars, registered through the SDK  |
 | `tower-agent-plugin-tools`      | **Tool plugin collection**: read / edit / write / grep / find / ls, each as an independent static plugin                         |
 | `tower-agent-plugin`    | **General plugin host**: registry, resolution, lifecycle, HostApi, permissions, and extension slots; Provider-agnostic              |
-| `tower-agent-plugin-sdk` | **Plugin capability SDK**: static / dynamic ABI, host capabilities, Provider registration and wire, dynamic Provider adaptation     |
+| `tower-agent-plugin-sdk` | **Plugin capability SDK**: static / dynamic ABI, host capabilities, Provider support, optional storage and Wasmtime sandbox infrastructure |
 | `tower-agent-ui`         | **Frontend-neutral UI backend**: event reduction, session view, slash commands, static UI plugins                                  |
 | `tower-agent-monty`      | **codemode Python host**: embedded monty (Python subset) sandbox plugins + hot-reload script manager                               |
-| `tower-agent-wasmtime`   | **General Wasmtime sandbox base**: component model, WASI, resource limits, JIT cache, and instance pool                           |
 | `tower-agent-protocol`   | **Protocol**: framing, strict CBOR subset, RPC envelopes                                                                           |
 | `tower-agent-tui`        | **Terminal frontend**: differential-rendering TUI over the agent event stream                                                      |
 | `tower-agent-cli`        | **CLI host**: binary named `tower-agent`, assembling the session via `Service` / `Layer`                                           |

@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tower_agent_wasmtime::{HostState, SandboxEngine, SandboxOptions};
+use tower_agent_plugin_sdk::wasmtime::{HostState, SandboxEngine, SandboxOptions};
 use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{
     I32Exit, ResourceTable, WasiCtxBuilder,

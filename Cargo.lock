@@ -5250,7 +5250,6 @@ dependencies = [
  "tower-agent-provider",
  "tower-agent-runtime",
  "tower-agent-ui",
- "tower-agent-wasmtime",
 ]
 
 [[package]]
@@ -5297,10 +5296,9 @@ dependencies = [
  "tower",
  "tower-agent-codemode-core",
  "tower-agent-core",
- "tower-agent-plugin",
+ "tower-agent-plugin-sdk",
  "tower-agent-plugin-tools",
  "tower-agent-provider",
- "tower-agent-wasmtime",
  "wasmtime",
  "wasmtime-wasi",
 ]
@@ -5352,11 +5350,9 @@ dependencies = [
  "tower",
  "tower-agent-codemode-core",
  "tower-agent-core",
- "tower-agent-plugin",
  "tower-agent-plugin-sdk",
  "tower-agent-provider",
  "tower-agent-runtime",
- "tower-agent-wasmtime",
  "wasmtime",
 ]
 
@@ -5397,6 +5393,7 @@ dependencies = [
 name = "tower-agent-plugin-sdk"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "futures-util",
  "rkyv",
  "schemars",
@@ -5411,6 +5408,8 @@ dependencies = [
  "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",
+ "wasmtime",
+ "wasmtime-wasi",
 ]
 
 [[package]]
@@ -5543,18 +5542,6 @@ dependencies = [
  "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",
-]
-
-[[package]]
-name = "tower-agent-wasmtime"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "semver",
- "thiserror 2.0.21",
- "tower-agent-plugin",
- "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]

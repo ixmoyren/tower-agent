@@ -29,12 +29,11 @@ tower-agent/                 （facade：re-export core + runtime + provider + t
   tower-agent-plugin-tools/         六个静态内置工具 + tower-agent-plugin-shell（动态 shell）
   tower-agent-protocol/      帧 / CBOR / RPC（按需保留）
   tower-agent-plugin/        通用插件宿主：注册表 / 生命周期 / HostApi / 权限 / 三类加载器 / extension slot
-  tower-agent-plugin-sdk/    插件能力 SDK：静态宏 / 动态 ABI / Host 能力 / 可选 Provider 能力
+  tower-agent-plugin-sdk/    插件能力 SDK：静态宏 / 动态 ABI / Host 能力；可选 Provider、storage 与 wasmtime
   tower-agent-codemode-core/ 引擎无关的脚本能力、Hook 与 Prompt 契约
   tower-agent-codemode/      JavaScript wasm 宿主与命令层
   tower-agent-monty/         monty/Python 沙箱与 JIT 热重载后端
-  tower-agent-wasmtime/      通用 Wasmtime 组件、WASI、资源限制与实例池
-  tower-agent-plugin-sdk/    插件 SDK；storage feature 提供配置、凭据、会话、历史、记忆与脚本契约
+                            （wasmtime feature 提供组件、WASI、资源限制、JIT 缓存与实例池）
   tower-agent-plugin-turso/  默认嵌入式存储插件
   tower-agent-ui/            前端无关 UI 会话插件（事件归约 / 命令 / 可序列化视图）
   tower-agent-tui/           终端前端（实现 UiPlugin）

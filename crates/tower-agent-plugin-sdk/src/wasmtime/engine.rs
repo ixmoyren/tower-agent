@@ -14,7 +14,7 @@ use wasmtime::{
     component::{Component, Linker},
 };
 
-use crate::HostState;
+use super::HostState;
 
 /// 默认 wasm 线性内存上限（256 MiB）。
 pub const DEFAULT_MEMORY_LIMIT: usize = 256 * 1024 * 1024;
@@ -233,7 +233,7 @@ fn warn_no_cache(reason: &str) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         eprintln!(
-            "tower-agent-wasmtime: JIT 缓存不可用（{reason}），组件每次都会重新编译（冷启动可达数秒到十几秒）"
+            "tower-agent-plugin-sdk/wasmtime: JIT 缓存不可用（{reason}），组件每次都会重新编译（冷启动可达数秒到十几秒）"
         );
     });
 }

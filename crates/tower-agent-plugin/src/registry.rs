@@ -219,7 +219,7 @@ impl PluginRegistry {
 
     /// 若 `name` 已被受保护插件占用则报错。
     ///
-    /// 受保护的静态插件（JIT 运行时地基、`wasmtime` / `codemode` 这类宿主能力）
+    /// 受保护的静态插件（例如 JIT 运行时地基与 codemode 这类宿主能力）
     /// **永不被遮蔽**：动态与 JIT 加载器在注册前统一走这里，规则只有一处，避免
     /// 「JIT 与动态两条路各自漂移」。
     pub fn ensure_not_protected(&self, name: &str) -> Result<(), PluginError> {

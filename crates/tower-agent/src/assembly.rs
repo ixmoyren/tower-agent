@@ -9,7 +9,6 @@
 //! - 六个内置工具插件（`read` / `edit` / …，来自 [`tower_agent_plugin_tools::builtin_plugins`]）；
 //!   `shell` 由独立的动态插件 `tower-agent-plugin-shell` 提供；
 //! - 五个内置 provider 插件（Anthropic / OpenAI / OpenAI Responses / Google / DeepSeek）；
-//! - `wasmtime`（feature `sandbox-wasmtime`）：把名字与 `sandbox.wasmtime` 能力占成 `protected`；
 //! - `codemode`（feature `codemode`，需显式 [`HostPlugins::with_codemode`]）：受保护静态插件，
 //!   提供 `tool.codemode`。
 //!
@@ -56,7 +55,7 @@ struct CodemodeSetup {
 }
 
 impl HostPlugins {
-    /// 以工作目录新建：内置工具 + `wasmtime`（feature `sandbox-wasmtime` 打开时）。
+    /// 以工作目录新建：默认只包含内置工具与 provider 插件。
     #[must_use]
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
@@ -123,10 +122,6 @@ impl HostPlugins {
                 .register_plugin(plugin)
                 .expect("内置 provider 插件清单固定且自洽");
         }
-        #[cfg(feature = "sandbox-wasmtime")]
-        registry
-            .register_plugin(Arc::new(tower_agent_wasmtime::WasmtimePlugin::new()))
-            .expect("wasmtime 清单固定且自洽");
         #[cfg(feature = "codemode-js")]
         if let Some(setup) = self.codemode {
             let plugin = tower_agent_codemode::CodemodePlugin::new(self.cwd.clone(), setup.session)

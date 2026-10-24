@@ -2,7 +2,7 @@
 
 use wasmtime::Store;
 
-use crate::{HostState, SandboxEngine, SandboxError};
+use super::{HostState, SandboxEngine, SandboxError};
 
 /// 一个沙箱实例：`Store<HostState>` + 组件实例 `I`。
 ///
@@ -66,8 +66,8 @@ impl<I> Sandbox<I> {
 mod tests {
     use wasmtime::{Config, Engine};
 
+    use super::HostState;
     use super::*;
-    use crate::HostState;
 
     #[test]
     fn accessors_expose_store_and_instance_separately() {

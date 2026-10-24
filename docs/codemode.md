@@ -20,7 +20,7 @@
 
 | 部件           | crate / 产物                                                                                                        | 已有能力                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 缺口                                                                           |
 |----------------|---------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| 沙箱基础设施   | `tower-agent-wasmtime`：`SandboxEngine` / `HostState` / `Sandbox` / `SandboxPool`                                   | wasm 组件编译 + WASI + 内存/栈上限 + JIT 缓存 + 实例池；`wasmtime` 静态插件占位（`protected`）                                                                                                                                                                                                                                                                                                                                                               | ——                                                                             |
+| 沙箱基础设施   | `tower-agent-plugin-sdk/wasmtime`：`SandboxEngine` / `HostState` / `Sandbox` / `SandboxPool`                                   | wasm 组件编译 + WASI + 内存/栈上限 + JIT 缓存 + 实例池；由 SDK cargo feature 提供，不是插件                                                                                                                                                                                                                                                                                                                                                                 | ——                                                                             |
 | guest 命令集   | `wasm/coreutils-wasm`（uutils multicall，**60 个命令**，argv[0] 分发；权威列表见 `tower_agent_codemode::COMMANDS`） | `exec(name, args, opts)`                                                                                                                                                                                                                                                                                                                                                                                                                                     | 两个引擎均已接入；monty 通过注入的 `CapabilitySurface` 转发                    |
 | Python codemode | `tower-agent-monty` + `wasm/monty-sandbox`                                                                          | monty 子集、宿主导发的 REPL 状态机；共享能力表；`ScriptPermissions`；热重载；`ScriptStore` 持久化；`on("tool_call"/"tool_result")`；作者工具 `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` / `codemode_persist` / `codemode_discard` | JS 记录的启动执行仍待统一 host 分发；Python 宿主当前只加载 `monty` 记录 |
 | codemode（JS） | `tower-agent-codemode` + `wasm/rquickjs-sandbox`                                                                    | rquickjs（guest）、`exec` + 60 个命令函数 + pipeline + `fs`；工具调用 / 注册、`on("tool_call"/"tool_result")`、state、log、UI；会话根（`<config>/tower-agent/codemode/sessions/<name>`）；命名会话列表 / 清理 | 脚本注册工具尚未自动同步到 CLI 的 agent 工具目录 |
@@ -45,7 +45,7 @@
                         └─────────────────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
-                        tower-agent-wasmtime（引擎 / WASI / 限制 / 池）
+                        tower-agent-plugin-sdk/wasmtime（引擎 / WASI / 限制 / 池）
                         wasm/coreutils-wasm（命令集） · wasm/*-sandbox（解释器组件）
 ```
 
@@ -137,7 +137,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 
 ### 0.8 影响面
 
-- crate：`tower-agent-codemode`（宿主，吃掉 monty 的宿主职责或改为引擎适配器）、`tower-agent-monty`（Python 引擎）、`tower-agent-wasmtime`（不变）、 **新增内部 crate `tower-agent-codemode-core`**（能力层 / 提示词 / 脚本模型，引擎无关）、 **扩展 `tower-agent-plugin-sdk`**（不新增对外 SDK crate）。
+- crate：`tower-agent-codemode`（宿主）、`tower-agent-monty`（Python 引擎）、 **内部 crate `tower-agent-codemode-core`**（能力层 / 提示词 / 脚本模型）、 **扩展 `tower-agent-plugin-sdk`**（Provider、storage 与 wasmtime feature）。
 - feature：`tower-agent` 门面 / `tower-agent-cli` 已收敛为 `codemode` + `codemode-python` + `codemode-js`；
   默认三者都开，`mods` feature 已删除且没有兼容别名。
 - CLI：`--codemode` / `--no-codemode` / `--codemode-engine` / `--codemode-session*`；旧
@@ -241,7 +241,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 |----------|------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 状态     | v0.6 草案。**Q1–Q11 已定**（含组合 R1 + Q2(a)，权威表见 §8）；M0–M5 + CLI 接线 + M7 第一层已完成，下一阶段见 §9（M6：并发走 ticket + join，不做 p3） |
 | 日期     | 2026-10-11                                                                                                                                           |
-| 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、`crates/tower-agent-wasmtime`、`crates/tower-agent-monty`（同构样板）                      |
+| 关联     | [`design.md`](./design.md)、[`plugins.md`](./plugins.md)、`crates/tower-agent-plugin-sdk/src/wasmtime`、`crates/tower-agent-monty`（同构样板）                      |
 | 本地引用 | `~/Projects/DelSkayn/rquickjs`、`~/Projects/awslabs/llrt`、`~/Projects/rquickjs/rquickjs-extra`、`~/Projects/rquickjs/rquickjs-serde`                |
 
 ## 1. 目标与非目标
@@ -273,7 +273,7 @@ LLM
 ┌──────────────────── 宿主进程（tower-agent）───────────────────────┐
 │ codemode 工具层：参数校验 / 权限 / 超时 / 截断 / 审计             │
 │        │                                                          │
-│        ▼  wasmtime（tower-agent-wasmtime：引擎 / 池 / JIT 缓存）  │
+│        ▼  wasmtime（tower-agent-plugin-sdk/wasmtime：引擎 / 池 / JIT 缓存）  │
 │  ┌──────────────────────┐      host import: exec / fs             │
 │  │ JS guest 组件        │──────────────────────────────┐          │
 │  │ wasm32-wasip2        │                              ▼          │
@@ -445,7 +445,7 @@ LLM
 
 ### 3.6 既有设施
 
-**[源码]** `tower-agent-wasmtime`：`SandboxEngine` / `Sandbox` / `SandboxPool` / `HostState` / `SandboxOptions`（`DEFAULT_MEMORY_LIMIT = 256 MiB`）。现状 **只开 p2**、 **默认无 preopen**、 **无 epoch/fuel 超时**。
+**[源码]** `tower-agent-plugin-sdk/wasmtime`：`SandboxEngine` / `Sandbox` / `SandboxPool` / `HostState` / `SandboxOptions`（`DEFAULT_MEMORY_LIMIT = 256 MiB`）。现状 **只开 p2**、 **默认无 preopen**、 **无 epoch/fuel 超时**。
 
 **[源码]** `tower-agent-monty` + `wasm/monty-sandbox` 是现成样板：独立 workspace 产出组件 → 内嵌 `assets/*.wasm` → 宿主 `bindgen!` 绑定 + 池化 + 预热 + JIT 缓存 + `run(...)` 导出。codemode 的 guest 组件照这个形状做。
 
@@ -457,7 +457,7 @@ LLM
     - `wasm/rquickjs-sandbox`：rquickjs + 我们的 API 层 → JS guest 组件；
     - `wasm/coreutils-wasm`：uutils wrapper crate（§3.5）→ multicall 命令组件，产物 `dist/coreutils.wasm`。
 
-  两者都是普通 wasm 组件，由宿主 `crates/tower-agent-codemode` 用 `tower-agent-wasmtime` 驱动。`rquickjs-sandbox` 的导出面（已核对）：import `tower-agent:codemode/host` + `wasi:*@0.2.12`，export `tower-agent:codemode/sandbox`，产物 `dist/codemode.wasm`（ **796 KB**）。
+  两者都是普通 wasm 组件，由宿主 `crates/tower-agent-codemode` 用 `tower-agent-plugin-sdk/wasmtime` 驱动。`rquickjs-sandbox` 的导出面（已核对）：import `tower-agent:codemode/host` + `wasi:*@0.2.12`，export `tower-agent:codemode/sandbox`，产物 `dist/codemode.wasm`（ **796 KB**）。
 
   **两个产物都入库并内嵌**（决定：内嵌）：`generate.sh` 直接写到 `crates/tower-agent-codemode/assets/{coreutils.wasm,codemode.wasm}`，宿主用 `include_bytes!`（`EMBEDDED_COREUTILS` / `EMBEDDED_SANDBOX`）。形状与 monty-sandbox 一致，代价是仓库 +8.2 MB、二进制 +8.2 MB。
 
@@ -602,7 +602,7 @@ exec: func(name: string, args: list<string>, opts: exec-opts
 6. **构建要 wasi-sdk + quickjs-ng 子模块**：`WASI_SDK=<path>`（本机已有 34）；`sys/quickjs` 是 submodule，未 init 会直接构建报错（§3.1 实测）。
 7. **`fs` 的可见性是 preopen 决定的**，不是路径字符串决定的：脚本里 `/data` 能不能打开，取决于我们给了哪个 preopen（§5）。
 8. **guest 里的 tokio 只允许 `sync,macros,io-util,rt,time`**（`fs`/`process` 直接 `compile_error`，§3.2 实测），也 **没有可用的阻塞线程池**：首版同步 host import；rquickjs 的 executor 只用来驱动 JS 内部的 Promise，不做宿主等待。
-9. **超时两层**：JS 侧 `set_interrupt_handler`（脚本总预算，含纯计算死循环）+ 命令侧超时（要给 `tower-agent-wasmtime` 加 epoch/fuel；现状没有）。 **硬中断会丢 guest 缓冲区**：中断粒度放在「命令」，不要指望中断后还能拿到半截输出。
+9. **超时两层**：JS 侧 `set_interrupt_handler`（脚本总预算，含纯计算死循环）+ 命令侧超时（要给 `tower-agent-plugin-sdk/wasmtime` 加 epoch/fuel；现状没有）。 **硬中断会丢 guest 缓冲区**：中断粒度放在「命令」，不要指望中断后还能拿到半截输出。
 10. **内存在两侧都要设**：JS 侧 `set_memory_limit`；命令侧 `StoreLimits`（默认 256 MiB）。
 11. **输出截断**：命令 stdout/stderr 各限 N MB，超限截断并打 `truncated`——否则一次 `cat` 大文件就能吃掉整个上下文预算。
 12. **stdio 是内存缓冲，不是流式管道**：需要流式时按块 drain（宿主侧），或在 JS 侧用 Promise 分块（复杂度高，本期不做）。
@@ -627,7 +627,7 @@ exec: func(name: string, args: list<string>, opts: exec-opts
 | 项          | 默认值                                        | 实现处                                                                              |
 |-------------|-----------------------------------------------|-------------------------------------------------------------------------------------|
 | 脚本总超时  | 30 s                                          | `Runtime::set_interrupt_handler`（纯计算死循环也管）                                |
-| 单命令超时  | 10 s                                          | 命令侧 epoch（M5 给 `tower-agent-wasmtime` 加）                                     |
+| 单命令超时  | 10 s                                          | 命令侧 epoch（M5 给 `tower-agent-plugin-sdk/wasmtime` 加）                                     |
 | 脚本大小    | 64 KiB                                        | 工具入参校验                                                                        |
 | JS 堆上限   | 64 MiB                                        | `Runtime::set_memory_limit`                                                         |
 | JS 栈上限   | **64 KiB**（不是上游建议的 256 KiB，见 §3.1） | `Runtime::set_max_stack_size`（wasm 上必设；组件里超限是 trap，宿主降级成脚本失败） |
@@ -723,10 +723,10 @@ tower-agent --codemode --codemode-mount /data:/data:ro   # 额外只读挂载；
 **刻意没把 codemode 放进内置工具插件集合**：构造 codemode 要编译组件，放进默认列表会让每个使用标准工具集的宿主都变慢；所以 codemode 只在开关打开时才由装配层追加。
 
 > **插件化（已接线）**：codemode 是一个 **静态插件**（`CodemodePlugin`：`protected` + `provides tool.codemode`），
-> 与 `tower-agent-wasmtime` 的 `WasmtimePlugin`（`protected` + 能力 `sandbox.wasmtime`）一起不允许被
-> 动态/JIT 插件同名覆盖。两者都由 **组装层** `tower-agent::assembly::HostPlugins` 登记
-> （依赖 `tower-agent` 的宿主，如 axum，也用同一入口）；CLI 的 `--codemode` 在运行时通过
-> `ModManager::register_static_plugin` 追加。名字与能力都进 `protected_*`。
+> 不允许被动态/JIT 插件同名覆盖。Wasmtime 沙箱是
+> `tower-agent-plugin-sdk` 的 cargo feature，不注册插件、不占用插件名。
+> codemode 由 **组装层** `tower-agent::assembly::HostPlugins` 登记；CLI 的 `--codemode`
+> 在运行时通过 `ModManager::register_static_plugin` 追加。
 > 当前完成度与 **剩余待办** 见 [`plugins.md` §16](./plugins.md)。
 
 另外要把「产物怎么随包走」的既定答案用上：两个组件已经内嵌在 `tower-agent-codemode`（`include_bytes!`），所以接线不需要额外的文件分发。
@@ -842,6 +842,6 @@ cd /tmp/tokiowasm && cargo build --target wasm32-wasip2 --offline
 | `~/Projects/rquickjs/rquickjs-serde/README.md`                              | serde ↔ Value 双向，纯 Rust                                                  |
 | `tokio-1.53.2/src/lib.rs:479`（实测）                                       | wasm 上只允许 `sync,macros,io-util,rt,time`；`fs`/`process` 直接报错         |
 | `llrt/modules/llrt_fs/Cargo.toml`、`llrt_child_process/Cargo.toml`          | 两者 tokio feature = `fs,io-util,rt` / `process`（故 guest 里编不过）        |
-| 本仓库 `crates/tower-agent-wasmtime/src/engine.rs:11,15,61`                 | `SandboxOptions` / `DEFAULT_MEMORY_LIMIT` / 无 preopen                       |
+| 本仓库 `crates/tower-agent-plugin-sdk/src/wasmtime/engine.rs`               | `SandboxOptions` / `DEFAULT_MEMORY_LIMIT` / 无 preopen                       |
 | 本仓库 `crates/tower-agent-monty/src/manager.rs:84`                         | `ModPermissions` 权限形状                                                    |
 | 本仓库 `wasm/monty-sandbox/generate.sh`                                     | 独立 wasm workspace → 组件 → 内嵌的既有流程                                  |

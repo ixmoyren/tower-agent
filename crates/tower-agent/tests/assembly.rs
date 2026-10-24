@@ -1,4 +1,4 @@
-//! 组装层：宿主静态插件集合（内置工具 + wasmtime [+ codemode]）。
+//! 组装层：宿主静态插件集合（内置工具 + provider [+ codemode]）。
 //!
 //! 关键点：组装与 CLI 会话无关，任何依赖 `tower-agent` 的宿主（axum 等）都从这里取。
 
@@ -15,6 +15,18 @@ fn builtin_tools_are_assembled() {
         );
     }
     assert!(!names.contains(&"shell"), "shell is a dynamic plugin");
+}
+
+#[test]
+fn wasmtime_is_an_sdk_feature_not_a_protected_plugin() {
+    let registry = tower_agent::assembly::HostPlugins::new(".").registry();
+    assert!(
+        !registry
+            .protected_names()
+            .iter()
+            .any(|name| name == "wasmtime")
+    );
+    assert!(registry.ensure_not_protected("wasmtime").is_ok());
 }
 
 #[test]
@@ -145,23 +157,6 @@ fn dynamic_provider_uses_generic_plugin_resolution_and_shadowing() {
             .shadows()
             .iter()
             .any(|shadow| shadow.id.name == "provider.anthropic")
-    );
-}
-
-#[cfg(feature = "sandbox-wasmtime")]
-#[test]
-fn wasmtime_capability_is_registered_and_protected() {
-    let registry = tower_agent::assembly::HostPlugins::new(".").registry();
-    assert!(
-        registry
-            .protected_names()
-            .iter()
-            .any(|name| name == "wasmtime"),
-        "wasmtime 必须作为受保护静态插件登记"
-    );
-    assert!(
-        registry.ensure_not_protected("wasmtime").is_err(),
-        "同名动态/JIT 插件必须被挡"
     );
 }
 

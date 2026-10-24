@@ -365,7 +365,7 @@ pub enum PluginError {
 | M1 ✅  | `tower-agent-plugin` 核心：模型 + 注册表 + 解析（覆盖/环/菱形/版本）+ 静态插件；内置工具以独立静态插件接入；生命周期 / 宿主 API / 权限 / 错误已落地 |
 | M2 ✅  | `tower-agent-plugin-sdk` + 动态加载器（stabby + libloading）：`LoadedPlugin` 加载/调用/`stop`/卸载 + `examples/plugin-dyn` 示例 cdylib + 端到端测试 |
 | M3 ✅  | `tower-agent-monty`：内嵌 monty wasm 组件、宿主能力回调、原子换绑热加载与失败回滚                                                                                    |
-| M4 ◐   | 沙箱（`tower-agent-wasmtime`）/ 记忆 / 持久化 / codemode 已落地；Python / JS 引擎共享 capability、提示词、feature 与 CLI 开关。**未完成**：动态形态的沙箱与记忆、统一脚本仓库。其余未完成项见 [`roadmap.md`](./roadmap.md)。 |
+| M4 ◐   | 沙箱（SDK `wasmtime` feature）/ 记忆 / 持久化 / codemode 已落地；Python / JS 引擎共享 capability、提示词、feature 与 CLI 开关。**未完成**：动态形态的沙箱与记忆、统一脚本仓库。其余未完成项见 [`roadmap.md`](./roadmap.md)。 |
 
 ## 16. 已确认决策
 
@@ -378,55 +378,28 @@ pub enum PluginError {
 
 仍待实现的细节（不阻塞立项）：权限提示的 UI 形态、`CapabilityOverride` 的配置来源（配置文件 / CLI / 运行时命令）。
 
-## 16. codemode / wasmtime 插件化：已完成与待办
+## 16. codemode / wasmtime：插件与 SDK feature 边界
 
-目标（2026-10-12 定）：`tower-agent-wasmtime` 与 `tower-agent-codemode` **都是静态插件**，
-并且与 `tower-agent-monty` 一样 **不允许被动态插件与 JIT 插件用同名方式覆盖能力**；
-静态插件与 **cargo feature** 联动，用 feature 决定「tower-agent 提供哪些能力」；
-插件集合由 **组装层**（`tower-agent::assembly`）统一给出， **不在任何会话装配里硬编码**。
+`tower-agent-codemode` 和 `tower-agent-monty` 是插件宿主与实现，基于
+`tower-agent-plugin-sdk` 开发。它们需要 Wasmtime 沙箱基础设施时启用 SDK 的
+`wasmtime` feature：
 
-### 16.1 已完成
+```toml
+tower-agent-plugin-sdk = { workspace = true, features = ["wasmtime"] }
+```
 
-- **机制本来就有**：`PluginManifest.protected` + `PluginRegistry::{protected_names, protected_capabilities}`；
-  `resolve()` 的规则是「受保护的插件永不被遮蔽：protected 组内取胜者，其余（含同名 JIT/动态）进 `Resolution::shadows()`」。
-- **JIT 那条路早已响亮报错**（`manager::check_shadowing`，两处 JIT 入口），命中保护名或保留名即 `PluginError::Install`。
-- **动态那条路补上了同名拒绝**：`dynamic::load_from_dir` 在注册前走 `registry.ensure_not_protected(name)`，
-  命中即 `PluginError::Install { … "reserved by a protected static plugin and cannot be shadowed" }`——
-  不再静默进入 shadow（与 JIT 行为一致）。
-- **两个插件形态定义好了**（`CodemodePlugin`：静态 / `protected` / `provides("tool","codemode")` / `install` 注册工具；
-  `WasmtimePlugin`：静态 / `protected` / `provides("sandbox","wasmtime")` / 空安装）。已确认新增依赖不成环。
-- **组装层落位（2026-10-12 追加）**：宿主静态插件集合收敛到 `tower-agent::assembly::HostPlugins`
-  （门面 crate，依赖 `tower-agent` 的 axum 等宿主同样能用）；`ModManager` 不再自己塞 wasmtime。
-- **能力矩阵 feature 化**：`tower-agent` 门面 `[features]` =
-  `sandbox-wasmtime` / `codemode`（共享入口）/ `codemode-python`（monty）/
-  `codemode-js`（rquickjs）。`tower-agent-cli` 使用同一组 feature，默认三者都开；
-  `mods` feature 已删除。两端 `--no-default-features` 以及两个单引擎组合都已验证编译。
+SDK 的 `wasmtime` 模块提供 `SandboxEngine`、`HostState`、`Sandbox`、
+`SandboxPool`、资源限制和 JIT 缓存。具体解释器仍可用上游 `wasmtime` crate
+的 `bindgen!` 为自己的 WIT world 生成绑定。
 
-### 16.2 待办（按顺序；落地后勾选）
+Wasmtime 是编译期基础设施，不是插件，也没有 `sandbox.wasmtime` 能力。
+因此它不会注册 protected 插件、不会占用插件名，也不会进入动态插件的
+`ensure_not_protected` 特判。`protected` 规则只用于真实的插件能力，例如
+`CodemodePlugin` 提供的 `tool.codemode`。
 
-- [x] **1. 组装层 + 登记进注册表**：宿主静态插件集合由 `tower-agent::assembly::HostPlugins`
-  给出（内置工具 + `wasmtime`〔feature `sandbox-wasmtime`〕+ codemode〔feature `codemode`，
-  `with_codemode(session, mounts)`〕）—— **与会话无关**，CLI / axum / 测试同一入口。
-  `ModManager::new` 只再叠加自己的 JIT 运行时地基，不再自己塞 wasmtime；
-  `ModManager::register_static_plugin(&self, Arc<dyn StaticPlugin>)` 保留，供运行时追加插件
-  （CLI 的 `--codemode` 走它；JavaScript 引擎未启用时退化为直接追加工具）。
-  —— 这条同时修掉了工具目录与静态插件表不同源的问题。
-- [x] **2. 抽出可测的检查**：`PluginRegistry::ensure_not_protected(name)` 成为唯一规则实现，
-  `dynamic::load_from_dir` 与 JIT 的 `check_shadowing` 都调它（不再两处漂移）；
-  `tests/resolution.rs` 覆盖「保护名 → Err / 普通名 → Ok」，monty 侧补 `register_static_plugin` 用例，
-  `tower-agent/tests/assembly.rs` 覆盖组装层（内置工具 + wasmtime/codemode 受保护）。
-- [x] **3. 能力级覆盖的口子**：`resolve()` 现在把「受保护插件提供的能力」收敛到受保护实现——
-  `select_providers` 对受保护能力只考虑受保护提供者（JIT 形态优先级 / 更高版本不再能顶掉），
-  `CapabilityOverride` 指向非受保护实现时返回新错误 `PluginError::OverrideProtected`
-  （与「未知实现」的 `OverrideTargetMissing` 区分）；`tests/resolution.rs` 补三条断言。
-- [x] **4. 静态插件与 cargo feature 联动**：`tower-agent` 门面使用
-  `sandbox-wasmtime` / `codemode` / `codemode-python` / `codemode-js`；组装层按 feature
-  注册插件，`--no-default-features` 下只剩内置工具。见 §11。
-- [x] **5. Python / JavaScript 引擎 feature 化**：`codemode` 是共享入口，
-  `codemode-python = ["codemode", "dep:tower-agent-monty"]`、
-  `codemode-js = ["codemode", "dep:tower-agent-codemode"]`；默认三者都开，两个引擎也可各自单独编译。
-- [x] **6. CLI 二进制的 feature 化**：`tower-agent-cli` 使用同名三 feature，并通过
-  `tower-agent/codemode-*` 继续传递引擎选择；无默认时只剩内置工具，单 Python / 单 JS
-  以及共享层单独启用均已验证编译。CLI 已用 `--no-codemode` 收敛开关，并移除旧环境变量。
-  `tokio` 补 `rt-multi-thread`（少了 monty 的隐式 feature 后，`main` 的多线程 runtime 才成立）。
-  `cargo check/test -p tower-agent-cli --no-default-features` 已验证（只剩内置工具）。
+引擎 feature 保持为：
+
+- `codemode`：共享 codemode 入口，并启用
+  `tower-agent-plugin-sdk/wasmtime`；
+- `codemode-python`：额外引入 monty；
+- `codemode-js`：额外引入 JavaScript/rquickjs 宿主。

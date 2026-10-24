@@ -1,15 +1,15 @@
-//! monty 的沙箱包装：通用实例（`tower-agent-wasmtime`）+ monty 自己的组件绑定与协议。
+//! monty 的沙箱包装：SDK 的通用实例 + monty 自己的组件绑定与协议。
 //!
-//! 引擎、WASI、内存上限、JIT 缓存、通用实例与实例池都在 `tower-agent-wasmtime`；这里只有
-//! monty 专属的两样东西：
+//! 引擎、WASI、内存上限、JIT 缓存、通用实例与实例池都在
+//! `tower-agent-plugin-sdk/wasmtime`；这里只有 monty 专属的两样东西：
 //!
 //! - 内嵌组件字节 [`MONTY_SANDBOX`] 与 `bindgen!` 生成的绑定 `MontySandbox`；
 //! - 把 `progress` 状态机包装成 [`Sandbox`]（`start` / `resume_*`）。
 
 use std::sync::Arc;
 
-use tower_agent_plugin::PluginError;
-use tower_agent_wasmtime::{
+use tower_agent_plugin_sdk::PluginError;
+use tower_agent_plugin_sdk::wasmtime::{
     HostState, Sandbox as GenericSandbox, SandboxEngine, SandboxError, SandboxOptions,
 };
 use wasmtime::Store;
@@ -101,7 +101,7 @@ impl Sandbox {
 }
 
 /// monty 沙箱实例池（引擎 = `SandboxEngine`，实例 = `Sandbox`）。
-pub type SandboxPool = tower_agent_wasmtime::SandboxPool<SandboxEngine, Sandbox>;
+pub type SandboxPool = tower_agent_plugin_sdk::wasmtime::SandboxPool<SandboxEngine, Sandbox>;
 
 /// 建一个 monty 沙箱池：惰性编译内嵌组件，最多保留 `max_idle` 个空闲实例。
 #[must_use]

@@ -23,11 +23,11 @@ use tower_agent_codemode_core::{
 use tower_agent_core::{
     AgentTool, AgentToolResult, Panel, PanelAnchor, StatusSegment, ToolRenderer, UiState,
 };
-use tower_agent_plugin::{
+use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore};
+use tower_agent_plugin_sdk::{
     CapabilityId, HostApi, Permission, PermissionPolicy, PluginContext, PluginError, PluginId,
     PluginKind, PluginManifest, PluginRegistry, ShadowedPlugin, StaticPlugin,
 };
-use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore};
 use tower_agent_provider::{Arguments, ToolCall};
 
 use crate::{
@@ -186,7 +186,7 @@ impl ModManager {
     /// 用共享 UI 状态与初始注册表构造，并立刻解析一次。
     ///
     /// 初始注册表由**宿主组装层**提供（`tower_agent::assembly::HostPlugins`）：内置工具 +
-    /// `wasmtime` / `codemode` 这类宿主能力；`ModManager` 只再叠加自己的 JIT 运行时地基。
+    /// `codemode` 这类宿主能力；`ModManager` 只再叠加自己的 JIT 运行时地基。
     /// `HostApi` 的工具表由解析结果填充，因此宿主能力与工具目录同源。
     pub fn new(ui: UiState, registry: PluginRegistry) -> Result<Arc<Self>, PluginError> {
         let manager = Arc::new(Self {
@@ -1028,7 +1028,7 @@ impl ModManager {
     fn check_shadowing(&self, name: &str) -> Result<(), PluginError> {
         let protected_tools: BTreeSet<String> = {
             let registry = self.registry.lock().expect("registry poisoned");
-            // 受保护插件名（JIT 运行时地基 + wasmtime / codemode 等宿主能力）统一走注册表规则。
+            // 受保护插件名（JIT 运行时地基 + codemode 等宿主能力）统一走注册表规则。
             registry.ensure_not_protected(name)?;
             registry
                 .protected_capabilities()

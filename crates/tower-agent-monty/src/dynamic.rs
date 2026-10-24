@@ -19,7 +19,7 @@ use futures_util::future::BoxFuture;
 use serde_json::Value;
 use tower::Service;
 use tower_agent_core::{AgentError, AgentTool, AgentToolResult, ToolCallRequest, ToolResultStream};
-use tower_agent_plugin::{
+use tower_agent_plugin_sdk::{
     AbiToolCall, AbiValue, ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, LoadedPlugin,
     PluginContext, PluginError, PluginManifest, PluginRegistry, StaticPlugin,
 };
@@ -248,7 +248,7 @@ pub unsafe fn load_from_dir(
         if !seen.insert(name.clone()) {
             continue;
         }
-        // 受保护的静态插件（monty 自己的地基、以及 wasmtime / codemode 这类宿主能力）
+        // 受保护的静态插件（monty 自己的地基、以及 codemode 这类宿主能力）
         // **永不被遮蔽**：动态插件拿同名来顶替能力 → 像 JIT 那条路一样**响亮报错**，
         // 而不是静默进入 `Resolution::shadows()`。
         registry.ensure_not_protected(&name)?;

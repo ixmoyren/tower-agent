@@ -1,6 +1,6 @@
 [package]
 name = "tower-agent-plugin-sdk"
-description = "tower-agent plugin SDK: plugin macros, HostApi, tools, Provider, and optional storage contracts."
+description = "tower-agent plugin SDK: plugin macros, HostApi, tools, Provider, storage, and Wasmtime sandbox infrastructure."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -23,6 +23,9 @@ tokio = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
 tower-agent-core = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
+dirs = { workspace = true, optional = true }
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -38,6 +41,12 @@ storage = [
     "dep:futures-util",
     "dep:thiserror",
     "dep:tokio",
+]
+wasmtime = [
+    "dep:dirs",
+    "dep:thiserror",
+    "dep:wasmtime",
+    "dep:wasmtime-wasi",
 ]
 
 [dev-dependencies]

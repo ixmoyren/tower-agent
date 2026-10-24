@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::SandboxError;
+use super::SandboxError;
 
 /// 引擎工厂：惰性创建共享引擎（如「编译内嵌组件」）。
 type EngineFactory<E> = Box<dyn Fn() -> Result<E, SandboxError> + Send + Sync>;

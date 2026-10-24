@@ -295,7 +295,7 @@ fn parse_scope(scope: Option<&str>) -> Result<Option<ConfigScope>, String> {
 }
 
 /// 把写/重载结果渲染成模型可见文本。
-fn render(result: Result<ModSummary, tower_agent_plugin::PluginError>) -> AgentToolResult {
+fn render(result: Result<ModSummary, tower_agent_plugin_sdk::PluginError>) -> AgentToolResult {
     match result {
         Ok(summary) => AgentToolResult::text(render_summary(&summary)),
         Err(error) => AgentToolResult::error(error.to_string()),

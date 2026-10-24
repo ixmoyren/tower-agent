@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use tower_agent_codemode::{CodemodePlugin, SessionRoot};
-use tower_agent_plugin::{CapabilityId, PluginContext, StaticPlugin as _};
+use tower_agent_plugin_sdk::{CapabilityId, PluginContext, StaticPlugin as _};
 
 #[test]
 fn manifest_claims_a_protected_codemode_capability() {

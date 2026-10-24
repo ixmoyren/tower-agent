@@ -10,7 +10,6 @@ workspace = true
 
 [features]
 default = [
-    "sandbox-wasmtime",
     "codemode",
     "codemode-python",
     "codemode-js",
@@ -22,10 +21,8 @@ protocol = ["dep:tower-agent-protocol"]
 plugin-sdk = []
 # 默认存储后端：内嵌 Turso（持久化 config / provider 凭据 / 会话 / 历史 / 记忆）。
 storage-turso = ["dep:tower-agent-plugin-turso", "tower-agent-plugin-sdk/storage"]
-# 宿主插件能力：由 feature 决定「tower-agent 提供哪些插件」。
-sandbox-wasmtime = ["dep:tower-agent-wasmtime"]
 # codemode 的引擎无关宿主入口；具体解释器由下面两个子 feature 引入。
-codemode = ["sandbox-wasmtime"]
+codemode = ["tower-agent-plugin-sdk/wasmtime"]
 # Python（monty）解释器。
 codemode-python = ["codemode", "dep:tower-agent-monty"]
 # JavaScript（rquickjs）解释器。
@@ -37,7 +34,6 @@ tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-plugin-tools = { workspace = true }
 tower-agent-plugin = { workspace = true }
-tower-agent-wasmtime = { workspace = true, optional = true }
 tower-agent-codemode = { workspace = true, optional = true }
 tower-agent-monty = { workspace = true, optional = true }
 tower-agent-protocol = { workspace = true, optional = true }

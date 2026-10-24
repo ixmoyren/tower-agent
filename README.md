@@ -59,11 +59,10 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | `tower-agent-plugin-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
 | `tower-agent-plugin-shell` | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                    |
 | `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；不依赖 Provider 领域 |
-| `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider、可选 `storage` 契约 |
+| `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider、可选 `storage` 契约与 `wasmtime` 沙箱基础设施 |
 | `tower-agent-plugin-turso` | **默认存储插件**：实现 SDK storage 契约的嵌入式 Turso 后端 |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
 | `tower-agent-monty`      | **codemode Python 宿主**：内嵌 monty（Python 子集）沙箱插件 + 热重载脚本管理器                       |
-| `tower-agent-wasmtime`   | **通用 Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存与实例池                               |
 | `tower-agent-protocol`   | **协议**：帧、严格 CBOR 子集、RPC 信封                                                                |
 | `tower-agent-tui`        | **终端渲染前端**：消费 `tower-agent-ui`，负责 ratatui 页面、编辑器与终端事件循环                       |
 | `tower-agent-cli`        | **CLI 宿主**：二进制名 `tower-agent`，以 `Service` / `Layer` 组合装配会话                             |

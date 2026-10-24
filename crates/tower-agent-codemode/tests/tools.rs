@@ -9,7 +9,7 @@ use futures_util::StreamExt as _;
 use tower_agent_codemode::{CodemodeHost, CodemodeOptions, Mount};
 use tower_agent_codemode_core::{ScriptHookEvent, ScriptHookRegistry, ScriptPermissions};
 use tower_agent_core::{AgentTool, ToolCallRequest};
-use tower_agent_plugin::{
+use tower_agent_plugin_sdk::{
     CapabilityId, HostApi, Permission, PermissionDecision, PermissionPolicy, PermissionPrompter,
 };
 use tower_agent_plugin_tools::create_read_tool;
