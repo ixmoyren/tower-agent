@@ -43,6 +43,19 @@ impl StaticPlugin for LoadedPluginPayload {
                 continue;
             }
             let name = provided.id.name.clone();
+            let descriptor = self.loaded.tool_descriptor(&name);
+            let description = descriptor.map_or_else(
+                || {
+                    format!(
+                        "dynamic plugin `{}` capability `tool.{name}`",
+                        self.manifest.name
+                    )
+                },
+                |descriptor| descriptor.description.clone(),
+            );
+            let parameters = descriptor
+                .and_then(|descriptor| serde_json::from_str(&descriptor.parameters_json).ok())
+                .unwrap_or_else(|| serde_json::json!({ "type": "object" }));
             let tool = AgentTool::new(
                 name.clone(),
                 DynamicTool {
@@ -51,11 +64,15 @@ impl StaticPlugin for LoadedPluginPayload {
                 },
             )
             .label(name.clone())
-            .description(format!(
-                "dynamic plugin `{}` capability `tool.{name}`",
-                self.manifest.name
-            ))
-            .parameters(serde_json::json!({ "type": "object" }));
+            .description(description)
+            .parameters(parameters);
+            let tool = match descriptor
+                .and_then(|descriptor| descriptor.output_schema_json.as_deref())
+                .and_then(|schema| serde_json::from_str(schema).ok())
+            {
+                Some(schema) => tool.output_schema(schema),
+                None => tool,
+            };
             context.register_tool(tool);
         }
         Ok(())

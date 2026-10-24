@@ -5,14 +5,14 @@
 //! 通过 [`LoadedPlugin`] 调用与卸载；调用走 [`Lifecycle`] 记账，卸载前必须先 `stop`
 //! 且 in-flight 归零，否则 [`PluginError::UnloadBusy`]。
 
-use std::ffi::OsStr;
+use std::{collections::BTreeSet, ffi::OsStr};
 
 use semver::Version;
 use stabby::{string::String as AbiString, vec::Vec as AbiVec};
 
 use crate::{
     CapabilityId, HOST_ABI, Lifecycle, PluginError, PluginKind, PluginManifest, PluginState,
-    ProvidedCapability,
+    ProvidedCapability, ToolDescriptor,
 };
 
 /// ABI 稳定的语义版本。
@@ -55,6 +55,19 @@ pub struct AbiCapability {
     pub version: AbiVersion,
 }
 
+/// Optional model-facing metadata for a dynamic tool.
+#[stabby::stabby]
+pub struct AbiToolDescriptor {
+    /// Tool name.
+    pub name: AbiString,
+    /// Model-facing purpose.
+    pub description: AbiString,
+    /// JSON Schema for arguments.
+    pub parameters_json: AbiString,
+    /// JSON Schema for structured output; empty means no schema.
+    pub output_schema_json: AbiString,
+}
+
 /// ABI 稳定的插件清单（动态插件的入口载荷）。
 #[stabby::stabby]
 pub struct AbiManifest {
@@ -66,6 +79,8 @@ pub struct AbiManifest {
     pub sdk_abi: AbiVersion,
     /// 提供的能力。
     pub provides: AbiVec<AbiCapability>,
+    /// Model-facing metadata for tools provided by this plugin.
+    pub tool_descriptors: AbiVec<AbiToolDescriptor>,
 }
 
 impl AbiManifest {
@@ -77,6 +92,7 @@ impl AbiManifest {
             version,
             sdk_abi,
             provides,
+            tool_descriptors,
         } = self;
         let provides = provides
             .iter()
@@ -90,12 +106,23 @@ impl AbiManifest {
                 )
             })
             .collect();
+        let tool_descriptors = tool_descriptors
+            .iter()
+            .map(|descriptor| ToolDescriptor {
+                name: std::string::String::from(descriptor.name.clone()),
+                description: std::string::String::from(descriptor.description.clone()),
+                parameters_json: std::string::String::from(descriptor.parameters_json.clone()),
+                output_schema_json: (!descriptor.output_schema_json.is_empty())
+                    .then(|| std::string::String::from(descriptor.output_schema_json.clone())),
+            })
+            .collect();
         PluginManifest {
             name: std::string::String::from(name),
             version: version.to_version(),
             kind: PluginKind::Dynamic,
             sdk_abi: sdk_abi.to_version(),
             provides,
+            tool_descriptors,
             requires: Vec::new(),
             permissions: Vec::new(),
             protected: false,
@@ -430,6 +457,7 @@ pub struct LoadedPlugin {
     host_vtable: Box<HostVTable>,
     /// 回调上下文：`Box<Arc<dyn HostDispatch>>` 的裸指针，析构时释放。
     host_ctx: *mut std::sync::Arc<dyn HostDispatch>,
+    shutdown_called: bool,
 }
 
 impl LoadedPlugin {
@@ -469,6 +497,7 @@ impl LoadedPlugin {
                 found: Box::new(manifest.sdk_abi.clone()),
             });
         }
+        validate_tool_descriptors(&manifest)?;
 
         let lifecycle = Lifecycle::new(manifest.name.clone());
         for state in [
@@ -517,6 +546,7 @@ impl LoadedPlugin {
             lifecycle,
             host_vtable,
             host_ctx,
+            shutdown_called: false,
         })
     }
 
@@ -524,6 +554,21 @@ impl LoadedPlugin {
     #[must_use]
     pub fn manifest(&self) -> &PluginManifest {
         &self.manifest
+    }
+
+    /// Model-facing descriptors exported by the plugin.
+    #[must_use]
+    pub fn tool_descriptors(&self) -> &[ToolDescriptor] {
+        &self.manifest.tool_descriptors
+    }
+
+    /// Look up metadata for one provided tool.
+    #[must_use]
+    pub fn tool_descriptor(&self, name: &str) -> Option<&ToolDescriptor> {
+        self.manifest
+            .tool_descriptors
+            .iter()
+            .find(|descriptor| descriptor.name == name)
     }
 
     /// 生命周期句柄。
@@ -561,15 +606,68 @@ impl LoadedPlugin {
     }
 
     /// 卸载：要求已 `stop` 且 in-flight 归零，随后调用插件的 `shutdown` 并释放库。
-    pub fn unload(self) -> Result<(), PluginError> {
+    pub fn unload(mut self) -> Result<(), PluginError> {
         self.lifecycle.unload()?;
-        (self.vtable.shutdown)();
+        self.shutdown();
         Ok(())
     }
+
+    fn shutdown(&mut self) {
+        if !self.shutdown_called {
+            (self.vtable.shutdown)();
+            self.shutdown_called = true;
+        }
+    }
+}
+
+fn validate_tool_descriptors(manifest: &PluginManifest) -> Result<(), PluginError> {
+    let mut seen = BTreeSet::new();
+    for descriptor in &manifest.tool_descriptors {
+        if !seen.insert(&descriptor.name) {
+            return Err(PluginError::Manifest {
+                plugin: manifest.name.clone(),
+                message: format!("duplicate tool descriptor `{}`", descriptor.name),
+            });
+        }
+        if manifest
+            .provides_capability(&CapabilityId::new("tool", &descriptor.name))
+            .is_none()
+        {
+            return Err(PluginError::Manifest {
+                plugin: manifest.name.clone(),
+                message: format!(
+                    "tool descriptor `{}` has no matching `tool.{}` capability",
+                    descriptor.name, descriptor.name
+                ),
+            });
+        }
+        serde_json::from_str::<serde_json::Value>(&descriptor.parameters_json).map_err(
+            |error| PluginError::Manifest {
+                plugin: manifest.name.clone(),
+                message: format!(
+                    "tool `{}` has invalid parameters schema: {error}",
+                    descriptor.name
+                ),
+            },
+        )?;
+        if let Some(schema) = &descriptor.output_schema_json {
+            serde_json::from_str::<serde_json::Value>(schema).map_err(|error| {
+                PluginError::Manifest {
+                    plugin: manifest.name.clone(),
+                    message: format!(
+                        "tool `{}` has invalid output schema: {error}",
+                        descriptor.name
+                    ),
+                }
+            })?;
+        }
+    }
+    Ok(())
 }
 
 impl Drop for LoadedPlugin {
     fn drop(&mut self) {
+        self.shutdown();
         // 释放传给插件的宿主回调上下文（`host_vtable` 随结构一起释放）。
         let _ = &self.host_vtable;
         let _ = &self.library;

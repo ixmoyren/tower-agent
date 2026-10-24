@@ -5394,6 +5394,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "tower-agent-plugin-shell"
+version = "0.1.0"
+dependencies = [
+ "brush-builtins",
+ "brush-core",
+ "futures-util",
+ "serde_json",
+ "stabby",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tower-agent-plugin-sdk",
+ "tower-agent-provider",
+ "tower-agent-runtime",
+ "tower-agent-tools",
+]
+
+[[package]]
 name = "tower-agent-protocol"
 version = "0.1.0"
 dependencies = [
@@ -5471,8 +5490,6 @@ name = "tower-agent-tools"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
- "brush-builtins",
- "brush-core",
  "dirs",
  "futures-util",
  "globset",

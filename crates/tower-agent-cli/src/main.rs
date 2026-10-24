@@ -14,8 +14,8 @@
 //!   （anthropic / openai / deepseek / google）。测试用的离线 provider 在 `tower_agent_provider_builtin::provider::faux`
 //!   （`test-util` feature）里，不进这个二进制。
 //!
-//! 七个内置工具（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）在独立的
-//! `tools` crate 中；`shell` 内嵌 brush（bash 兼容），跨平台行为一致。
+//! 六个内置工具（`read` / `edit` / `write` / `grep` / `find` / `ls`）在独立的
+//! `tools` crate 中；`shell` 由动态插件 `tower-agent-plugin-shell` 提供。
 //!
 //! 扩展（`coding-agent` 的 extensions/MCP）尚未移植；上下文压缩是核心能力
 //! （`tower_agent_runtime::Compactor`），由 agent 循环自动执行。
@@ -726,7 +726,9 @@ fn run_print_blocking(
 ) -> std::io::Result<()> {
     runtime.block_on(async {
         session.load_persisted_mods().await;
-        session.load_dynamic_plugins();
+        if let Some(notice) = session.load_dynamic_plugins().shell_notice() {
+            eprintln!("{notice}");
+        }
         session.prewarm_mods();
         let subscription = session.subscribe();
         let ask = session.ask(prompt);

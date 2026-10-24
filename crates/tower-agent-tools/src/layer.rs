@@ -14,7 +14,7 @@ use tower_agent_runtime::{AgentError, ToolCallRequest, ToolResultStream};
 
 pub use tower_agent_runtime::{ToolNotFound, ToolRoute};
 
-use super::{EditTool, FindTool, GrepTool, LsTool, ReadTool, ShellTool, WriteTool};
+use super::{EditTool, FindTool, GrepTool, LsTool, ReadTool, WriteTool};
 
 /// 为「名字固定」的内置工具实现 `Layer<S>`（层叠到按名分派服务上）。
 macro_rules! impl_tool_layer {
@@ -37,7 +37,6 @@ macro_rules! impl_tool_layer {
 }
 
 impl_tool_layer!(ReadTool);
-impl_tool_layer!(ShellTool);
 impl_tool_layer!(EditTool);
 impl_tool_layer!(WriteTool);
 impl_tool_layer!(GrepTool);

@@ -18,9 +18,8 @@ use tower_agent_plugin::{
 const BUILTIN_VERSION: Version = Version::new(1, 0, 0);
 
 /// Names of the built-in tool plugins, in their stable registration order.
-pub const DEFAULT_TOOL_NAMES: [&str; 7] = [
+pub const DEFAULT_TOOL_NAMES: [&str; 6] = [
     crate::ReadTool::NAME,
-    crate::ShellTool::NAME,
     crate::EditTool::NAME,
     crate::WriteTool::NAME,
     crate::GrepTool::NAME,
@@ -59,14 +58,13 @@ macro_rules! define_tool_plugin {
 }
 
 define_tool_plugin!(ReadPlugin, "read", crate::create_read_tool);
-define_tool_plugin!(ShellPlugin, "shell", crate::create_shell_tool);
 define_tool_plugin!(EditPlugin, "edit", crate::create_edit_tool);
 define_tool_plugin!(WritePlugin, "write", crate::create_write_tool);
 define_tool_plugin!(GrepPlugin, "grep", crate::create_grep_tool);
 define_tool_plugin!(FindPlugin, "find", crate::create_find_tool);
 define_tool_plugin!(LsPlugin, "ls", crate::create_ls_tool);
 
-/// Build the seven built-in plugin instances without registering them.
+/// Build the built-in plugin instances without registering them.
 ///
 /// A host assembly layer is responsible for registering these values with a
 /// [`tower_agent_plugin::PluginRegistry`], resolving them, and installing their
@@ -76,7 +74,6 @@ pub fn builtin_plugins(cwd: impl AsRef<Path>) -> Vec<Arc<dyn StaticPlugin>> {
     let cwd = cwd.as_ref();
     vec![
         Arc::new(ReadPlugin::new(cwd)),
-        Arc::new(ShellPlugin::new(cwd)),
         Arc::new(EditPlugin::new(cwd)),
         Arc::new(WritePlugin::new(cwd)),
         Arc::new(GrepPlugin::new(cwd)),
@@ -92,7 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtin_tools_are_seven_independent_static_plugins() {
+    fn builtin_tools_are_independent_static_plugins() {
         let plugins = builtin_plugins(".");
         let manifests: Vec<PluginManifest> =
             plugins.iter().map(|plugin| plugin.manifest()).collect();

@@ -1,6 +1,6 @@
 # 插件 / 扩展体系（子设计）
 
-> 状态：v0.6（M1 静态插件、M2 stabby 动态插件、M3 monty 热重载已实现；静态插件已 Layer 化，见下方实现状态）。
+> 状态：v0.6（M1 静态插件、M2 stabby 动态插件、M3 monty 热重载已实现；静态插件已 Layer 化，`shell` 已迁移为动态插件）。
 > 关联：[`design.md`](./design.md)（总体设计、Provider 分层与关键契约）。
 > 本文只描述插件体系本身的结构与规则；当前实现以 `tower-agent-plugin`、`tower-agent-plugin-sdk` 和各领域插件 crate 为准。
 
@@ -8,7 +8,7 @@
 
 把 tower-agent 从「编译期内置能力集合」升级为「可组合、可扩展、可热插拔的能力平台」，满足：
 
-1. **内置能力插件化**：核心插件与内置 tool 走统一注册/解析体系；工具 crate 提供七个独立静态插件，宿主装配层负责把它们登记到注册表。
+1. **内置能力插件化**：核心插件与内置 tool 走统一注册/解析体系；工具 crate 提供六个独立静态插件，`shell` 由独立动态插件提供，宿主装配层负责登记到注册表。
 2. **三种插件形态**：静态（tower Layer）、动态（stabby `cdylib`）、热重载（monty，Python 子集沙箱），覆盖从「零开销内置」到「热加载的 codemode 脚本」的整条光谱。
 3. **跨形态能力调用**：动态与 JIT 插件可以互相调用对方提供的能力。
 4. **确定性解析**：无循环依赖；菱形依赖用版本机制收敛；同名插件按形态优先级覆盖。
@@ -65,17 +65,19 @@
     - 若干 **能力**（`provides`）；
     - 若干 **工具**（`AgentTool`）；每个内置工具本身就是一个 `tower::Layer`（第 9 节）。
 - 插件还可贡献三层中间件与事件处理器：`agent_layers()`（包 `BoxAgentService`）、`tool_layers()`（包 `BoxToolService`）、`event_handlers()`（纯通知）。`AgentLayer` / `ToolLayer` 是对象安全的装箱层 trait，也可用 `tower_agent_layer` / `tower_tool_layer` 适配任意 tower `Layer`；宿主用 `PluginContext::apply_agent_layers` / `apply_tool_layers` 组合、`dispatch_event` 派发。
-- 静态插件之间通过 `Layer` 顺序 + 能力注册组合； **内置 tool（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`）各自是一个独立的静态插件**，拆出来的每个 tool 都是 tower 中的 layer（第 9 节）。
+- 静态插件之间通过 `Layer` 顺序 + 能力注册组合； **内置 tool（`read` / `edit` / `write` / `grep` / `find` / `ls`）各自是一个独立的静态插件**，拆出来的每个 tool 都是 tower 中的 layer（第 9 节）。`shell` 是独立动态插件 `tower-agent-plugin-shell`。
 - 静态插件 **不能**依赖动态或 JIT 插件（第 6.5 节）：它是进程内的编译期单元，必须自洽。
 
 ### 4.2 动态插件（stabby）
 
 - 用 `tower-agent-plugin-sdk` 编写，`crate-type = ["cdylib"]`，导出 stabby 入口（`__tpa_plugin_entry`），返回 `PluginVTable`。
+- `AbiManifest.tool_descriptors` 描述动态工具面向模型的名称、用途、参数 schema 和输出 schema；宿主在首次调用前即可生成完整工具声明。
 - 宿主通过 `libloading` 加载，做 **ABI 版本 + 插件版本** 双重校验，再调用 `init` 拿到能力表。
+- 可选插件缺失不是启动错误：例如未安装 `tower-agent-plugin-shell` 时，宿主继续以其余工具启动，并在 TUI notice 或 `--print` stderr 中给出安装路径与构建命令。
 - 卸载安全：宿主以 `Arc<LoadedPlugin>` 持有模块，调用带引用计数； **存在 in-flight 调用时拒绝卸载**（`stop` 后等待归零）。
 - 大插件落在这里：`sandbox`（进程/权限隔离）、`memory`、`persist`（会话/向量/文件持久化）、`codemode`。
 
-> 实现状态（M2 已落地）：`tower-agent-plugin` 的 `dynamic` feature（=`dep:stabby` + `dep:libloading`）提供 `LoadedPlugin::load` / `call` / `stop` / `unload`，`#[repr(C)]` 的 `PluginVTable`（`manifest` / `init` / `call` / `shutdown`）与 stabby 的 ABI 稳定清单（`AbiManifest` / `AbiCapability` / `AbiVersion`）做 SDK ABI major 校验；`tower-agent-plugin-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。示例插件在 `examples/plugin-dyn`（独立 workspace 的 cdylib）。
+> 实现状态（M2 已落地）：`tower-agent-plugin` 的 `dynamic` feature（=`dep:stabby` + `dep:libloading`）提供 `LoadedPlugin::load` / `call` / `stop` / `unload`，`#[repr(C)]` 的 `PluginVTable`（`manifest` / `init` / `call` / `shutdown`）与 stabby 的 ABI 清单（`AbiManifest` / `AbiCapability` / `AbiToolDescriptor` / `AbiVersion`）做 SDK ABI major 校验；`tower-agent-plugin-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。示例插件在 `examples/plugin-dyn`，实际动态工具见 `crates/tower-agent-plugin-shell`。
 
 ### 4.3 热重载插件（monty）
 
@@ -263,13 +265,13 @@ stabby::export! {
 
 > 实现状态：`tower-agent-plugin-sdk` crate 已落地，提供 `DeclaredPlugin` / `declare_plugin!`（静态插件路径）、`HostApi` / `ToolRegistration` 再导出、`tool::ToolMetadata` 与 typed 注册、async `hook::on(ToolCall/ToolResult, handler)`、可选 Provider 能力，以及共享类型。工具元数据现可声明 exposure、namespace、annotations、参数/输出 schema；Rust 与 codemode 脚本都可用 `tool_call` / `tool_result` hook。stabby 的 `__tpa_plugin_entry` 动态入口随 `tower-agent-plugin` 的 `dynamic` feature 落地。
 
-## 9. 内置工具迁移到静态插件
+## 9. 内置工具插件化
 
-1. **每个内置工具本身是一个静态插件**：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls` 各自注册为独立插件，分别提供 `tool.read` / `tool.shell` / … / `tool.ls`（版本从 `1.0.0` 起），不再由一个 `core-tools` 插件整体打包。
-2. **每个 tool 都是 tower 中的 layer**：`tools` crate 里每个工具除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tower_agent_tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上，得到发给 agent 的可执行服务。工具层可以与 tower 生态的其它 layer（`timeout` / `limit` / `buffer` ……）自由组合。
+1. **静态内置工具各自是一个插件**：`read` / `edit` / `write` / `grep` / `find` / `ls` 分别注册为独立静态插件；`shell` 通过动态插件 `tower-agent-plugin-shell` 提供 `tool.shell`。
+2. **静态 tool 都是 tower 中的 layer**：`tools` crate 里六个静态工具除实现叶服务 `Service<ToolCallRequest>` 外，还实现 `tower::Layer<S>`——层叠到内层按名分派服务上后，命中本工具名就执行工具、否则委托内层。`tower_agent_tools::create_*_tool` 把工具层叠到「工具未找到」基础服务上。动态 `shell` 通过 `AbiToolCall` / `AbiToolResult` 边界接入同一工具服务契约。
 3. **工具钩子也是 layer**：`tower_agent_runtime::layer` 提供 `BeforeToolCallLayer` / `AfterToolResultLayer`，分别对应 pi 的 `tool_call`（可放行/改写/拦截）与 `tool_result`（逐条改写结果）钩子。
 4. **typed 工具注册**：`tower_agent_runtime::ToolRegistration::new::<P, _, _>(...)` 用 schemars 生成参数 schema、用 serde 反序列化入参，校验失败编码为 `is_error` 工具结果。
-5. `tower-agent-tools` 导出七个独立静态插件和 `builtin_plugins(cwd)` 插件集合，但**不创建注册表、不解析、不安装**；`tower-agent::assembly::HostPlugins` 负责登记到 `PluginRegistry` 并解析安装。`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在装配后的解析结果上过滤。
+5. `tower-agent-tools` 导出六个独立静态插件和 `builtin_plugins(cwd)` 插件集合，但**不创建注册表、不解析、不安装**；`shell` 由 `tower-agent-plugin-shell` 以动态 `cdylib` 提供。`tower-agent::assembly::HostPlugins` 负责登记静态插件，运行时动态插件由宿主加载器登记到同一 `PluginRegistry` 并解析安装。`tower-agent-cli` 的 `select_tools`（`--tools` / `--exclude-tools` / `--no-tools`）在装配后的解析结果上过滤。
 6. 共享实用件（`truncate` / `path_utils` / `queue` / `edit_diff`）留在 `tools`，作为工具的实现细节，不对外暴露成能力。
 7. 内置工具覆盖以**插件名**为单位：替换 `read` 就注册另一个名为 `read` 的高优先级插件，只影响 `read`；`tool.read` 仅作为能力/依赖标识，不作为工具插件覆盖入口。
 8. **provider 中间件不插件化**：`retry` / `timeout` / `observe` 由 `tower-agent-cli::provider` 直接编排（传输层叠 `RetryTransport`，服务层叠 `TimeoutService`），不进入注册表。
@@ -372,7 +374,7 @@ pub enum PluginError {
 3. **权限**：采用 **运行时提示**（首次调用需要权限的能力时询问用户，按会话缓存；无人值守默认拒绝）。
 4. **热更一致性**：调用在 **发起时绑定版本**；in-flight 调用在旧版本上完成，之后的新调用用新版本。
 5. **版本 / ABI 兼容**：一律 `^`（semver 兼容）； **major 不兼容即拒绝**，不静默降级。
-6. **内置工具与 provider 中间件**：内置 tool（`read` / `shell` / …） **各自是一个静态插件，且每个都是 tower Layer**；provider 中间件（`retry` / `timeout` / `observe`） **不插件化**，由 `tower-agent-cli::provider` 直接编排。
+6. **内置工具与 provider 中间件**：除 `shell` 外的内置 tool（`read` / `edit` / …） **各自是一个静态插件，且每个都是 tower Layer**；`shell` 是独立动态插件。provider 中间件（`retry` / `timeout` / `observe`） **不插件化**，由 `tower-agent-cli::provider` 直接编排。
 
 仍待实现的细节（不阻塞立项）：权限提示的 UI 形态、`CapabilityOverride` 的配置来源（配置文件 / CLI / 运行时命令）。
 

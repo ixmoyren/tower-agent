@@ -29,22 +29,18 @@ use brush_core::{
     ProfileLoadBehavior, RcLoadBehavior, Shell, SourceInfo,
     openfiles::{self, OpenFile, OpenFiles},
 };
+use futures_util::future::BoxFuture;
 use tokio::{
     sync::{Mutex, mpsc, oneshot},
     time::Instant,
 };
 use tokio_util::sync::CancellationToken;
-use tower::{Layer, Service};
+use tower::Service;
 use tower_agent_provider::Arguments;
 use tower_agent_runtime::{AgentError, AgentToolResult, ToolCallRequest, ToolResultStream};
-
-use super::{
-    layer::ToolNotFound,
-    support::{ToolFuture, error_result, text_content, text_result},
-    truncate::{
-        DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size,
-        truncate_tail,
-    },
+use tower_agent_tools::truncate::{
+    DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size,
+    truncate_tail,
 };
 
 /// pi 的 `BASH_UPDATE_THROTTLE_MS`。
@@ -131,13 +127,8 @@ impl ShellTool {
         }
     }
 
-    /// 工具名。
-    pub fn name(&self) -> &'static str {
-        Self::NAME
-    }
-
-    /// 发给模型的工具描述。
-    pub fn description(&self) -> String {
+    /// 与实例无关的模型可见描述。
+    pub(crate) fn description_text() -> String {
         format!(
             "Execute a bash-compatible shell command in the current working directory. Shell \
             state (variables, functions, aliases) persists across calls, but every command \
@@ -381,7 +372,7 @@ impl ShellTool {
 impl Service<ToolCallRequest> for ShellTool {
     type Response = ToolResultStream;
     type Error = AgentError;
-    type Future = ToolFuture;
+    type Future = BoxFuture<'static, Result<ToolResultStream, AgentError>>;
 
     fn poll_ready(
         &mut self,
@@ -588,7 +579,7 @@ fn parse_shell_args(args: &Arguments) -> Result<(String, Option<f64>), String> {
 
 fn partial_result(snapshot: &Snapshot) -> AgentToolResult {
     AgentToolResult {
-        content: vec![text_content(snapshot.content.clone())],
+        content: text_content(snapshot.content.clone()),
         details: Some(serde_json::json!({
             "truncation": snapshot.truncated.then(|| truncation_json(snapshot)),
             "fullOutputPath": snapshot.full_output_path,
@@ -940,17 +931,7 @@ fn decode_stream(pending: &mut Vec<u8>, data: &[u8], out: &mut String) {
     }
 }
 
-/// 构造内置 `shell` 工具（内嵌 brush，跨平台行为一致）。
-pub fn create_shell_tool(cwd: impl AsRef<Path>) -> tower_agent_runtime::AgentTool {
-    let tool = ShellTool::new(cwd);
-    tower_agent_runtime::AgentTool::new(ShellTool::NAME, tool.layer(ToolNotFound))
-        .label(ShellTool::NAME)
-        .description(tool.description())
-        .parameters(ShellTool::parameters())
-        .output_schema(shell_output_schema())
-}
-
-fn shell_output_schema() -> tower_agent_provider::JsonValue {
+pub(crate) fn shell_output_schema() -> tower_agent_provider::JsonValue {
     serde_json::json!({
         "type": "object",
         "properties": {
@@ -961,6 +942,29 @@ fn shell_output_schema() -> tower_agent_provider::JsonValue {
             "wall_time_seconds": { "type": "number" }
         }
     })
+}
+
+fn text_content(value: impl Into<String>) -> Vec<tower_agent_provider::ContentBlock> {
+    vec![tower_agent_provider::ContentBlock::Text(
+        tower_agent_provider::TextContent {
+            text: value.into(),
+            text_signature: None,
+        },
+    )]
+}
+
+fn text_result(value: impl Into<String>) -> AgentToolResult {
+    AgentToolResult {
+        content: text_content(value),
+        ..AgentToolResult::default()
+    }
+}
+
+fn error_result(value: impl Into<String>) -> AgentToolResult {
+    AgentToolResult {
+        is_error: true,
+        ..text_result(value)
+    }
 }
 
 #[cfg(test)]

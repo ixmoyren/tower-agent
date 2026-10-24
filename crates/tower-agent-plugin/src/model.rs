@@ -37,6 +37,23 @@ impl fmt::Display for PluginKind {
     }
 }
 
+/// Model-facing metadata declared by a dynamically loaded tool.
+///
+/// Schemas stay as JSON strings so the core plugin model has no optional
+/// `serde_json` dependency. The dynamic loader validates them before calling
+/// the plugin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDescriptor {
+    /// Tool name.
+    pub name: String,
+    /// Model-facing purpose.
+    pub description: String,
+    /// JSON Schema for tool arguments.
+    pub parameters_json: String,
+    /// Optional JSON Schema for structured output.
+    pub output_schema_json: Option<String>,
+}
+
 /// 插件标识：名字 + 语义版本。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PluginId {
@@ -229,6 +246,8 @@ pub struct PluginManifest {
     pub sdk_abi: Version,
     /// 提供的能力。
     pub provides: Vec<ProvidedCapability>,
+    /// Model-facing declarations for provided tools.
+    pub tool_descriptors: Vec<ToolDescriptor>,
     /// 依赖的能力。
     pub requires: Vec<Dependency>,
     /// 权限声明。
@@ -249,6 +268,7 @@ impl PluginManifest {
             kind,
             sdk_abi: crate::HOST_ABI,
             provides: Vec::new(),
+            tool_descriptors: Vec::new(),
             requires: Vec::new(),
             permissions: Vec::new(),
             protected: false,

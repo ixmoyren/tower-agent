@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 
-use stabby::string::String as AbiString;
+use stabby::{string::String as AbiString, vec::Vec as AbiVec};
 use tower_agent_plugin_sdk::{
     AbiBuffer, AbiCapability, AbiManifest, AbiToolResult, AbiVersion, HostVTable,
     declare_dynamic_plugin, provider::wire::SidecarEvent,
@@ -38,6 +38,7 @@ extern "C" fn provider_manifest() -> AbiManifest {
         }]
         .into_iter()
         .collect(),
+        tool_descriptors: AbiVec::new(),
     }
 }
 
@@ -70,8 +71,7 @@ extern "C" fn provider_shutdown() {}
 fn respond(result: &AbiToolResult) -> AbiBuffer {
     let Ok(out) = tower_agent_plugin_sdk::rkyv::to_bytes::<
         tower_agent_plugin_sdk::rkyv::rancor::Error,
-    >(result)
-    else {
+    >(result) else {
         return AbiBuffer::empty();
     };
     REPLY.with(|cell| {

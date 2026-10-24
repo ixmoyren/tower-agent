@@ -85,6 +85,41 @@ pub struct ToolFilter {
     pub exclude: Vec<String>,
 }
 
+/// Startup result for native dynamic plugins.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DynamicPluginLoad {
+    loaded: Vec<String>,
+    error: Option<String>,
+}
+
+impl DynamicPluginLoad {
+    /// User-facing warning when the optional shell plugin is unavailable.
+    ///
+    /// A missing plugin never aborts startup: every static tool and codemode
+    /// remains usable, while the caller decides whether to show this as a TUI
+    /// notice or a stderr warning.
+    #[must_use]
+    pub fn shell_notice(&self) -> Option<String> {
+        if self.loaded.iter().any(|name| name == "shell") {
+            return None;
+        }
+        let directory = dirs::config_dir()
+            .map(|dir| {
+                dir.join("tower-agent")
+                    .join("plugins")
+                    .display()
+                    .to_string()
+            })
+            .unwrap_or_else(|| "<系统的配置目录>/tower-agent/plugins".to_owned());
+        let reason = self.error.as_deref().unwrap_or("未发现 shell 插件库");
+        Some(format!(
+            "shell 工具暂不可用：{reason}。其他工具仍可正常使用。\n\
+             请构建 `tower-agent-plugin-shell` 并把动态库放到：{directory}\n\
+             构建命令：cargo build -p tower-agent-plugin-shell --release"
+        ))
+    }
+}
+
 impl ToolFilter {
     /// 某个工具名是否通过过滤。
     #[must_use]
@@ -503,25 +538,37 @@ impl Session {
         }
     }
 
-    /// 从 `dirs` 的 config 目录（`tower-agent/plugins`）加载动态插件；返回加载数量。
+    /// 从 `dirs` 的 config 目录（`tower-agent/plugins`）加载动态插件。
+    ///
+    /// Missing libraries are not fatal. Callers decide how to surface
+    /// [`DynamicPluginLoad::shell_notice`].
     #[allow(unsafe_code)] // 加载用户配置目录里的动态库，视作受信任。
-    pub fn load_dynamic_plugins(&self) -> usize {
+    pub fn load_dynamic_plugins(&self) -> DynamicPluginLoad {
         #[cfg(feature = "codemode-python")]
         {
             let Some(mods) = &self.mods else {
-                return 0;
+                return DynamicPluginLoad {
+                    loaded: Vec::new(),
+                    error: Some("动态插件宿主未启用（需要 `codemode-python` feature）".to_owned()),
+                };
             };
             match unsafe { mods.load_dynamic_plugins_from_config() } {
-                Ok(names) => names.len(),
-                Err(error) => {
-                    eprintln!("加载动态插件失败：{error}");
-                    0
-                }
+                Ok(loaded) => DynamicPluginLoad {
+                    loaded,
+                    error: None,
+                },
+                Err(error) => DynamicPluginLoad {
+                    loaded: Vec::new(),
+                    error: Some(format!("动态插件加载失败：{error}")),
+                },
             }
         }
         #[cfg(not(feature = "codemode-python"))]
         {
-            0
+            DynamicPluginLoad {
+                loaded: Vec::new(),
+                error: Some("动态插件宿主未启用（缺少 `codemode-python` feature）".to_owned()),
+            }
         }
     }
 
@@ -1180,7 +1227,8 @@ pub async fn run_tui(
 ) -> std::io::Result<()> {
     // 先恢复持久化的 mod、加载动态插件，再后台预热沙箱。
     session.load_persisted_mods().await;
-    session.load_dynamic_plugins();
+    let plugin_load = session.load_dynamic_plugins();
+    let notice = combine_notice(notice, plugin_load.shell_notice());
     session.prewarm_mods();
     let subscription = session.subscribe();
     let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();
@@ -1236,6 +1284,14 @@ pub async fn run_tui(
     Ok(())
 }
 
+fn combine_notice(existing: Option<String>, warning: Option<String>) -> Option<String> {
+    match (existing, warning) {
+        (Some(existing), Some(warning)) => Some(format!("{existing}\n{warning}")),
+        (None, Some(warning)) => Some(warning),
+        (existing, None) => existing,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! 会话入口的端到端测试：用离线 faux provider 驱动真实的 agent 循环 + 真实内置工具。
@@ -1259,8 +1315,27 @@ mod tests {
     use tower_agent_ui::CommandHost as _;
 
     use super::{
-        ConfigScope, ScriptLanguage, Session, parse_thinking_level, run_print, thinking_level_name,
+        ConfigScope, DynamicPluginLoad, ScriptLanguage, Session, parse_thinking_level, run_print,
+        thinking_level_name,
     };
+
+    #[test]
+    fn missing_shell_plugin_produces_a_non_fatal_notice() {
+        let load = DynamicPluginLoad::default();
+        let notice = load.shell_notice().expect("missing shell warning");
+        assert!(notice.contains("shell 工具暂不可用"));
+        assert!(notice.contains("其他工具仍可正常使用"));
+        assert!(notice.contains("tower-agent/plugins"));
+    }
+
+    #[test]
+    fn loaded_shell_plugin_suppresses_the_warning() {
+        let load = DynamicPluginLoad {
+            loaded: vec!["shell".to_owned()],
+            error: None,
+        };
+        assert!(load.shell_notice().is_none());
+    }
 
     fn session(cwd: &std::path::Path) -> Session {
         Session::with_model(cwd, FauxProvider::new().boxed(), model())

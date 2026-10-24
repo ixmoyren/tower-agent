@@ -36,9 +36,9 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 - **多 Provider**：Anthropic Messages、OpenAI Chat Completions（含兼容端点）、OpenAI
   Responses、Google Generative AI、DeepSeek 以独立 Provider 插件注册；宿主也可实现
   `ProviderPlugin` 注入自定义 LLM。
-- **七个内置工具**：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`，
-  每个工具本身就是一个可组合的 tower `Layer`（`shell` 内嵌 [brush](https://github.com/reubeno/brush)
-  ——bash 兼容的 Rust shell，在进程内解释执行，跨平台行为一致）。
+- **六个内置工具**：`read` / `edit` / `write` / `grep` / `find` / `ls`，以及独立的动态
+  `shell` 插件；六个静态工具本身都是可组合的 tower `Layer`。`shell` 插件内嵌
+  [brush](https://github.com/reubeno/brush)，通过动态插件 ABI 提供 `tool.shell`。
 - **前后端解耦**：`tower-agent-ui` 提供与渲染无关的状态归约、命令和宿主接口；
   `tower-agent-tui` 只负责 ratatui/终端，GUI 与 axum 服务可以直接消费 UI 后端。
 - **双响应形态**：非流式 `AgentResponse`（流式事件的 fold）与流式 `AgentEventStream`
@@ -56,7 +56,8 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | `tower-agent-runtime`    | **运行时**：`Agent` 编排循环、队列、事件总线；无状态 / 池化 Service 适配                              |
 | `tower-agent-provider`   | **Provider 协议**：消息/模型/请求/事件、Stream Service、Models、HTTP/SSE、插件契约；不含具体厂商实现 |
 | `tower-agent-provider-builtin` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar，通过 SDK 注册 Provider 能力 |
-| `tower-agent-tools`      | **内置工具与插件合集**：七个工具实现及各自独立的静态插件声明                                           |
+| `tower-agent-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
+| `tower-agent-plugin-shell` | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                    |
 | `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；不依赖 Provider 领域 |
 | `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider 注册与 wire、动态 Provider 适配              |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |

@@ -71,7 +71,7 @@
 
 ## 7. 工具与沙箱
 
-✅ 已完成：7 个内置工具（`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`），`shell` 内嵌 brush；coreutils-wasm **60 个命令**（`COMMANDS`）；monty / JS 两个沙箱。
+✅ 已完成：6 个静态内置工具（`read` / `edit` / `write` / `grep` / `find` / `ls`），以及使用 brush 的独立动态插件 `tower-agent-plugin-shell`；coreutils-wasm **60 个命令**（`COMMANDS`）；monty / JS 两个沙箱。
 
 - ◐ `coreutils-wasm` 缺"管道里的重活"：`sed` / `awk` / `grep` / `find` / `xargs` 都不在 60 个命令里（见 `codemode.md` §3.5 的取舍）。 **P1**
 - ❌ 沙箱网络能力（当前无网络，符合"默认安全"）。 **——**

@@ -1,0 +1,29 @@
+[package]
+name = "tower-agent-plugin-shell"
+description = "Dynamic tower-agent shell tool backed by an embedded bash-compatible brush session."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints.rust]
+unsafe_code = "allow"
+
+[dependencies]
+brush-core = { git = "https://github.com/reubeno/brush", version = "0.5.0" }
+brush-builtins = { git = "https://github.com/reubeno/brush", version = "0.2.0" }
+futures-util.workspace = true
+serde_json.workspace = true
+stabby.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio-util.workspace = true
+tower.workspace = true
+tower-agent-plugin-sdk = { workspace = true, features = ["dynamic"] }
+tower-agent-provider.workspace = true
+tower-agent-runtime.workspace = true
+tower-agent-tools.workspace = true
+

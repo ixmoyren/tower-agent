@@ -7,9 +7,9 @@
 //! 每个工具同时还实现 [`tower::Layer`]（见 `layer` 模块）：`create_*_tool` 把工具层叠到
 //! [`ToolNotFound`] 基础服务上得到该工具的可执行服务，于是每个 tool 都是可组合的 tower 单元。
 //!
-//! 七个内置工具：`read` / `shell` / `edit` / `write` / `grep` / `find` / `ls`。
+//! 六个内置工具：`read` / `edit` / `write` / `grep` / `find` / `ls`。
 //! 它们同时各自对应一个 [`plugin`] 中的静态插件；注册和解析由宿主装配层负责。
-//! `shell` 底层是**内嵌的 brush**（bash 兼容），在进程内解释执行，跨平台行为一致。
+//! `shell` 已迁移到独立的 `tower-agent-plugin-shell` 动态插件。
 
 mod edit;
 mod find;
@@ -17,7 +17,6 @@ mod grep;
 mod layer;
 mod ls;
 mod read;
-mod shell;
 mod write;
 
 pub mod edit_diff;
@@ -34,12 +33,11 @@ pub use grep::{GrepTool, create_grep_tool};
 pub use layer::{ToolNotFound, ToolRoute};
 pub use ls::{LsTool, create_ls_tool};
 pub use plugin::{
-    DEFAULT_TOOL_NAMES, EditPlugin, FindPlugin, GrepPlugin, LsPlugin, ReadPlugin, ShellPlugin,
-    WritePlugin, builtin_plugins,
+    DEFAULT_TOOL_NAMES, EditPlugin, FindPlugin, GrepPlugin, LsPlugin, ReadPlugin, WritePlugin,
+    builtin_plugins,
 };
 pub use queue::FileMutationQueue;
 pub use read::{ReadTool, create_read_tool};
-pub use shell::{ShellTool, ShellToolOptions, create_shell_tool};
 pub use truncate::{
     DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, TruncationResult,
     format_size, truncate_head, truncate_line, truncate_tail,

@@ -40,7 +40,6 @@ fn default_tools(cwd: impl AsRef<std::path::Path>) -> Vec<AgentTool> {
     let cwd = cwd.as_ref();
     vec![
         tower_agent_tools::create_read_tool(cwd),
-        tower_agent_tools::create_shell_tool(cwd),
         tower_agent_tools::create_edit_tool(cwd),
         tower_agent_tools::create_write_tool(cwd),
         tower_agent_tools::create_grep_tool(cwd),
@@ -50,7 +49,7 @@ fn default_tools(cwd: impl AsRef<std::path::Path>) -> Vec<AgentTool> {
 }
 
 /// 内置工具名，顺序与 [`default_tools`] 一致。
-const DEFAULT_TOOL_NAMES: [&str; 7] = ["read", "shell", "edit", "write", "grep", "find", "ls"];
+const DEFAULT_TOOL_NAMES: [&str; 6] = ["read", "edit", "write", "grep", "find", "ls"];
 
 /// 像 agent 循环那样调用一次工具，收集完整的部分结果 + 终态结果。
 async fn run_tool(tool: &AgentTool, args: JsonValue) -> Vec<tower_agent_runtime::AgentToolResult> {
@@ -77,14 +76,14 @@ fn first_text(result: &tower_agent_runtime::AgentToolResult) -> String {
 }
 
 #[tokio::test]
-async fn default_tools_expose_one_unified_shell_tool() {
+async fn default_tools_do_not_include_shell() {
     let dir = tempfile::tempdir().expect("temp dir");
     let tools = default_tools(dir.path());
     let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
     assert_eq!(
         names,
-        vec!["read", "shell", "edit", "write", "grep", "find", "ls"],
-        "内置工具里只有一个统一的 shell 工具"
+        vec!["read", "edit", "write", "grep", "find", "ls"],
+        "shell is provided by the dynamic tower-agent-plugin-shell plugin"
     );
     assert_eq!(names.as_slice(), DEFAULT_TOOL_NAMES.as_slice());
 }
@@ -227,19 +226,6 @@ async fn grep_truncates_long_lines() {
         text.contains("Some lines truncated to 500 chars. Use read tool to see full lines"),
         "got: {text}"
     );
-}
-
-#[tokio::test]
-async fn shell_tool_is_registered_with_pi_metadata() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let tools = default_tools(dir.path());
-    let shell = tools.iter().find(|tool| tool.name() == "shell").unwrap();
-    assert_eq!(shell.display_label(), "shell");
-    // 描述文案点明这是一个 bash 兼容的 shell。
-    let description = shell.tool_description();
-    assert!(description.starts_with("Execute a "), "got: {description}");
-    assert!(description.contains("command"), "got: {description}");
-    assert!(shell.declared_output_schema().is_some());
 }
 
 #[tokio::test]
@@ -397,148 +383,7 @@ async fn edit_reports_a_not_found_error_without_touching_the_file() {
     );
 }
 
-#[tokio::test]
-async fn shell_streams_output_and_reports_exit_codes() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let shell = tower_agent_tools::create_shell_tool(dir.path());
-
-    let results = run_tool(
-        &shell,
-        serde_json::json!({ "command": "printf 'hello\\n'" }),
-    )
-    .await;
-    assert!(
-        results.len() >= 2,
-        "expected an initial update plus the final result"
-    );
-    let last = results.last().unwrap();
-    assert!(!last.is_error);
-    assert_eq!(first_text(last), "hello\n");
-
-    let results = run_tool(&shell, serde_json::json!({ "command": "exit 7" })).await;
-    let last = results.last().unwrap();
-    assert!(last.is_error);
-    assert!(
-        first_text(last).contains("Command exited with code 7"),
-        "got: {}",
-        first_text(last)
-    );
-}
-
-#[tokio::test]
-async fn shell_state_persists_but_working_directory_is_pinned() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    std::fs::create_dir(dir.path().join("sub")).expect("mkdir sub");
-    let shell = tower_agent_tools::create_shell_tool(dir.path());
-
-    // 记下 workspace 根：每条命令都应从这里起步。
-    let results = run_tool(&shell, serde_json::json!({ "command": "pwd" })).await;
-    let root = first_text(results.last().unwrap()).trim().to_owned();
-    assert!(!root.is_empty(), "pwd 应有输出");
-
-    // 变量跨调用保留（shell 会话是持久的）。
-    let results = run_tool(
-        &shell,
-        serde_json::json!({ "command": "export GREETING=hi" }),
-    )
-    .await;
-    assert!(!results.last().unwrap().is_error);
-    let results = run_tool(
-        &shell,
-        serde_json::json!({ "command": "printf '%s\\n' \"$GREETING\"" }),
-    )
-    .await;
-    assert_eq!(first_text(results.last().unwrap()).trim(), "hi");
-
-    // `cd` 在**同一条命令**里生效。
-    let results = run_tool(&shell, serde_json::json!({ "command": "cd sub && pwd" })).await;
-    let inside = first_text(results.last().unwrap()).trim().to_owned();
-    assert!(inside.ends_with("sub"), "got: {inside}");
-
-    // 下一条命令被钉回 workspace，不漂移。
-    let results = run_tool(&shell, serde_json::json!({ "command": "pwd" })).await;
-    assert_eq!(first_text(results.last().unwrap()).trim(), root);
-}
-
-#[tokio::test]
-async fn shell_reports_a_timeout_as_an_error_result() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let shell = tower_agent_tools::create_shell_tool(dir.path());
-
-    let results = run_tool(
-        &shell,
-        serde_json::json!({ "command": "sleep 5", "timeout": 0.2 }),
-    )
-    .await;
-    let last = results.last().unwrap();
-    assert!(last.is_error);
-    assert!(
-        first_text(last).contains("Command timed out after 0.2 seconds"),
-        "got: {}",
-        first_text(last)
-    );
-}
-
-/// 超时/取消时要杀掉**整个进程组**，而不只是直接子进程：
-/// 这里让子进程 fork 一个后台写文件的孙进程，只有进程组被杀掉它才会停。
-#[tokio::test]
-async fn shell_timeout_kills_the_whole_process_tree() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let ticker = dir.path().join("ticker.txt");
-    let shell = tower_agent_tools::create_shell_tool(dir.path());
-
-    let command = format!(
-        "bash -c 'while true; do echo tick >> {}; sleep 0.05; done' & sleep 30",
-        ticker.display()
-    );
-    let results = run_tool(
-        &shell,
-        serde_json::json!({ "command": command, "timeout": 0.5 }),
-    )
-    .await;
-    let last = results.last().expect("terminal result");
-    assert!(last.is_error, "timeout is an error result");
-    assert!(first_text(last).contains("Command timed out"));
-
-    // 给后台进程一点时间暴露问题，再确认它已停止写入。
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    let first = std::fs::read_to_string(&ticker).unwrap_or_default();
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-    let second = std::fs::read_to_string(&ticker).unwrap_or_default();
-    assert_eq!(
-        first, second,
-        "background writer must stop once the process group is killed"
-    );
-    assert!(
-        !first.is_empty(),
-        "the background writer did run before the kill"
-    );
-}
-
-#[tokio::test]
-async fn shell_truncates_large_output_and_reports_a_temp_file() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let shell = tower_agent_tools::create_shell_tool(dir.path());
-
-    // 3000 lines exceeds the 2000-line display limit.
-    let results = run_tool(&shell, serde_json::json!({ "command": "seq 1 3000" })).await;
-    let last = results.last().unwrap();
-    let text = first_text(last);
-    assert!(
-        text.contains("Showing lines 1001-3000 of 3000"),
-        "got: {text}"
-    );
-    assert!(text.contains("Full output:"), "got: {text}");
-    let structured = last
-        .structured_content
-        .as_ref()
-        .expect("structured content");
-    assert_eq!(structured["exit_code"], 0);
-    assert!(structured["output"].as_str().unwrap().starts_with("1\n2\n"));
-}
-
 // ---- agent 集成：把内置工具注册进 Agent 并由第一次 provider 响应触发工具调用 ----
-
 #[derive(Clone)]
 struct ScriptedStreamService {
     scripts: Arc<Vec<Vec<AssistantMessageEvent>>>,

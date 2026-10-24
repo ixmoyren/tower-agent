@@ -6,7 +6,8 @@
 //!
 //! 产出的 [`PluginRegistry`] 固定包含：
 //!
-//! - 七个内置工具插件（`read` / `shell` / …，来自 [`tower_agent_tools::builtin_plugins`]）；
+//! - 六个内置工具插件（`read` / `edit` / …，来自 [`tower_agent_tools::builtin_plugins`]）；
+//!   `shell` 由独立的动态插件 `tower-agent-plugin-shell` 提供；
 //! - 五个内置 provider 插件（Anthropic / OpenAI / OpenAI Responses / Google / DeepSeek）；
 //! - `wasmtime`（feature `sandbox-wasmtime`）：把名字与 `sandbox.wasmtime` 能力占成 `protected`；
 //! - `codemode`（feature `codemode`，需显式 [`HostPlugins::with_codemode`]）：受保护静态插件，

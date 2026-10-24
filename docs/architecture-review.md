@@ -17,7 +17,8 @@
 crates/
   ai/           provider Service / Models 路由 / 传输层中间件 / 错误与消息类型（对应 pi packages/ai）
   agent/        agent 运行时、工具边界、事件、编排循环（对应 pi packages/agent）
-  tools/        7 个内置工具实现（read/shell/edit/write/grep/find/ls）
+  tools/        6 个静态内置工具实现（read/edit/write/grep/find/ls）
+  plugin-shell/ shell 动态插件（brush + stabby cdylib）
   tower-agent-plugin/  通用插件宿主：模型 / 注册表 / 解析 / 生命周期 / 宿主 API / 权限 / 动态加载
   tower-agent-plugin-sdk/  插件能力 SDK：declare_plugin! / declare_dynamic_plugin! / HostApi
   protocol/     帧 / CBOR 子集 / RPC envelope（对应 pi packages/protocol）
@@ -38,7 +39,7 @@ examples/
 
 ### 1.3 插件体系现状
 
-- **静态插件**：`tower_agent_plugin::StaticPlugin { manifest(); install(&mut PluginContext) }`，`install` 把 `AgentTool` 登记进上下文；`tower_agent_plugin::default_registry` 为 7 个内置工具各注册一个静态插件。注册表支持能力/依赖/版本收敛/同名覆盖（静态<动态<JIT）/环检测。
+- **静态插件**：`tower_agent_plugin::StaticPlugin { manifest(); install(&mut PluginContext) }`，`install` 把 `AgentTool` 登记进上下文；六个静态内置工具各注册一个插件。注册表支持能力/依赖/版本收敛/同名覆盖（静态<动态<JIT）/环检测。
 - **生命周期/宿主 API/权限**：`Lifecycle` / `PluginState` / `InflightGuard`、`HostApi` / `PluginAccess`（`requires` 收窄 + 中介调用，目前只中介 `tool.*`）、`PermissionPolicy` / `PermissionPrompter`。
 - **动态插件（stabby）**：`tower-agent-plugin` 的 `dynamic` feature（`dep:stabby` + `dep:libloading`）；`crates/tower-agent-plugin/src/dynamic.rs` 定义 `AbiVersion` / `AbiCapability` / `AbiManifest` / `PluginVTable`，`LoadedPlugin::load/call/stop/unload`，做 SDK ABI major 校验。`tower-agent-plugin-sdk` 的 `dynamic` feature 提供 `declare_dynamic_plugin!`。
 - **热重载/JIT**：已改为 `tower-agent-monty`（早期实现是 `plugins` 的 `jit` feature + Roto，已删除）。

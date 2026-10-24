@@ -8,12 +8,13 @@ fn builtin_tools_are_assembled() {
         .tools()
         .expect("assemble tools");
     let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
-    for expected in ["read", "shell", "edit", "write", "grep", "find", "ls"] {
+    for expected in ["read", "edit", "write", "grep", "find", "ls"] {
         assert!(
             names.contains(&expected),
             "缺少内置工具 `{expected}`：{names:?}"
         );
     }
+    assert!(!names.contains(&"shell"), "shell is a dynamic plugin");
 }
 
 #[test]

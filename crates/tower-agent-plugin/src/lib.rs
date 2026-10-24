@@ -27,8 +27,8 @@ mod static_plugin;
 #[cfg(feature = "dynamic")]
 pub use dynamic::{
     AbiBuffer, AbiCapability, AbiHostCall, AbiHostResult, AbiKind, AbiManifest, AbiNode,
-    AbiToolCall, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiToolCall, ArchivedAbiToolResult,
-    ArchivedAbiValue, HostDispatch, HostVTable, LoadedPlugin, PluginVTable,
+    AbiToolCall, AbiToolDescriptor, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiToolCall,
+    ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, HostVTable, LoadedPlugin, PluginVTable,
 };
 pub use error::PluginError;
 pub use host::{HostApi, PluginAccess};
@@ -39,7 +39,7 @@ pub use layer::{
 pub use lifecycle::{InflightGuard, Lifecycle, PluginState};
 pub use model::{
     CapabilityId, CapabilityOverride, Dependency, Permission, PluginId, PluginKind, PluginManifest,
-    ProvidedCapability,
+    ProvidedCapability, ToolDescriptor,
 };
 pub use permission::{PermissionDecision, PermissionPolicy, PermissionPrompter};
 pub use registry::{Binding, PluginRegistry, Resolution, ResolvedPlugin, ShadowedPlugin};

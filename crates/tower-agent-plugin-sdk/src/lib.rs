@@ -43,8 +43,9 @@ pub use tower_agent_plugin::dynamic;
 #[cfg(feature = "dynamic")]
 pub use tower_agent_plugin::dynamic::{
     AbiBuffer, AbiCapability, AbiHostCall, AbiHostResult, AbiKind, AbiManifest, AbiNode,
-    AbiToolCall, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiHostResult, ArchivedAbiToolCall,
-    ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, HostVTable, LoadedPlugin, PluginVTable,
+    AbiToolCall, AbiToolDescriptor, AbiToolResult, AbiValue, AbiVersion, ArchivedAbiHostResult,
+    ArchivedAbiToolCall, ArchivedAbiToolResult, ArchivedAbiValue, HostDispatch, HostVTable,
+    LoadedPlugin, PluginVTable,
 };
 
 /// 导出动态插件的 `__tpa_plugin_entry`（`docs/plugins.md` 第 8.2 节）。
