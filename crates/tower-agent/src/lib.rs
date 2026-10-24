@@ -8,7 +8,7 @@
 //! - [`provider`]：provider Services 与 Models 路由；
 //! - [`tools`]：六个内置工具插件；
 //! - [`plugins`]：插件宿主（静态 / 动态 / 热重载）；`plugin-sdk` feature 打开作者 SDK；
-//!   `ui` feature 打开前端无关的 `tower-agent-ui` 会话插件。
+//!   `ui` feature 打开前端无关的 `tower-agent-plugin-ui` 会话插件。
 //!
 //! tower-native：`runtime::Agent` 实现 `core::AgentServiceExt`/`Service<AgentRequest>`，
 //! 可 `.layer()` 组合或 `.boxed_agent()` 后交给 axum/tonic 等宿主。
@@ -35,10 +35,10 @@ pub use tower_agent_plugin_rquickjs as rquickjs;
 pub use tower_agent_plugin_sdk as plugin_sdk;
 #[cfg(feature = "storage-turso")]
 pub use tower_agent_plugin_turso as turso;
+#[cfg(feature = "ui")]
+pub use tower_agent_plugin_ui as ui;
 #[cfg(feature = "protocol")]
 pub use tower_agent_protocol as protocol;
-#[cfg(feature = "ui")]
-pub use tower_agent_ui as ui;
 
 pub use tower_agent_core::{
     AfterToolResultLayer, AgentError, AgentEvent, AgentEventStream, AgentMessage, AgentRequest,

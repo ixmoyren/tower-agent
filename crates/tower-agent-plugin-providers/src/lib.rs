@@ -24,8 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use semver::Version;
-use tower_agent_plugin::StaticPlugin;
-use tower_agent_plugin_sdk::ProviderPluginRegistration;
+use tower_agent_plugin_sdk::{ProviderPluginRegistration, StaticPlugin};
 use tower_agent_provider::{
     ANTHROPIC_MESSAGES_API, BoxProviderService, CredentialDescriptor, GOOGLE_GENERATIVE_AI_API,
     OPENAI_COMPLETIONS_API, OPENAI_RESPONSES_API, ProviderBuild, ProviderConfig,

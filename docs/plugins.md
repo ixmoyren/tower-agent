@@ -4,6 +4,21 @@
 > 关联：[`design.md`](./design.md)（总体设计、Provider 分层与关键契约）。
 > 本文只描述插件体系本身的结构与规则；当前实现以 `tower-agent-plugin`、`tower-agent-plugin-sdk` 和各领域插件 crate 为准。
 
+## 0. 依赖边界
+
+依赖方向固定为：
+
+```text
+tower-agent-plugin-* 实现 → tower-agent-plugin-sdk → tower-agent-plugin
+```
+
+- `tower-agent-plugin` 是通用宿主机制，不依赖任何领域插件或 SDK；
+- `tower-agent-plugin-sdk` 是插件作者唯一直接使用的 API，负责再导出 `StaticPlugin`、`PluginContext`、`PluginRegistry` 与动态 ABI；
+- 所有 `tower-agent-plugin-*` 实现 crate 只能依赖 SDK，不得直接依赖 `tower-agent-plugin`；
+- 宿主应用（CLI、axum、门面 crate）可以同时依赖 host 与 SDK。
+
+`tower-agent-plugin-ui` 也遵循这条规则，它是普通 UI 插件实现，不是通用插件宿主。
+
 ## 1. 目标
 
 把 tower-agent 从「编译期内置能力集合」升级为「可组合、可扩展、可热插拔的能力平台」，满足：
@@ -93,7 +108,7 @@
 > **monty JIT 插件**：`ModManager` 管理一组 monty 插件，对 LLM 暴露 `jit_write` / `jit_reload` / `jit_list` / `jit_remove` / `jit_persist` / `jit_discard` 作者工具。脚本可：
 > 1. **调宿主能力**：`exec(name, args, opts)` / `tool_call(name, args)` / `log` / `state_get` / `state_set`；
 > 2. **提供工具**：安装期 `tool_register(name, function, description, parameters)` 把 Python 函数包成 `ModTool`，运行时动态注册进 `HostApi` 与 agent 工具集（`tool_unregister` 注销）；
-> 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据；agent 事件归约与命令协议统一由 `tower-agent-ui` 提供。
+> 3. **贡献 UI**：`ui_status` / `ui_panel` / `ui_clear` / `ui_tool_render` 写进前端无关的 `tower_agent_core::UiState`（状态栏片段 + 面板文本 + 工具结果渲染模板），TUI 由 `tower_agent_tui::ContributionPlugin` 渲染，web/GUI 前端消费同一份数据；agent 事件归约与命令协议统一由 `tower-agent-plugin-ui` 提供。
 >
 > 沙箱侧还提供： **实例池**（`SandboxPool`，一次运行借出、跑完归还）+ **预热**（`ModManager::warmup` / `spawn_warmup` 后台编译组件、预建实例）、 **文件系统挂载**（`ModManager::mount*` 用 `monty-fs` 的 `MountTable` 在宿主侧服务 OS 调用：`ReadOnly` / `OverlayMemory` / `ReadWrite`）与 **每-mod 权限**（`ModPermissions` 现为 `ScriptPermissions` 别名：`exec` / `fs` / `tools` / `register_tools` / `hooks` / `commands` / `ui` / `state`，在派发与 OS 处理时强制）。CLI 默认把工作目录只读挂到 `/work`。
 >

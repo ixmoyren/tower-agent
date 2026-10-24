@@ -7,7 +7,7 @@ use std::sync::{
 
 use semver::Version;
 use tower_agent_core::{AgentEvent, AgentMessage};
-use tower_agent_plugin::{
+use tower_agent_plugin_sdk::{
     CapabilityId, EventHandler, PluginContext, PluginError, PluginKind, PluginManifest,
     StaticPlugin, event_handler,
 };
@@ -176,7 +176,7 @@ impl StaticPlugin for AgentUi {
     fn manifest(&self) -> PluginManifest {
         let version =
             Version::parse(env!("CARGO_PKG_VERSION")).expect("workspace package version is semver");
-        PluginManifest::new("tower-agent-ui", version.clone(), PluginKind::Static)
+        PluginManifest::new("tower-agent-plugin-ui", version.clone(), PluginKind::Static)
             .providing(CapabilityId::new("ui", "session"), version)
     }
 
@@ -317,11 +317,11 @@ mod tests {
 
     #[test]
     fn agent_ui_is_a_static_plugin_with_an_event_reducer() {
-        use tower_agent_plugin::StaticPlugin as _;
+        use tower_agent_plugin_sdk::StaticPlugin as _;
 
         let ui = AgentUi::new("test");
         let manifest = ui.manifest();
-        assert_eq!(manifest.name, "tower-agent-ui");
+        assert_eq!(manifest.name, "tower-agent-plugin-ui");
         assert!(
             manifest
                 .provides_capability(&CapabilityId::new("ui", "session"))

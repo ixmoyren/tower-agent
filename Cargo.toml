@@ -32,7 +32,7 @@ tower-agent-plugin-providers = { path = "crates/tower-agent-plugin-providers" }
 tower-agent-plugin-tools = { path = "crates/tower-agent-plugin-tools" }
 tower-agent-plugin = { path = "crates/tower-agent-plugin" }
 tower-agent-plugin-sdk = { path = "crates/tower-agent-plugin-sdk" }
-tower-agent-ui = { path = "crates/tower-agent-ui" }
+tower-agent-plugin-ui = { path = "crates/tower-agent-plugin-ui" }
 tower-agent-tui = { path = "crates/tower-agent-tui" }
 tower-agent-protocol = { path = "crates/tower-agent-protocol" }
 tower-agent-plugin-monty = { path = "crates/tower-agent-plugin-monty" }

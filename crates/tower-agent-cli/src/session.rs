@@ -900,7 +900,7 @@ pub fn thinking_level_name(level: ModelThinkingLevel) -> &'static str {
 /// pi 的思考级别取值（帮助文案与错误提示共用）。
 pub const THINKING_LEVELS: &str = "off, minimal, low, medium, high, xhigh, max";
 
-impl tower_agent_ui::CommandHost for Session {
+impl tower_agent_plugin_ui::CommandHost for Session {
     fn new_session(&self) -> Result<(), String> {
         self.reset().map_err(|error| error.to_string())?;
         // `/new` 开一个新会话记录：换 id、清零「已落盘条数」，下一轮 sync 写新的会话。
@@ -1188,13 +1188,17 @@ pub fn write_event<W: Write>(out: &mut W, event: &AgentEvent) -> std::io::Result
         AgentEvent::AgentEnd { .. } => writeln!(out, "[agent] end"),
         AgentEvent::MessageEnd { message } => match message {
             tower_agent_runtime::AgentMessage::Message(Message::User(_)) => {
-                writeln!(out, "[user] {}", tower_agent_ui::render_message(message))
+                writeln!(
+                    out,
+                    "[user] {}",
+                    tower_agent_plugin_ui::render_message(message)
+                )
             }
             tower_agent_runtime::AgentMessage::Message(Message::Assistant(_)) => {
                 writeln!(
                     out,
                     "[assistant] {}",
-                    tower_agent_ui::render_message(message)
+                    tower_agent_plugin_ui::render_message(message)
                 )
             }
             tower_agent_runtime::AgentMessage::Message(Message::System(_)) => Ok(()),
@@ -1213,7 +1217,7 @@ pub fn write_event<W: Write>(out: &mut W, event: &AgentEvent) -> std::io::Result
             out,
             "[tool:{}] {tool_name} {}",
             if *is_error { "error" } else { "ok" },
-            tower_agent_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
+            tower_agent_plugin_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
                 Message::ToolResult(tower_agent_provider::ToolResultMessage {
                     tool_call_id: String::new(),
                     tool_name: tool_name.clone(),
@@ -1248,7 +1252,7 @@ pub async fn run_tui(
     let subscription = session.subscribe();
     let (submissions_tx, mut submissions_rx) = mpsc::unbounded_channel::<String>();
     // 斜杠命令（`/new`、`/model`…）在 TUI 里执行，通过这个 trait 回调到会话。
-    let host: Arc<dyn tower_agent_ui::CommandHost> = session.clone();
+    let host: Arc<dyn tower_agent_plugin_ui::CommandHost> = session.clone();
 
     let driver_session = Arc::clone(session);
     let driver = tokio::spawn(async move {
@@ -1323,11 +1327,11 @@ mod tests {
     use tokio::sync::Semaphore;
     use tower::Service;
     use tower_agent_plugin_providers::provider::faux::{FauxProvider, model};
+    use tower_agent_plugin_ui::CommandHost as _;
     use tower_agent_provider::{
         AssistantEventStream, AssistantMessage, AssistantMessageEvent, BoxStreamService,
         ContentBlock, DoneReason, PiError, StopReason, StreamRequest, TextContent, Usage,
     };
-    use tower_agent_ui::CommandHost as _;
 
     use super::{
         ConfigScope, DynamicPluginLoad, ScriptLanguage, Session, parse_thinking_level, run_print,
@@ -1401,7 +1405,7 @@ mod tests {
             })
             .unwrap_or_else(|| panic!("last `{tool_name}` tool result"));
         (
-            tower_agent_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
+            tower_agent_plugin_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
                 tower_agent_provider::Message::ToolResult(result.clone()),
             )),
             result.is_error,
@@ -1546,7 +1550,7 @@ mod tests {
             .find_map(|message| match message {
                 tower_agent_runtime::AgentMessage::Message(
                     tower_agent_provider::Message::Assistant(assistant),
-                ) => Some(tower_agent_ui::render_message(
+                ) => Some(tower_agent_plugin_ui::render_message(
                     &tower_agent_runtime::AgentMessage::Message(
                         tower_agent_provider::Message::Assistant(assistant.clone()),
                     ),
@@ -1612,7 +1616,7 @@ mod tests {
         assert_eq!(tool_result.tool_name, "read");
         assert!(!tool_result.is_error);
         assert_eq!(
-            tower_agent_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
+            tower_agent_plugin_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
                 tower_agent_provider::Message::ToolResult(tool_result.clone())
             )),
             "工具读到的内容\n"
@@ -1782,7 +1786,7 @@ on("tool_call", "block");
             .expect("a tool result message");
         assert!(result.is_error, "unknown tool produces an error result");
         assert!(
-            tower_agent_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
+            tower_agent_plugin_ui::render_message(&tower_agent_runtime::AgentMessage::Message(
                 tower_agent_provider::Message::ToolResult(result)
             ))
             .contains("Tool nope not found")

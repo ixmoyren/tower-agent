@@ -31,7 +31,7 @@ use ratatui::{
     },
 };
 use tokio::sync::mpsc;
-use tower_agent_ui::{AgentEvent, AgentUi, CommandHost, Subscription, UiAction};
+use tower_agent_plugin_ui::{AgentEvent, AgentUi, CommandHost, Subscription, UiAction};
 
 use crate::{app::Tui, editor::EditorAction, plugin::UiPlugin};
 
@@ -231,7 +231,7 @@ async fn run_loop(
                         EditorAction::Quit => return Ok(()),
                         EditorAction::Submit(text) => {
                             match tui.handle_text(&text) {
-                                // 斜杠命令由前端无关的 tower-agent-ui 消费。
+                                // 斜杠命令由前端无关的 tower-agent-plugin-ui 消费。
                                 UiAction::Handled => {}
                                 // 普通输入交给调用方驱动 agent；接收端没了就忽略。
                                 UiAction::Submit(text) => {

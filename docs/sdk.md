@@ -45,6 +45,10 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 
 结论（`codemode.md` Q7 已定）： **扩展点作者 API 直接加在 `tower-agent-plugin-sdk` 上**，按模块分层；`tower-agent-plugin` 仍是背后的注册表与生命周期机制。
 
+依赖方向固定为 `plugin-* 实现 → plugin-sdk → plugin`。所有插件实现
+（tools / providers / ui / shell / turso / rquickjs / monty）只能依赖 SDK；
+SDK 统一再导出宿主 API 和动态 ABI，避免插件直接耦合通用宿主 crate。
+
 `tower-agent-plugin-sdk` 的目标形态（模块划分，不是新 crate）：
 
 - `tool`：工具注册（含 pi 的 `exposure` / `namespace` / `annotations` / `outputSchema`）

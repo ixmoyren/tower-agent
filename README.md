@@ -39,7 +39,7 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 - **六个内置工具**：`read` / `edit` / `write` / `grep` / `find` / `ls`，以及独立的动态
   `shell` 插件；六个静态工具本身都是可组合的 tower `Layer`。`shell` 插件内嵌
   [brush](https://github.com/reubeno/brush)，通过动态插件 ABI 提供 `tool.shell`。
-- **前后端解耦**：`tower-agent-ui` 提供与渲染无关的状态归约、命令和宿主接口；
+- **前后端解耦**：`tower-agent-plugin-ui` 提供与渲染无关的状态归约、命令和宿主接口；
   `tower-agent-tui` 只负责 ratatui/终端，GUI 与 axum 服务可以直接消费 UI 后端。
 - **双响应形态**：非流式 `AgentResponse`（流式事件的 fold）与流式 `AgentEventStream`
   （`BoxStream<AgentEvent>`），可直接对接 TUI、SSE 或其他事件消费者。
@@ -58,19 +58,19 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | `tower-agent-plugin-providers` | **具体 Provider 实现与插件集合**：Anthropic/OpenAI/Google、兼容配置与 sidecar，通过 SDK 注册 Provider 能力 |
 | `tower-agent-plugin-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
 | `tower-agent-plugin-shell` | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                    |
-| `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；不依赖 Provider 领域 |
-| `tower-agent-plugin-sdk` | **插件能力 SDK**：Host/ABI、Provider、storage，以及可选 `codemode`、`jit`、`wasmtime` 能力 |
+| `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；只由 SDK 直接依赖 |
+| `tower-agent-plugin-sdk` | **插件能力 SDK**：依赖 plugin 并再导出宿主 API；所有 `plugin-*` 实现只依赖 SDK |
 | `tower-agent-plugin-turso` | **默认存储插件**：实现 SDK storage 契约的嵌入式 Turso 后端 |
-| `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
+| `tower-agent-plugin-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
 | `tower-agent-plugin-rquickjs` | **rquickjs 解释器插件**：JavaScript 的 codemode 与 JIT 实现 |
 | `tower-agent-plugin-monty`      | **monty 解释器插件**：Python 子集的 codemode 与 JIT 实现                       |
 | `tower-agent-protocol`   | **协议**：帧、严格 CBOR 子集、RPC 信封                                                                |
-| `tower-agent-tui`        | **终端渲染前端**：消费 `tower-agent-ui`，负责 ratatui 页面、编辑器与终端事件循环                       |
+| `tower-agent-tui`        | **终端渲染前端**：消费 `tower-agent-plugin-ui`，负责 ratatui 页面、编辑器与终端事件循环                       |
 | `tower-agent-cli`        | **CLI 宿主**：二进制名 `tower-agent`，以 `Service` / `Layer` 组合装配会话                             |
 
 **分层原则**：`tower-agent-core` 只放契约与类型，**不依赖** runtime / plugin / 前端；
 编排循环、队列、事件总线在 `runtime`；`tools` 提供工具实现与插件声明，`plugin` 提供注册表、
-解析、生命周期与扩展机制；`tower-agent-ui` 承载前端无关的会话状态和命令，
+解析、生命周期与扩展机制；`tower-agent-plugin-ui` 承载前端无关的会话状态和命令，
 `tower-agent-tui` 只做 ratatui 渲染。门面 crate 不依赖终端前端。
 
 ### 三种插件形态

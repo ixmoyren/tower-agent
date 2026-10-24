@@ -5245,10 +5245,10 @@ dependencies = [
  "tower-agent-plugin-sdk",
  "tower-agent-plugin-tools",
  "tower-agent-plugin-turso",
+ "tower-agent-plugin-ui",
  "tower-agent-protocol",
  "tower-agent-provider",
  "tower-agent-runtime",
- "tower-agent-ui",
 ]
 
 [[package]]
@@ -5273,10 +5273,10 @@ dependencies = [
  "tower-agent-plugin-rquickjs",
  "tower-agent-plugin-sdk",
  "tower-agent-plugin-turso",
+ "tower-agent-plugin-ui",
  "tower-agent-provider",
  "tower-agent-runtime",
  "tower-agent-tui",
- "tower-agent-ui",
 ]
 
 [[package]]
@@ -5341,12 +5341,10 @@ dependencies = [
  "bytes",
  "futures-util",
  "semver",
- "serde",
  "serde_json",
  "tokio",
  "tokio-util",
  "tower",
- "tower-agent-plugin",
  "tower-agent-plugin-sdk",
  "tower-agent-provider",
 ]
@@ -5431,7 +5429,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower",
- "tower-agent-plugin",
+ "tower-agent-plugin-sdk",
  "tower-agent-provider",
  "tower-agent-runtime",
  "unicode-normalization",
@@ -5456,6 +5454,19 @@ dependencies = [
  "unicode-segmentation",
  "waken_snowball",
  "whichlang",
+]
+
+[[package]]
+name = "tower-agent-plugin-ui"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "serde_json",
+ "tower-agent-core",
+ "tower-agent-plugin-sdk",
+ "tower-agent-provider",
+ "tower-agent-runtime",
 ]
 
 [[package]]
@@ -5508,23 +5519,10 @@ dependencies = [
  "ratatui-textarea",
  "serde_json",
  "tokio",
+ "tower-agent-plugin-ui",
  "tower-agent-provider",
  "tower-agent-runtime",
- "tower-agent-ui",
  "unicode-width 0.2.2",
-]
-
-[[package]]
-name = "tower-agent-ui"
-version = "0.1.0"
-dependencies = [
- "semver",
- "serde",
- "serde_json",
- "tower-agent-core",
- "tower-agent-plugin",
- "tower-agent-provider",
- "tower-agent-runtime",
 ]
 
 [[package]]

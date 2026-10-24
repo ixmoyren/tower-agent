@@ -1,5 +1,5 @@
 [package]
-name = "tower-agent-ui"
+name = "tower-agent-plugin-ui"
 description = "Frontend-neutral tower-agent UI session plugin and view model."
 version.workspace = true
 edition.workspace = true
@@ -12,7 +12,7 @@ workspace = true
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tower-agent-core.workspace = true
-tower-agent-plugin.workspace = true
+tower-agent-plugin-sdk.workspace = true
 tower-agent-provider.workspace = true
 tower-agent-runtime.workspace = true
 

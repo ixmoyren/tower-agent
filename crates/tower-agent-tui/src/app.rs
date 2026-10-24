@@ -4,7 +4,7 @@
 //! 两边走同一套渲染代码。
 
 use ratatui::{Terminal, backend::Backend, termina::event::Event};
-use tower_agent_ui::{AgentEvent, AgentUi, UiAction, UiModel};
+use tower_agent_plugin_ui::{AgentEvent, AgentUi, UiAction, UiModel};
 
 use crate::{
     editor::{Editor, EditorAction},

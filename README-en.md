@@ -51,7 +51,7 @@ used directly as a library.
   Each tool is itself a composable tower `Layer` (`shell` embeds
   [brush](https://github.com/reubeno/brush), a bash-compatible Rust shell, and interprets
   commands in-process for consistent cross-platform behavior).
-- **Frontend separation**: `tower-agent-ui` owns rendering-independent state reduction,
+- **Frontend separation**: `tower-agent-plugin-ui` owns rendering-independent state reduction,
   commands, and host interfaces; `tower-agent-tui` handles only ratatui and terminal
   integration. GUIs and axum services can consume the UI backend directly.
 - **Two response shapes**: non-streaming `AgentResponse` (a fold of the stream) and the
@@ -72,9 +72,9 @@ dependencies are declared once through workspace dependencies.
 | `tower-agent-provider`   | **Provider protocol**: messages/models/request schemas, stream services, `Models`, HTTP/SSE, plugin contracts                      |
 | `tower-agent-plugin-providers` | **Concrete provider implementations**: Anthropic/OpenAI/Google, compatible configs, and sidecars, registered through the SDK  |
 | `tower-agent-plugin-tools`      | **Tool plugin collection**: read / edit / write / grep / find / ls, each as an independent static plugin                         |
-| `tower-agent-plugin`    | **General plugin host**: registry, resolution, lifecycle, HostApi, permissions, and extension slots; Provider-agnostic              |
-| `tower-agent-plugin-sdk` | **Plugin capability SDK**: host/ABI, Provider, storage, and optional codemode, JIT and Wasmtime capabilities |
-| `tower-agent-ui`         | **Frontend-neutral UI backend**: event reduction, session view, slash commands, static UI plugins                                  |
+| `tower-agent-plugin`    | **General plugin host**: registry, resolution, lifecycle, HostApi, permissions, and extension slots; directly used by the SDK |
+| `tower-agent-plugin-sdk` | **Plugin capability SDK**: depends on the plugin host and re-exports its APIs; every `plugin-*` implementation depends only on the SDK |
+| `tower-agent-plugin-ui`         | **Frontend-neutral UI backend**: event reduction, session view, slash commands, static UI plugins                                  |
 | `tower-agent-plugin-rquickjs` | **rquickjs interpreter plugin**: JavaScript implementations of codemode and JIT |
 | `tower-agent-plugin-monty`      | **monty interpreter plugin**: Python-subset implementations of codemode and JIT                               |
 | `tower-agent-protocol`   | **Protocol**: framing, strict CBOR subset, RPC envelopes                                                                           |
@@ -84,7 +84,7 @@ dependencies are declared once through workspace dependencies.
 **Layering rule**: `tower-agent-core` holds only contracts and types and does **not**
 depend on runtime / plugin / frontends; the loop, queues, and event bus live in `runtime`;
 tools provide implementations and plugin declarations, while `plugin` owns registry,
-resolution, lifecycle, and extension mechanisms. `tower-agent-ui` is rendering-independent,
+resolution, lifecycle, and extension mechanisms. `tower-agent-plugin-ui` is rendering-independent,
 and `tower-agent-tui` handles only ratatui and terminal integration.
 
 ### The three plugin forms

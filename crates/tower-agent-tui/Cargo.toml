@@ -1,6 +1,6 @@
 [package]
 name = "tower-agent-tui"
-description = "tower-agent terminal renderer: ratatui pages and terminal input over tower-agent-ui."
+description = "tower-agent terminal renderer: ratatui pages and terminal input over tower-agent-plugin-ui."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,7 @@ ratatui = { git = "https://github.com/ratatui/ratatui.git", default-features = f
 ratatui-textarea = { git = "https://github.com/ixmoyren/ratatui-textarea", default-features = false, features = ["termina", "search"] }
 unicode-width = "0.2"
 tokio = { workspace = true }
-tower-agent-ui.workspace = true
+tower-agent-plugin-ui.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -1,7 +1,7 @@
 //! UI 插件扩展点。
 //!
 //! [`UiPlugin`] 让插件在不改动内置渲染的前提下贡献 UI：状态栏片段、浮层（overlay）
-//! 以及某个工具结果的定制渲染。前端无关的会话状态和命令由 `tower-agent-ui`
+//! 以及某个工具结果的定制渲染。前端无关的会话状态和命令由 `tower-agent-plugin-ui`
 //! 提供，`UiPlugin` 只决定终端页面怎么显示。
 //!
 //! 后端固定为 termina（不使用 crossterm）；插件只依赖 ratatui 的渲染类型
@@ -14,7 +14,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph, Widget},
 };
-use tower_agent_ui::{Panel, PanelAnchor, UiState, render_template};
+use tower_agent_plugin_ui::{Panel, PanelAnchor, UiState, render_template};
 
 pub use crate::model::ToolResultView;
 
