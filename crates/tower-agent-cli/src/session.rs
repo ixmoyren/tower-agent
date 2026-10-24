@@ -26,7 +26,7 @@ use tower_agent_monty::ModManager;
 use tower_agent_plugin::PermissionPolicy;
 #[cfg(feature = "codemode-js")]
 use tower_agent_plugin::StaticPlugin as _;
-use tower_agent_storage::{ConfigScope, ProviderCredential};
+use tower_agent_plugin_sdk::storage::{ConfigScope, ProviderCredential};
 
 use crate::store::CliStore;
 use tower_agent_provider::{
@@ -1981,7 +1981,7 @@ on("tool_call", "block");
     #[tokio::test]
     async fn command_host_persists_config_to_store() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let storage = tower_agent_turso::TursoStorage::in_memory()
+        let storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("open in-memory");
         let store = Arc::new(crate::store::CliStore::from_storage(
@@ -2029,7 +2029,7 @@ on("tool_call", "block");
     #[tokio::test]
     async fn codemode_scripts_survive_restart_from_turso() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let storage = tower_agent_turso::TursoStorage::in_memory()
+        let storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("open in-memory");
         let store = Arc::new(crate::store::CliStore::from_storage(
@@ -2108,7 +2108,7 @@ def exported_echo(args):
     return \"exported:\" + args[\"text\"]
 ";
 
-        let original_storage = tower_agent_turso::TursoStorage::in_memory()
+        let original_storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("open in-memory");
         let original = Arc::new(crate::store::CliStore::from_storage(
@@ -2154,7 +2154,7 @@ def exported_echo(args):
         drop(writer_session);
         drop(original);
 
-        let restored_storage = tower_agent_turso::TursoStorage::in_memory()
+        let restored_storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("open fresh in-memory");
         let restored = Arc::new(crate::store::CliStore::from_storage(
@@ -2199,7 +2199,7 @@ def exported_echo(args):
     #[tokio::test]
     async fn transcript_persists_across_turns_and_resumes() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let storage = tower_agent_turso::TursoStorage::in_memory()
+        let storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("open in-memory");
         let store = Arc::new(crate::store::CliStore::from_storage(
@@ -2283,7 +2283,7 @@ def exported_echo(args):
     #[tokio::test]
     async fn transcript_persists_the_active_compaction() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let storage = tower_agent_turso::TursoStorage::in_memory()
+        let storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("open in-memory");
         let store = Arc::new(crate::store::CliStore::from_storage(

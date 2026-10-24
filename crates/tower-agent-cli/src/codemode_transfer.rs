@@ -12,7 +12,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_agent_codemode_core::{ScriptLanguage, ScriptPermissions};
-use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore};
+use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore};
 
 const FORMAT_VERSION: u32 = 1;
 const MAGIC_LINE: &str = "--- tower-agent-codemode v1";
@@ -334,7 +334,7 @@ mod tests {
 
     #[tokio::test]
     async fn import_overwrites_same_scope_and_name() {
-        let storage = tower_agent_turso::TursoStorage::in_memory()
+        let storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("storage");
         let store = std::sync::Arc::new(crate::store::CliStore::from_storage(
@@ -374,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn export_prunes_only_owned_stale_script_files() {
-        let storage = tower_agent_turso::TursoStorage::in_memory()
+        let storage = tower_agent_plugin_turso::TursoStorage::in_memory()
             .await
             .expect("storage");
         let store = std::sync::Arc::new(crate::store::CliStore::from_storage(

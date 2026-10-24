@@ -1,5 +1,5 @@
 [toolchain]
-# Turso（默认存储后端 `tower-agent-turso`）依赖 `allocator_api` 的旧行为：
+# Turso（默认存储插件 `tower-agent-plugin-turso`）依赖 `allocator_api` 的旧行为：
 # 在把 `allocator_api` 稳定化之后的 nightly 上，`turso_core` 的两条编译路径
 # 都会失败。tower-agent 自身没有用到 nightly 特性，因此固定在 stable 上。
 # 注意：等 stable 也稳定化 `allocator_api` 后，需要把版本钉死在仍可用的那一版。

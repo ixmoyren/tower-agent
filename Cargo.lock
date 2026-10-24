@@ -5243,12 +5243,12 @@ dependencies = [
  "tower-agent-monty",
  "tower-agent-plugin",
  "tower-agent-plugin-sdk",
+ "tower-agent-plugin-turso",
  "tower-agent-protocol",
  "tower-agent-provider",
  "tower-agent-provider-builtin",
  "tower-agent-runtime",
  "tower-agent-tools",
- "tower-agent-turso",
  "tower-agent-ui",
  "tower-agent-wasmtime",
 ]
@@ -5272,12 +5272,11 @@ dependencies = [
  "tower-agent-monty",
  "tower-agent-plugin",
  "tower-agent-plugin-sdk",
+ "tower-agent-plugin-turso",
  "tower-agent-provider",
  "tower-agent-provider-builtin",
  "tower-agent-runtime",
- "tower-agent-storage",
  "tower-agent-tui",
- "tower-agent-turso",
  "tower-agent-ui",
 ]
 
@@ -5352,9 +5351,9 @@ dependencies = [
  "tower-agent-codemode-core",
  "tower-agent-core",
  "tower-agent-plugin",
+ "tower-agent-plugin-sdk",
  "tower-agent-provider",
  "tower-agent-runtime",
- "tower-agent-storage",
  "tower-agent-wasmtime",
  "wasmtime",
 ]
@@ -5386,8 +5385,10 @@ dependencies = [
  "serde",
  "serde_json",
  "stabby",
+ "thiserror 2.0.21",
  "tokio",
  "tower",
+ "tower-agent-core",
  "tower-agent-plugin",
  "tower-agent-provider",
  "tower-agent-runtime",
@@ -5410,6 +5411,27 @@ dependencies = [
  "tower-agent-provider",
  "tower-agent-runtime",
  "tower-agent-tools",
+]
+
+[[package]]
+name = "tower-agent-plugin-turso"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "jieba-rs",
+ "semver",
+ "serde",
+ "serde_json",
+ "stop-words",
+ "tempfile",
+ "tokio",
+ "tower-agent-core",
+ "tower-agent-plugin-sdk",
+ "tower-agent-provider",
+ "turso",
+ "unicode-segmentation",
+ "waken_snowball",
+ "whichlang",
 ]
 
 [[package]]
@@ -5472,19 +5494,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tower-agent-storage"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "semver",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tower-agent-core",
- "tower-agent-plugin",
-]
-
-[[package]]
 name = "tower-agent-tools"
 version = "0.1.0"
 dependencies = [
@@ -5519,27 +5528,6 @@ dependencies = [
  "tower-agent-runtime",
  "tower-agent-ui",
  "unicode-width 0.2.2",
-]
-
-[[package]]
-name = "tower-agent-turso"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "jieba-rs",
- "semver",
- "serde",
- "serde_json",
- "stop-words",
- "tempfile",
- "tokio",
- "tower-agent-core",
- "tower-agent-provider",
- "tower-agent-storage",
- "turso",
- "unicode-segmentation",
- "waken_snowball",
- "whichlang",
 ]
 
 [[package]]

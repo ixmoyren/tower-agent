@@ -55,6 +55,7 @@ pi 的扩展点是 `ExtensionAPI`（`pi.registerTool()` / `pi.on(...)` / `ctx.ui
 - `session`：发消息、追加条目、会话控制
 - `host`：`HostApi` / 能力调用（ **已有**，保留）
 - `packaging`：manifest 宏、stabby 动态入口、动态工具描述与 ABI 类型（ **已有**，保留）
+- `storage`（feature）：配置、凭据、会话、历史、记忆与 codemode 脚本的持久化契约；默认关闭，由存储插件和需要持久化能力的宿主启用。
 
 也就是说：plugin-sdk 从"只有打包 + HostApi"扩成"打包 + HostApi + 扩展点"。好处是脚本侧（codemode host function）与 Rust 侧天然同一套定义，不再有第三个 crate。
 

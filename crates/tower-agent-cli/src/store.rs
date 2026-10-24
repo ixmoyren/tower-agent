@@ -1,6 +1,7 @@
 //! CLI 配置的持久化：把 pi 的 `auth.json`（provider 凭据）与 `settings.json`
-//! （默认 provider / 默认模型 / 默认思考级别）落到 [`tower_agent_storage`]，
-//! 默认后端是 [`tower_agent_turso`]（`~/.local/share/tower-agent/storage.db`）。
+//! （默认 provider / 默认模型 / 默认思考级别）落到
+//! [`tower_agent_plugin_sdk::storage`]，默认插件后端是
+//! [`tower_agent_plugin_turso`]（`~/.local/share/tower-agent/storage.db`）。
 //!
 //! 对齐 pi 的两份文件：
 //!
@@ -25,12 +26,12 @@ use serde_json::Value;
 use tokio::runtime::{Handle, Runtime};
 use tokio::task::JoinHandle;
 use tower_agent_core::AgentMessage;
-use tower_agent_provider::{Message, UserContent};
-use tower_agent_storage::{
+use tower_agent_plugin_sdk::storage::{
     ConfigScope, ConfigStore, HistoryStore, ProviderCredential, ProviderStore, ScriptRecord,
     ScriptStore, SessionRecord, SessionStore, StorageError, StorageFuture,
 };
-use tower_agent_turso::TursoStorage;
+use tower_agent_plugin_turso::TursoStorage;
+use tower_agent_provider::{Message, UserContent};
 
 /// pi `settings.json` 的 `defaultProvider`。
 pub const DEFAULT_PROVIDER: &str = "defaultProvider";
@@ -159,14 +160,14 @@ impl CliStore {
 
     /// 读某 key 的有效值（项目级覆盖用户级）。
     pub async fn resolve_config(&self, project: Option<&str>, key: &str) -> Option<Value> {
-        tower_agent_storage::resolve_config(&*self.storage, project, key)
+        tower_agent_plugin_sdk::storage::resolve_config(&*self.storage, project, key)
             .await
             .unwrap_or(None)
     }
 
     /// 列出「项目覆盖用户」后的有效配置（按 key 排序）。
     pub async fn effective_config(&self, project: Option<&str>) -> Vec<(String, Value)> {
-        tower_agent_storage::effective_config(&*self.storage, project)
+        tower_agent_plugin_sdk::storage::effective_config(&*self.storage, project)
             .await
             .unwrap_or_default()
     }

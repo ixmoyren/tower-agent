@@ -44,7 +44,7 @@ pub use tool::{ModTool, ToolSpec};
 pub use tower_agent_codemode_core::{
     Capability, CapabilityError, CapabilitySurface, ScriptLanguage, ScriptPermissions,
 };
-pub use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore};
+pub use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore};
 
 #[cfg(test)]
 mod tests {
@@ -60,7 +60,7 @@ mod tests {
         CapabilityId, Permission, PermissionDecision, PermissionPolicy, PermissionPrompter,
         PluginRegistry,
     };
-    use tower_agent_storage::{ScriptRecord, ScriptStore, StorageFuture};
+    use tower_agent_plugin_sdk::storage::{ScriptRecord, ScriptStore, StorageFuture};
 
     use super::*;
     use crate::sandbox::SandboxPool;

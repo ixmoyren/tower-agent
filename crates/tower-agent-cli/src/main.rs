@@ -37,7 +37,7 @@ use std::{
     sync::Arc,
 };
 use tower_agent_codemode_core::{EngineSelection, ScriptLanguage};
-use tower_agent_storage::ConfigScope;
+use tower_agent_plugin_sdk::storage::ConfigScope;
 
 fn main() -> ExitCode {
     let args = match parse(std::env::args().skip(1)) {
@@ -77,7 +77,7 @@ fn main() -> ExitCode {
         return run_codemode_transfer_command(&args, &cwd);
     }
 
-    // 配置查看 / 修改（`--config-*`）：配置一律走 `tower-agent-storage`，CLI 只是消费端。
+    // 配置查看 / 修改（`--config-*`）：配置一律走 SDK 的 storage feature，CLI 只是消费端。
     if args.config_list
         || args.config_get.is_some()
         || args.config_set.is_some()
@@ -428,7 +428,7 @@ fn clear_session(name: &str) -> ExitCode {
 
 /// `--config-get` / `--config-set` / `--config-unset` / `--config-list`：配置查看与修改。
 ///
-/// 配置一律经 `tower-agent-storage` 读写（不写 JSON、不走别的路子）；作用域由
+/// 配置一律经 `tower-agent-plugin-sdk/storage` 读写（不写 JSON、不走别的路子）；作用域由
 /// `--config-scope` 决定。CLI 只是消费端，axum / webui 走同一套 storage 接口。
 fn run_config_command(args: &CliArgs, cwd: &Path) -> ExitCode {
     let runtime = match runtime() {

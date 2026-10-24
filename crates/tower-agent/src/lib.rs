@@ -26,12 +26,12 @@ pub mod assembly;
 pub use tower_agent_codemode as codemode;
 #[cfg(feature = "codemode-python")]
 pub use tower_agent_monty as monty;
-#[cfg(feature = "plugin-sdk")]
+#[cfg(any(feature = "plugin-sdk", feature = "storage-turso"))]
 pub use tower_agent_plugin_sdk as plugin_sdk;
+#[cfg(feature = "storage-turso")]
+pub use tower_agent_plugin_turso as turso;
 #[cfg(feature = "protocol")]
 pub use tower_agent_protocol as protocol;
-#[cfg(feature = "storage-turso")]
-pub use tower_agent_turso as turso;
 #[cfg(feature = "ui")]
 pub use tower_agent_ui as ui;
 

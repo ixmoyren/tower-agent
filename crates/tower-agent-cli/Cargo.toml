@@ -31,7 +31,7 @@ tower-agent-core = { workspace = true }
 tower-agent-runtime = { workspace = true }
 tower-agent-provider = { workspace = true }
 tower-agent-plugin = { workspace = true }
-tower-agent-plugin-sdk = { workspace = true, features = ["dynamic", "provider"] }
+tower-agent-plugin-sdk = { workspace = true, features = ["dynamic", "provider", "storage"] }
 tower-agent-tui = { workspace = true }
 tower-agent-monty = { workspace = true, optional = true }
 tower-agent-codemode = { workspace = true, optional = true }
@@ -41,8 +41,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tower = { workspace = true }
-tower-agent-storage.workspace = true
-tower-agent-turso.workspace = true
+tower-agent-plugin-turso.workspace = true
 tower-agent-codemode-core.workspace = true
 tower-agent-ui.workspace = true
 tower-agent = { workspace = true, default-features = false }

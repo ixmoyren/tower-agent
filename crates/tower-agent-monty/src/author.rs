@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower_agent_codemode_core::ScriptLanguage;
 use tower_agent_core::{AgentTool, AgentToolResult, ToolRegistration};
-use tower_agent_storage::ConfigScope;
+use tower_agent_plugin_sdk::storage::ConfigScope;
 
 use crate::manager::{ModManager, ModPermissions, ModSummary, ScriptSummary, ScriptWriteOptions};
 

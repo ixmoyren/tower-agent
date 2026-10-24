@@ -34,8 +34,8 @@ tower-agent/                 （facade：re-export core + runtime + provider + t
   tower-agent-codemode/      JavaScript wasm 宿主与命令层
   tower-agent-monty/         monty/Python 沙箱与 JIT 热重载后端
   tower-agent-wasmtime/      通用 Wasmtime 组件、WASI、资源限制与实例池
-  tower-agent-storage/       配置、凭据、会话、历史、记忆与脚本存储契约
-  tower-agent-turso/         默认嵌入式存储后端
+  tower-agent-plugin-sdk/    插件 SDK；storage feature 提供配置、凭据、会话、历史、记忆与脚本契约
+  tower-agent-plugin-turso/  默认嵌入式存储插件
   tower-agent-ui/            前端无关 UI 会话插件（事件归约 / 命令 / 可序列化视图）
   tower-agent-tui/           终端前端（实现 UiPlugin）
   tower-agent-cli/           CLI 宿主（Service/Layer 组合）

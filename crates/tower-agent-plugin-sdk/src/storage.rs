@@ -1,6 +1,8 @@
-//! 存储抽象：把「配置 / provider 凭据 / 会话 / 历史 / 记忆 / 脚本」抽成宿主无关的接口。
+//! Storage contracts exposed by the plugin SDK's optional `storage` feature.
 //!
-//! 这是存储插件的**公共基础**：`tower-agent-turso` 这类静态插件实现这些 trait；
+//! 把「配置 / provider 凭据 / 会话 / 历史 / 记忆 / 脚本」抽成宿主无关的接口。
+//!
+//! 这是存储插件的**公共基础**：`tower-agent-plugin-turso` 这类静态插件实现这些 trait；
 //! 未来同名动态插件 / JIT 插件只要实现同一套接口就能顶替它——覆盖走插件注册表的同名规则，
 //! 因此 [`StoragePlugin`] **刻意不标 `protected`**：默认实现必须可被替换。
 //!
@@ -142,8 +144,8 @@ pub async fn resolve_config(
 ) -> StorageResult<Option<Value>> {
     if let Some(project) = project
         && let Some(value) = store
-        .get_config(&ConfigScope::Project(project.to_owned()), key)
-        .await?
+            .get_config(&ConfigScope::Project(project.to_owned()), key)
+            .await?
     {
         return Ok(Some(value));
     }
@@ -336,13 +338,14 @@ pub trait MemoryStore: Send + Sync + 'static {
 ///
 /// 宿主用 `Arc<dyn Storage>` 拿到一个后端；具体实现（Turso / 未来别的）只需实现这六个。
 pub trait Storage:
-ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
-{}
+    ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
+{
+}
 
-impl<T> Storage for T
-where
-    T: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore,
-{}
+impl<T> Storage for T where
+    T: ConfigStore + ProviderStore + SessionStore + HistoryStore + MemoryStore + ScriptStore
+{
+}
 
 /// 把任意 [`Storage`] 后端包装成**静态存储插件**。
 ///

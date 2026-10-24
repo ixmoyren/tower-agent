@@ -1,6 +1,6 @@
 //! tower-agent 的**默认存储后端**：内嵌 [Turso]（Rust 重写的 SQLite 兼容引擎）。
 //!
-//! 实现 [`tower_agent_storage`] 的六个子接口（配置 / 凭据 / 会话 / 历史 /
+//! 实现 [`tower_agent_plugin_sdk::storage`] 的六个子接口（配置 / 凭据 / 会话 / 历史 /
 //! 记忆 / 脚本），并把它包成可被同名动态插件顶替的静态插件。
 //!
 //! # 为什么不是 SurrealDB
@@ -49,7 +49,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as Json;
 use tokio::sync::{mpsc, oneshot};
 use tower_agent_core::AgentMessage;
-use tower_agent_storage::{
+use tower_agent_plugin_sdk::storage::{
     ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
     ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionStore, StorageError,
     StorageFuture, StoragePlugin, StorageResult,

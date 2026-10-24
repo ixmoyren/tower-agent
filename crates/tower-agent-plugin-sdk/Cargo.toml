@@ -1,6 +1,6 @@
 [package]
 name = "tower-agent-plugin-sdk"
-description = "tower-agent plugin capability SDK: plugin macros, HostApi, tools, and optional Provider support."
+description = "tower-agent plugin SDK: plugin macros, HostApi, tools, Provider, and optional storage contracts."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -21,6 +21,8 @@ tower-agent-provider = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
+tower-agent-core = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -31,6 +33,7 @@ provider = [
     "dep:tokio",
     "dep:tower",
 ]
+storage = ["dep:tower-agent-core", "dep:futures-util", "dep:thiserror"]
 
 [dev-dependencies]
 futures-util.workspace = true

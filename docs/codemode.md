@@ -163,7 +163,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 
 | 路线                         | 真源在哪                                 | 作者怎么改                             | 人类可读 / git      | 多前端共享                            |
 |------------------------------|------------------------------------------|----------------------------------------|---------------------|---------------------------------------|
-| (a) 每脚本一条 storage 记录  | SQLite 行（新增一个 `ScriptStore`）      | 走工具 / API（`script_write`）         | ❌ 要导出才能看     | ✅ 现成（`tower-agent-storage` 抽象） |
+| (a) 每脚本一条 storage 记录  | SQLite 行（新增一个 `ScriptStore`）      | 走工具 / API（`script_write`）         | ❌ 要导出才能看     | ✅ 现成（`tower-agent-plugin-sdk/storage`） |
 | (b) 每脚本一个文件           | `<config>/tower-agent/codemode/*.py\|js` | 编辑器 / `script_write` 都行           | ✅ 天然             | ⚠️ 每个前端都要知道路径约定 + 文件锁  |
 | (c) storage 为主 + 导出/导入 | SQLite 行为真源，文件是投影              | 工具 / API 写库；人类改文件后 `import` | ✅（显式导出/导入） | ✅                                    |
 
@@ -174,7 +174,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 
 与既有决策的张力：
 
-- 前面已经定过"**配置一律走 `tower-agent-storage`，不能走别的路子**"（CLI/axum/webui 共用同一套存储抽象）。脚本更接近"用户资产"而不是"运行时产物"，按同一条原则应该进 storage。
+- 前面已经定过"**配置一律走 SDK 的 `storage` feature，不能走别的路子**"（CLI/axum/webui 共用同一套存储抽象）。脚本更接近"用户资产"而不是"运行时产物"，按同一条原则应该进 storage。
 - Python codemode 脚本已迁到 `ScriptStore`：`codemode_write` 默认写当前项目作用域，`scope=user` 可写用户级；启动时项目同名记录覆盖用户记录。
 - 无论哪条， **脚本元数据（语言、权限、启用状态、源码哈希、最近运行）都应该进 storage**——它是权限矩阵与热重载校验的依据，JSON 侧车文件只会制造两处真相。
 
@@ -182,7 +182,7 @@ Codemode: 写一段 <Python | JavaScript> 脚本完成任务，脚本在沙箱�
 
 落地形状：
 
-1. `tower-agent-storage` 增加 `ScriptStore` 子接口（与 `ConfigStore` / `HistoryStore` 并列）：脚本 id、名字、语言（`monty` / `js`）、作用域（user / project）、源码、启用状态、权限、元数据、时间戳。
+1. `tower-agent-plugin-sdk` 的 `storage` feature 提供 `ScriptStore` 子接口（与 `ConfigStore` / `HistoryStore` 并列）：脚本 id、名字、语言（`monty` / `js`）、作用域（user / project）、源码、启用状态、权限、元数据、时间戳。
 2. `codemode_write` / `codemode_reload` / `codemode_list` / `codemode_remove` 直接读写 `ScriptStore`；`codemode_persist` / `codemode_discard` 作为启用保存与删除的兼容入口。
 3. `codemode export <dir>` / `codemode import <dir>`：每个脚本一个文件（源码 + 元数据头）；项目级默认导出到 `.tower-agent/codemode/`。
 4. 脚本的 **元数据永远在 storage**（权限、源码哈希、最近运行），文件只是投影——避免两处真相。

@@ -1,6 +1,6 @@
 [package]
-name = "tower-agent-turso"
-description = "tower-agent default storage backend: embedded Turso (SQLite-compatible) implementing the storage traits, with an application-layer tokenized full-text index for Chinese-aware recall and a background write queue."
+name = "tower-agent-plugin-turso"
+description = "tower-agent default storage plugin: embedded Turso (SQLite-compatible) implementing the plugin-sdk storage contracts."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 tower-agent-core = { workspace = true }
-tower-agent-storage = { workspace = true }
+tower-agent-plugin-sdk = { workspace = true, features = ["storage"] }
 dirs = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }

@@ -13,7 +13,7 @@ tower-agent-core = { workspace = true }
 tower-agent-plugin = { workspace = true, features = ["dynamic"] }
 tower-agent-provider = { workspace = true }
 tower-agent-runtime = { workspace = true }
-tower-agent-storage.workspace = true
+tower-agent-plugin-sdk = { workspace = true, features = ["storage"] }
 tower-agent-wasmtime = { workspace = true }
 futures-util = { workspace = true }
 rkyv = { workspace = true }

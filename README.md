@@ -59,7 +59,8 @@ codemode 和 Wasmtime 沙箱共同构成一套可扩展运行时，让宿主和 
 | `tower-agent-tools`      | **内置工具与插件合集**：六个静态工具实现及独立的插件声明                                               |
 | `tower-agent-plugin-shell` | **动态 shell 插件**：brush 持久会话，通过 stabby `cdylib` ABI 提供 `tool.shell`                    |
 | `tower-agent-plugin`    | **通用插件宿主**：注册表、解析、生命周期、HostApi、权限和 extension slot；不依赖 Provider 领域 |
-| `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider 注册与 wire、动态 Provider 适配              |
+| `tower-agent-plugin-sdk` | **插件能力 SDK**：静态 / 动态 ABI、Host 能力、Provider、可选 `storage` 契约 |
+| `tower-agent-plugin-turso` | **默认存储插件**：实现 SDK storage 契约的嵌入式 Turso 后端 |
 | `tower-agent-ui`         | **前端无关 UI 后端**：事件归约、会话视图、斜杠命令、静态 UI 插件；可被 GUI / axum 直接消费              |
 | `tower-agent-monty`      | **codemode Python 宿主**：内嵌 monty（Python 子集）沙箱插件 + 热重载脚本管理器                       |
 | `tower-agent-wasmtime`   | **通用 Wasmtime 沙箱底座**：组件模型、WASI、资源上限、JIT 缓存与实例池                               |

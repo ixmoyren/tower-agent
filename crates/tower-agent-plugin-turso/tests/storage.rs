@@ -4,13 +4,13 @@
 
 use serde_json::json;
 use tower_agent_core::AgentMessage;
-use tower_agent_provider::{Message, UserContent, UserMessage};
-use tower_agent_storage::{
+use tower_agent_plugin_sdk::storage::{
     ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
     ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionStore, effective_config,
     resolve_config,
 };
-use tower_agent_turso::TursoStorage;
+use tower_agent_plugin_turso::TursoStorage;
+use tower_agent_provider::{Message, UserContent, UserMessage};
 
 fn memory(id: &str, content: &str) -> MemoryRecord {
     MemoryRecord {

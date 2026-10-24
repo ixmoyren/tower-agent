@@ -73,8 +73,8 @@ fn help_and_version_exit_successfully() {
 #[tokio::test]
 async fn codemode_export_import_commands_round_trip_through_the_database() {
     use tower_agent_codemode_core::{ScriptLanguage, ScriptPermissions};
-    use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore as _};
-    use tower_agent_turso::TursoStorage;
+    use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore as _};
+    use tower_agent_plugin_turso::TursoStorage;
 
     let home = tempfile::tempdir().expect("home");
     let work = tempfile::tempdir().expect("work");

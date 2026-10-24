@@ -14,6 +14,8 @@
 pub mod hook;
 #[cfg(feature = "provider")]
 pub mod provider;
+#[cfg(feature = "storage")]
+pub mod storage;
 pub mod tool;
 
 #[cfg(all(feature = "provider", feature = "dynamic"))]
@@ -34,6 +36,13 @@ pub use tower_agent_provider::{
     ProviderPluginError, ProviderRegistry, ProviderSession,
 };
 pub use tower_agent_runtime::{ToolAnnotations, ToolExposure, ToolNamespace, ToolRegistration};
+
+#[cfg(feature = "storage")]
+pub use storage::{
+    ConfigScope, ConfigStore, HistoryStore, MemoryRecord, MemoryStore, ProviderCredential,
+    ProviderStore, ScriptRecord, ScriptStore, SessionRecord, SessionStore, StorageError,
+    StorageFuture, StoragePlugin, StorageResult, effective_config, resolve_config,
+};
 
 /// 插件作者需要与宿主同一版本的 `rkyv`（归档格式与之绑定）。
 #[cfg(feature = "dynamic")]

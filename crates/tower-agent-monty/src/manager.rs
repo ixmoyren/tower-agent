@@ -27,8 +27,8 @@ use tower_agent_plugin::{
     CapabilityId, HostApi, Permission, PermissionPolicy, PluginContext, PluginError, PluginId,
     PluginKind, PluginManifest, PluginRegistry, ShadowedPlugin, StaticPlugin,
 };
+use tower_agent_plugin_sdk::storage::{ConfigScope, ScriptRecord, ScriptStore};
 use tower_agent_provider::{Arguments, ToolCall};
-use tower_agent_storage::{ConfigScope, ScriptRecord, ScriptStore};
 
 use crate::{
     host::{HostCall, MontyHost},
